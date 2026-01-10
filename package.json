@@ -1,0 +1,31 @@
+{
+  "name": "clan-node",
+  "version": "1.0.0",
+  "description": "Family tree genealogy system with graph-based kinship calculations",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "d1:create": "wrangler d1 create clan-db",
+    "d1:migrate": "wrangler d1 execute clan-db --local --file=./schema.sql",
+    "d1:migrate:prod": "wrangler d1 execute clan-db --file=./schema.sql",
+    "d1:query": "wrangler d1 execute clan-db --local --command",
+    "type-check": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pjiaquan/clan-node.git"
+  },
+  "keywords": ["genealogy", "family-tree", "graph", "kinship"],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.6.16"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241227.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.9.0"
+  }
+}
