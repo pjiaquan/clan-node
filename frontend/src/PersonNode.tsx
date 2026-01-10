@@ -17,7 +17,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
       <Handle type="source" position={Position.Left} id="left-s" />
 
       <div
-        className={`person-node ${selected ? 'selected' : ''}`}
+        className={`person-node ${selected ? 'selected' : ''} ${data.isCenter ? 'center' : ''} ${data.flashCenter ? 'center-flash' : ''}`}
         style={{ borderColor: selected ? '#667eea' : data.genderColor }}
       >
         <div className="node-avatar" style={{ background: data.genderColor }}>
