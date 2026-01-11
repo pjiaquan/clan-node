@@ -12,6 +12,7 @@ interface ContextMenuProps {
   onCopyTitle: (title: string) => void;
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
+  onDuplicateBottomRight: (id: string) => void;
   dimRelativesActive: boolean;
   dimNonRelativesActive: boolean;
   onClose: () => void;
@@ -29,6 +30,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onCopyTitle,
   onToggleDimRelatives,
   onToggleDimNonRelatives,
+  onDuplicateBottomRight,
   dimRelativesActive,
   dimNonRelativesActive,
   onClose 
@@ -96,6 +98,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         title={title ? '' : '沒有稱呼可複製'}
       >
         複製稱呼
+      </button>
+      <button
+        onClick={() => {
+          onDuplicateBottomRight(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        複製到右下
       </button>
       <button 
         onClick={() => {

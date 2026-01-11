@@ -78,6 +78,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const canUndo = undoStack.length > 0;
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
@@ -145,6 +146,19 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }, 900);
     return () => window.clearTimeout(timer);
   }, [centerId]);
+
+  useEffect(() => {
+    if (!avatarPreview) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAvatarPreview(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [avatarPreview]);
 
   const handleNodeClick = useCallback((nodeId: string) => {
     console.log('Node clicked:', nodeId);
@@ -443,6 +457,33 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  const handleDuplicateBottomRight = useCallback(async (id: string) => {
+    if (!graphData) return;
+    const person = graphData.nodes.find(node => node.id === id);
+    if (!person) return;
+
+    const nodePosition = nodes.find(node => node.id === id)?.position
+      ?? person.metadata?.position
+      ?? { x: 500, y: 300 };
+    const position = { x: nodePosition.x + 160, y: nodePosition.y + 140 };
+    const newMetadata = {
+      ...(person.metadata ?? {}),
+      position,
+    };
+
+    await createPerson(
+      person.name,
+      person.gender,
+      person.dob,
+      person.dod,
+      person.tob,
+      person.tod,
+      newMetadata,
+      undefined,
+      person.avatar_url ?? undefined
+    );
+  }, [graphData, nodes, createPerson]);
+
   useMemo(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
@@ -554,6 +595,11 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onNodeClick={(_e, node) => {
             handleNodeClick(node.id);
             setContextMenu(null);
+            if (!linkMode && node.data?.avatarUrl) {
+              setAvatarPreview({ url: node.data.avatarUrl, name: node.data.name });
+            } else {
+              setAvatarPreview(null);
+            }
           }}
           onNodeContextMenu={onNodeContextMenu}
           onPaneClick={onPaneClick}
@@ -585,6 +631,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 window.setTimeout(() => setCopyNotice(null), 1200);
               });
             }}
+            onDuplicateBottomRight={handleDuplicateBottomRight}
             onToggleDimRelatives={(id) => {
               setDimNonRelativesId(null);
               setDimFocusId(prev => (prev === id ? null : id));
@@ -603,6 +650,15 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       {copyNotice && (
         <div className="link-indicator" style={{ bottom: '6.5rem' }}>
           {copyNotice}
+        </div>
+      )}
+
+      {avatarPreview && (
+        <div className="modal-overlay" onClick={() => setAvatarPreview(null)}>
+          <div className="avatar-modal" onClick={(event) => event.stopPropagation()}>
+            <img src={avatarPreview.url} alt={`${avatarPreview.name} avatar`} />
+            <div className="avatar-modal-name">{avatarPreview.name}</div>
+          </div>
         </div>
       )}
 
