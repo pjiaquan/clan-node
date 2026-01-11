@@ -178,6 +178,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     setSelectedNode(null);
   }, []);
 
+  const handleAvatarClick = useCallback((person: Person, avatarUrl: string) => {
+    setSelectedNode(person.id);
+    setSelectedEdge(null);
+    setContextMenu(null);
+    setAvatarPreview({ url: avatarUrl, name: person.name });
+  }, []);
+
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
@@ -283,6 +290,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     try {
       await api.createPerson(
         entry.person.name,
+        entry.person.english_name ?? undefined,
         entry.person.gender,
         entry.person.dob,
         entry.person.dod,
@@ -379,6 +387,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     return graphData.nodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
       const title = person.title || '';
+      const avatarUrl = api.resolveAvatarUrl(person.avatar_url);
 
       const position = person.metadata?.position || (
         person.id === graphData.center
@@ -398,9 +407,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           initial: person.name.charAt(0),
           title: title,
           genderColor: genderColor,
-          avatarUrl: api.resolveAvatarUrl(person.avatar_url),
+          avatarUrl,
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
+          onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
         },
         style: {
           background: 'transparent',
@@ -409,7 +419,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         },
       };
     });
-  }, [graphData, dimIds, centerId, centerFlashId]);
+  }, [graphData, dimIds, centerId, centerFlashId, handleAvatarClick]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -473,6 +483,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
     await createPerson(
       person.name,
+      person.english_name ?? undefined,
       person.gender,
       person.dob,
       person.dod,
@@ -517,6 +528,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
         await createPerson(
           copiedPerson.name,
+          copiedPerson.english_name ?? undefined,
           copiedPerson.gender,
           copiedPerson.dob,
           copiedPerson.dod,
@@ -595,11 +607,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onNodeClick={(_e, node) => {
             handleNodeClick(node.id);
             setContextMenu(null);
-            if (!linkMode && node.data?.avatarUrl) {
-              setAvatarPreview({ url: node.data.avatarUrl, name: node.data.name });
-            } else {
-              setAvatarPreview(null);
-            }
+            setAvatarPreview(null);
           }}
           onNodeContextMenu={onNodeContextMenu}
           onPaneClick={onPaneClick}
@@ -672,8 +680,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       {showAddModal && (
         <AddPersonModal
           onClose={() => setShowAddModal(false)}
-          onSubmit={async (name, gender, dob, dod, tob, tod) => {
-            const person = await createPerson(name, gender, dob, dod, tob, tod);
+          onSubmit={async (name, englishName, gender, dob, dod, tob, tod) => {
+            const person = await createPerson(name, englishName, gender, dob, dod, tob, tod);
             if (selectedNode) {
               const relationshipType = getDefaultRelationshipType(selectedNode, person.id, { toGender: person.gender });
               await createRelationship(selectedNode, person.id, undefined, undefined, relationshipType);

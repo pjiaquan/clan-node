@@ -11,6 +11,7 @@ interface EditPersonModalProps {
 
 export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onSubmit }) => {
   const [name, setName] = useState(person.name);
+  const [englishName, setEnglishName] = useState(person.english_name || '');
   const [gender, setGender] = useState(person.gender);
   const [dob, setDob] = useState(person.dob || '');
   const [tob, setTob] = useState(normalizeTraditionalHour(person.tob || ''));
@@ -32,6 +33,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
 
   useEffect(() => {
     setName(person.name);
+    setEnglishName(person.english_name || '');
     setGender(person.gender);
     setDob(person.dob || '');
     setTob(normalizeTraditionalHour(person.tob || ''));
@@ -163,6 +165,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     const croppedAvatar = await createCroppedAvatar();
     onSubmit(person.id, {
       name,
+      english_name: englishName || undefined,
       gender,
       dob: dob || undefined,
       tob: tob || undefined,
@@ -215,6 +218,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
               onChange={(e) => setName(e.target.value)}
               required
               autoFocus
+            />
+          </div>
+          <div className="form-group">
+            <label>英文名</label>
+            <input
+              value={englishName}
+              onChange={(e) => setEnglishName(e.target.value)}
             />
           </div>
           <div className="form-group">

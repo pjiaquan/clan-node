@@ -18,7 +18,7 @@ export function registerGraphRoutes(app: Hono<{ Bindings: Env }>) {
       // Verify center person exists
       console.log('Verifying center person...');
       const center = await c.env.DB.prepare(
-        'SELECT id, name, gender, dob, dod, tob, tod FROM people WHERE id = ?'
+        'SELECT id, name, english_name, gender, dob, dod, tob, tod FROM people WHERE id = ?'
       ).bind(centerId).first();
 
       if (!center) {
@@ -29,7 +29,7 @@ export function registerGraphRoutes(app: Hono<{ Bindings: Env }>) {
       // Get all people
       console.log('Fetching all people...');
       const { results: peopleRaw } = await c.env.DB.prepare(
-        'SELECT id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
+        'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
       ).all();
       console.log(`Fetched ${peopleRaw.length} people`);
 

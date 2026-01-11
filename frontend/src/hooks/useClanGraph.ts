@@ -166,9 +166,9 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     }
   }, [fetchGraph]);
 
-  const createPerson = async (name: string, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string) => {
+  const createPerson = async (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string) => {
     try {
-      const person = await api.createPerson(name, gender, dob, dod, tob, tod, metadata, id, avatar_url);
+      const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, metadata, id, avatar_url);
       fetchGraph();
       return person;
     } catch (error) {

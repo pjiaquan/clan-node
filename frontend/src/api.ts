@@ -30,11 +30,11 @@ export const api = {
     return res.json();
   },
 
-  createPerson: async (name: string, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string): Promise<Person> => {
+  createPerson: async (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string): Promise<Person> => {
     const res = await fetchWithAuth(`${API_BASE}/api/people`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name, gender, dob, dod, tob, tod, avatar_url, metadata }),
+      body: JSON.stringify({ id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata }),
     });
     return res.json();
   },

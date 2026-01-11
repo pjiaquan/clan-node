@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS people (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    english_name TEXT,
     gender TEXT CHECK(gender IN ('M', 'F', 'O')) NOT NULL DEFAULT 'O',
     dob TEXT, -- ISO date string for age comparison (older/younger sibling)
     dod TEXT, -- ISO date string for time of death date

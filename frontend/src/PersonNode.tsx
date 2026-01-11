@@ -20,7 +20,15 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         className={`person-node ${selected ? 'selected' : ''} ${data.isCenter ? 'center' : ''} ${data.flashCenter ? 'center-flash' : ''}`}
         style={{ borderColor: selected ? '#667eea' : data.genderColor }}
       >
-        <div className="node-avatar" style={{ background: data.genderColor }}>
+        <div
+          className="node-avatar"
+          style={{ background: data.genderColor }}
+          onClick={(event) => {
+            if (!data.onAvatarClick) return;
+            event.stopPropagation();
+            data.onAvatarClick();
+          }}
+        >
           {data.avatarUrl ? (
             <img src={data.avatarUrl} alt={data.name} />
           ) : (

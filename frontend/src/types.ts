@@ -1,6 +1,7 @@
 export interface Person {
   id: string;
   name: string;
+  english_name?: string | null;
   gender: 'M' | 'F' | 'O';
   dob?: string;
   dod?: string;

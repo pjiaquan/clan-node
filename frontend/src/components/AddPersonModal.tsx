@@ -3,7 +3,7 @@ import { getGanzhiYear, getModernTimeRange, getZodiacAnimal, normalizeTraditiona
 
 interface AddPersonModalProps {
   onClose: () => void;
-  onSubmit: (name: string, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string) => void;
+  onSubmit: (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string) => void;
 }
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
@@ -36,6 +36,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
           const formData = new FormData(e.currentTarget);
           onSubmit(
             formData.get('name') as string,
+            (formData.get('english_name') as string) || undefined,
             formData.get('gender') as 'M' | 'F' | 'O',
             dob || undefined,
             formData.get('dod') as string || undefined,
@@ -46,6 +47,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
           <div className="form-group">
             <label>姓名</label>
             <input name="name" required autoFocus />
+          </div>
+          <div className="form-group">
+            <label>英文名</label>
+            <input name="english_name" />
           </div>
           <div className="form-group">
             <label>性別</label>

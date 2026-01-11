@@ -37,7 +37,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
   // Get all people
   app.get('/api/people', async (c) => {
     const { results } = await c.env.DB.prepare(
-      'SELECT id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
+      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
     ).all();
 
     const parsedResults = results.map(person => ({
@@ -52,7 +52,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
   app.get('/api/people/:id', async (c) => {
     const id = c.req.param('id');
     const person = await c.env.DB.prepare(
-      'SELECT id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     if (!person) {
@@ -64,7 +64,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
   // Create a new person
   app.post('/api/people', async (c) => {
     const body = await c.req.json();
-    const { id: providedId, name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { id: providedId, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     if (!name) {
       return c.json({ error: 'Name is required' }, 400);
@@ -74,10 +74,11 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
     const now = new Date().toISOString();
 
     await c.env.DB.prepare(
-      'INSERT INTO people (id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO people (id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(
       id,
       name,
+      english_name || null,
       gender || 'O',
       dob || null,
       dod || null,
@@ -90,7 +91,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
     ).run();
 
     const person = await c.env.DB.prepare(
-      'SELECT id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     return c.json(person, 201);
@@ -100,7 +101,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     const existing = await c.env.DB.prepare(
       'SELECT id, dob FROM people WHERE id = ?'
@@ -118,6 +119,10 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
     if (name !== undefined) {
       updates.push('name = ?');
       values.push(name);
+    }
+    if (english_name !== undefined) {
+      updates.push('english_name = ?');
+      values.push(english_name);
     }
     if (gender !== undefined) {
       updates.push('gender = ?');
@@ -161,7 +166,7 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
     }
 
     const person = await c.env.DB.prepare(
-      'SELECT id, name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     return c.json(person);

@@ -16,6 +16,7 @@ export interface Relationship {
 export interface Person {
   id: string;
   name: string;
+  english_name?: string | null;
   gender: string;
   dob?: string;
 }
