@@ -21,3 +21,8 @@ Thumbs.db
 
 # Build outputs
 dist/
+
+# Local artifacts
+backups/
+frontend@0.0.0
+tsc
