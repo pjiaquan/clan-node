@@ -13,6 +13,9 @@ interface ContextMenuProps {
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
   onDuplicateBottomRight: (id: string) => void;
+  selectedCount: number;
+  onAlignHorizontal: () => void;
+  onAlignVertical: () => void;
   dimRelativesActive: boolean;
   dimNonRelativesActive: boolean;
   onClose: () => void;
@@ -31,6 +34,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onToggleDimRelatives,
   onToggleDimNonRelatives,
   onDuplicateBottomRight,
+  selectedCount,
+  onAlignHorizontal,
+  onAlignVertical,
   dimRelativesActive,
   dimNonRelativesActive,
   onClose 
@@ -110,6 +116,32 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         複製到右下
       </button>
+      {selectedCount > 1 && (
+        <button
+          onClick={() => {
+            onAlignHorizontal();
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          水平對齊（平均間距）
+        </button>
+      )}
+      {selectedCount > 1 && (
+        <button
+          onClick={() => {
+            onAlignVertical();
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          垂直對齊（平均間距）
+        </button>
+      )}
       <button 
         onClick={() => {
           onToggleDimRelatives(id);

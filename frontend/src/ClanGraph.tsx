@@ -467,6 +467,11 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  const selectedNodeIds = useMemo(
+    () => nodes.filter(node => node.selected).map(node => node.id),
+    [nodes]
+  );
+
   const handleDuplicateBottomRight = useCallback(async (id: string) => {
     if (!graphData) return;
     const person = graphData.nodes.find(node => node.id === id);
@@ -494,6 +499,39 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       person.avatar_url ?? undefined
     );
   }, [graphData, nodes, createPerson]);
+
+  const alignSelectedNodes = useCallback((direction: 'horizontal' | 'vertical') => {
+    const ids = selectedNodeIds.length > 1 ? selectedNodeIds : [];
+    if (ids.length < 2) return;
+
+    const selectedNodes = nodes.filter(node => ids.includes(node.id));
+    const sorted = [...selectedNodes].sort((a, b) => {
+      return direction === 'horizontal'
+        ? a.position.x - b.position.x
+        : a.position.y - b.position.y;
+    });
+
+    const min = direction === 'horizontal'
+      ? sorted[0].position.x
+      : sorted[0].position.y;
+    const max = direction === 'horizontal'
+      ? sorted[sorted.length - 1].position.x
+      : sorted[sorted.length - 1].position.y;
+    const gap = sorted.length > 1 ? (max - min) / (sorted.length - 1) : 0;
+    const alignValue = direction === 'horizontal'
+      ? sorted.reduce((sum, node) => sum + node.position.y, 0) / sorted.length
+      : sorted.reduce((sum, node) => sum + node.position.x, 0) / sorted.length;
+
+    setNodes((prev) => prev.map((node) => {
+      const index = sorted.findIndex(item => item.id === node.id);
+      if (index === -1) return node;
+      const position = direction === 'horizontal'
+        ? { x: min + gap * index, y: alignValue }
+        : { x: alignValue, y: min + gap * index };
+      updatePersonPosition(node.id, position);
+      return { ...node, position };
+    }));
+  }, [nodes, selectedNodeIds, setNodes, updatePersonPosition]);
 
   useMemo(() => {
     setNodes(initialNodes);
@@ -640,6 +678,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
               });
             }}
             onDuplicateBottomRight={handleDuplicateBottomRight}
+            selectedCount={selectedNodeIds.length}
+            onAlignHorizontal={() => alignSelectedNodes('horizontal')}
+            onAlignVertical={() => alignSelectedNodes('vertical')}
             onToggleDimRelatives={(id) => {
               setDimNonRelativesId(null);
               setDimFocusId(prev => (prev === id ? null : id));
