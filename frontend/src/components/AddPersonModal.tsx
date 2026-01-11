@@ -1,11 +1,32 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { getGanzhiYear, getModernTimeRange, getZodiacAnimal, normalizeTraditionalHour, TRADITIONAL_HOURS } from '../utils/chineseTime';
 
 interface AddPersonModalProps {
   onClose: () => void;
-  onSubmit: (name: string, gender: 'M' | 'F' | 'O') => void;
+  onSubmit: (name: string, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string) => void;
 }
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
+  const [showDod, setShowDod] = useState(false);
+  const [dob, setDob] = useState('');
+  const [tob, setTob] = useState('');
+  const [tod, setTod] = useState('');
+  const clickCountRef = React.useRef(0);
+
+  const handleDobLabelClick = () => {
+    if (showDod) return;
+    clickCountRef.current += 1;
+    if (clickCountRef.current >= 5) {
+      setShowDod(true);
+    }
+  };
+
+  const tobRange = tob ? getModernTimeRange(tob) : '';
+  const todRange = tod ? getModernTimeRange(tod) : '';
+  const birthYear = dob ? new Date(dob).getFullYear() : null;
+  const zodiac = birthYear ? getZodiacAnimal(birthYear) : '';
+  const ganzhi = birthYear ? getGanzhiYear(birthYear) : '';
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -15,7 +36,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
           const formData = new FormData(e.currentTarget);
           onSubmit(
             formData.get('name') as string,
-            formData.get('gender') as 'M' | 'F' | 'O'
+            formData.get('gender') as 'M' | 'F' | 'O',
+            dob || undefined,
+            formData.get('dod') as string || undefined,
+            normalizeTraditionalHour(formData.get('tob') as string || ''),
+            normalizeTraditionalHour(formData.get('tod') as string || '')
           );
         }}>
           <div className="form-group">
@@ -30,6 +55,46 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
               <option value="O">其他</option>
             </select>
           </div>
+          <div className="form-group">
+            <label onClick={handleDobLabelClick} style={{ cursor: 'pointer', userSelect: 'none' }}>
+              出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
+            </label>
+            <input type="date" name="dob" value={dob} onChange={(e) => setDob(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>
+              出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
+            </label>
+            <select name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
+              <option value="">--</option>
+              {TRADITIONAL_HOURS.map((hour) => (
+                <option key={hour.name} value={hour.name}>
+                  {hour.name} ({hour.range})
+                </option>
+              ))}
+            </select>
+          </div>
+          {showDod && (
+            <>
+              <div className="form-group">
+                <label>歿日</label>
+                <input type="date" name="dod" />
+              </div>
+              <div className="form-group">
+                <label>
+                  歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
+                </label>
+                <select name="tod" value={tod} onChange={(e) => setTod(e.target.value)}>
+                  <option value="">--</option>
+                  {TRADITIONAL_HOURS.map((hour) => (
+                    <option key={hour.name} value={hour.name}>
+                      {hour.name} ({hour.range})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           <div className="form-actions">
             <button type="button" onClick={onClose}>
               取消

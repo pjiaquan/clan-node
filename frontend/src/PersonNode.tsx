@@ -21,7 +21,11 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         style={{ borderColor: selected ? '#667eea' : data.genderColor }}
       >
         <div className="node-avatar" style={{ background: data.genderColor }}>
-          {data.initial}
+          {data.avatarUrl ? (
+            <img src={data.avatarUrl} alt={data.name} />
+          ) : (
+            data.initial
+          )}
         </div>
         <div className="node-name">{data.name}</div>
         {data.title && <div className="node-title">{data.title}</div>}

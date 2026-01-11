@@ -3,7 +3,10 @@ export interface Person {
   name: string;
   gender: 'M' | 'F' | 'O';
   dob?: string;
-  avatar_url?: string;
+  dod?: string;
+  tob?: string;
+  tod?: string;
+  avatar_url?: string | null;
   title?: string;
   metadata?: {
     position?: { x: number; y: number };

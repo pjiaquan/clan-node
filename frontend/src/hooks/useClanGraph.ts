@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from 'react';
 import type { GraphData } from '../types';
 import { api } from '../api';
 
-export function useClanGraph() {
+export function useClanGraph(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [centerId, setCenterIdState] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,7 @@ export function useClanGraph() {
   }, []);
 
   const fetchGraph = useCallback(async () => {
-    if (!centerId) return;
+    if (!centerId || !enabled) return;
     try {
       setLoading(true);
       setError(null);
@@ -32,15 +33,15 @@ export function useClanGraph() {
     } finally {
       setLoading(false);
     }
-  }, [centerId]);
+  }, [centerId, enabled]);
 
   useEffect(() => {
-    if (!centerId) return;
+    if (!centerId || !enabled) return;
     fetchGraph();
-  }, [fetchGraph, centerId]);
+  }, [fetchGraph, centerId, enabled]);
 
   useEffect(() => {
-    if (centerId) return;
+    if (centerId || !enabled) return;
     let cancelled = false;
     const initCenter = async () => {
       try {
@@ -70,7 +71,7 @@ export function useClanGraph() {
     return () => {
       cancelled = true;
     };
-  }, [centerId, setCenterId]);
+  }, [centerId, enabled, setCenterId]);
 
   const updatePerson = useCallback(async (id: string, updates: any) => {
     try {

@@ -35,6 +35,108 @@
   font-size: 0.95rem;
 }
 
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #e2e8f0 0%, #f8fafc 100%);
+  padding: 2rem;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+  text-align: center;
+}
+
+.login-card h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.75rem;
+  color: #1e293b;
+}
+
+.login-card p {
+  margin: 0 0 1.5rem 0;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.login-card .form-group {
+  text-align: left;
+}
+
+.login-card .btn-primary {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.login-error {
+  margin-top: 0.75rem;
+  color: #ef4444;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.avatar-cropper {
+  width: 140px;
+  height: 140px;
+  border-radius: 18px;
+  border: 2px dashed #cbd5f5;
+  background-color: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  overflow: hidden;
+  position: relative;
+}
+
+.avatar-cropper.has-image {
+  border-style: solid;
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+.avatar-cropper.dragging {
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+}
+
+.avatar-cropper img {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  user-select: none;
+  pointer-events: none;
+}
+
+.avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.avatar-upload input {
+  display: none;
+}
+
+.avatar-zoom {
+  width: 140px;
+  accent-color: #667eea;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -56,6 +158,19 @@
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.header-user span {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 button {
@@ -164,6 +279,14 @@ button:hover {
   font-weight: 600;
   color: white;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.node-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
 }
 
 .gender-m .node-avatar {

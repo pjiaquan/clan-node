@@ -10,6 +10,13 @@
     "d1:migrate": "wrangler d1 execute clan-db --local --file=./schema.sql",
     "d1:migrate:prod": "wrangler d1 execute clan-db --file=./schema.sql",
     "d1:query": "wrangler d1 execute clan-db --local --command",
+    "d1:backup": "mkdir -p backups && cp -a .wrangler/state/v3/d1/miniflare-D1DatabaseObject backups/miniflare-D1DatabaseObject-$(date +%Y%m%d-%H%M%S)",
+    "d1:restore": "ls -t backups/miniflare-D1DatabaseObject-* | head -n 1 | xargs -I{} sh -c 'rm -rf .wrangler/state/v3/d1/miniflare-D1DatabaseObject && cp -a {} .wrangler/state/v3/d1/miniflare-D1DatabaseObject'",
+    "d1:push": "bash scripts/push_local_d1.sh",
+    "d1:pull": "bash scripts/pull_remote_d1.sh",
+    "avatars:sync": "node scripts/sync_avatars.mjs",
+    "siblings:fix": "node scripts/fix_siblings.mjs",
+    "d1:merge": "node scripts/merge_d1_via_api.mjs",
     "type-check": "tsc --noEmit"
   },
   "repository": {
