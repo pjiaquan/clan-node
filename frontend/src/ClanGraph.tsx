@@ -35,6 +35,10 @@ type UndoEntry =
   | {
       type: 'align';
       positions: Record<string, { x: number; y: number }>;
+    }
+  | {
+      type: 'move';
+      positions: Record<string, { x: number; y: number }>;
     };
 
 type Gender = Person['gender'];
@@ -91,10 +95,23 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
-  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>({});
+  const getInitialNodePositions = () => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem('clan.nodePositions');
+      return raw ? JSON.parse(raw) : {};
+    } catch (error) {
+      console.warn('Failed to restore node positions:', error);
+      return {};
+    }
+  };
+  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(getInitialNodePositions());
   const nodesRef = useRef<Node[]>([]);
   const setNodesRef = useRef<React.Dispatch<React.SetStateAction<Node[]>> | null>(null);
   const dragSnapRef = useRef<{ id: string; y: number } | null>(null);
+  const dragSnapXRef = useRef<{ id: string; x: number } | null>(null);
+  const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
+  const selectedNodeIdsRef = useRef<string[]>([]);
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -105,16 +122,6 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     avatarBlobMap.current = avatarBlobs;
   }, [avatarBlobs]);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('clan.nodePositions');
-      if (raw) {
-        nodePositionMap.current = JSON.parse(raw);
-      }
-    } catch (error) {
-      console.warn('Failed to restore node positions:', error);
-    }
-  }, []);
 
   const collapsedNodeIds = useMemo(() => {
     if (!graphData) return new Set<string>();
@@ -557,9 +564,26 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [createRelationship, graphData, getDefaultRelationshipType]);
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
-    updatePersonPosition(node.id, node.position);
+    const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+    nodesRef.current.forEach((item) => {
+      if (selectedIds.includes(item.id)) {
+        updatePersonPosition(item.id, item.position);
+      }
+    });
     setDragGuideY(null);
     dragSnapRef.current = null;
+    dragSnapXRef.current = null;
+    const startPositions = dragStartPositions.current;
+    if (startPositions) {
+      const moved = Object.entries(startPositions).some(([id, position]) => {
+        const current = nodesRef.current.find(item => item.id === id)?.position;
+        return current ? current.x !== position.x || current.y !== position.y : false;
+      });
+      if (moved) {
+        setUndoStack(prev => [{ type: 'move', positions: startPositions } as const, ...prev].slice(0, 10));
+      }
+    }
+    dragStartPositions.current = null;
   }, [updatePersonPosition]);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
@@ -568,17 +592,25 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       .toObject?.().viewport;
     if (!viewport) return;
 
-    const threshold = 12;
-    const releaseThreshold = 24;
-    let nearestY: number | null = null;
-    let nearestDistance = Number.POSITIVE_INFINITY;
+    const threshold = 30;
+    const releaseThreshold = 40;
+    const guideThresholdY = 2000;
+    let nearestYGuide: number | null = null;
+    let nearestYGuideDistance = Number.POSITIVE_INFINITY;
+    let nearestX: number | null = null;
+    let nearestXDistance = Number.POSITIVE_INFINITY;
 
     nodesRef.current.forEach((other) => {
       if (other.id === node.id) return;
-      const distance = Math.abs(other.position.y - node.position.y);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestY = other.position.y;
+      const distanceY = Math.abs(other.position.y - node.position.y);
+      const distanceX = Math.abs(other.position.x - node.position.x);
+      if (distanceY < nearestYGuideDistance) {
+        nearestYGuideDistance = distanceY;
+        nearestYGuide = other.position.y;
+      }
+      if (distanceX < nearestXDistance) {
+        nearestXDistance = distanceX;
+        nearestX = other.position.x;
       }
     });
 
@@ -589,19 +621,47 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         dragSnapRef.current = null;
       }
     }
-    if (!dragSnapRef.current && nearestY !== null && nearestDistance <= threshold) {
-      dragSnapRef.current = { id: node.id, y: nearestY };
+    if (!dragSnapRef.current && nearestYGuide !== null && nearestYGuideDistance <= threshold) {
+      dragSnapRef.current = { id: node.id, y: nearestYGuide };
+    }
+
+    const existingSnapX = dragSnapXRef.current;
+    if (existingSnapX && existingSnapX.id === node.id) {
+      const distanceFromSnap = Math.abs(node.position.x - existingSnapX.x);
+      if (distanceFromSnap >= releaseThreshold) {
+        dragSnapXRef.current = null;
+      }
+    }
+    if (!dragSnapXRef.current && nearestX !== null && nearestXDistance <= threshold) {
+      dragSnapXRef.current = { id: node.id, x: nearestX };
     }
 
     const snapTarget = dragSnapRef.current?.id === node.id ? dragSnapRef.current.y : null;
-    if (snapTarget !== null && node.position.y !== snapTarget && setNodesRef.current) {
+    const snapTargetX = dragSnapXRef.current?.id === node.id ? dragSnapXRef.current.x : null;
+    if ((snapTarget !== null || snapTargetX !== null) && setNodesRef.current) {
+      const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+      const deltaY = snapTarget !== null ? snapTarget - node.position.y : 0;
       setNodesRef.current((prev) =>
-        prev.map((item) => item.id === node.id ? { ...item, position: { ...item.position, y: snapTarget } } : item)
+        prev.map((item) => {
+          const isSelected = selectedIds.includes(item.id);
+          if (!isSelected && item.id !== node.id) return item;
+          const nextY = snapTarget !== null && isSelected ? item.position.y + deltaY : item.position.y;
+          const nextX = item.id === node.id && snapTargetX !== null ? snapTargetX : item.position.x;
+          if (nextX === item.position.x && nextY === item.position.y) return item;
+          return {
+            ...item,
+            position: {
+              x: nextX,
+              y: nextY,
+            },
+          };
+        })
       );
     }
 
-    if (snapTarget !== null) {
-      const screenY = snapTarget * viewport.zoom + viewport.y;
+    const guideY = snapTarget ?? (nearestYGuide !== null && nearestYGuideDistance <= guideThresholdY ? nearestYGuide : null);
+    if (guideY !== null) {
+      const screenY = guideY * viewport.zoom + viewport.y;
       setDragGuideY(screenY);
     } else {
       setDragGuideY(null);
@@ -824,7 +884,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
       const getLabel = (type: string) => {
         switch (type) {
-          case 'spouse': return '配偶';
+          case 'spouse': return '夫妻';
           case 'sibling': return '手足';
           case 'in_law': return '姻親';
           default: return '親子';
@@ -856,6 +916,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   useEffect(() => {
     nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    selectedNodeIdsRef.current = nodes.filter(node => node.selected).map(node => node.id);
   }, [nodes]);
 
   useEffect(() => {
@@ -897,6 +961,17 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     [nodes]
   );
 
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+    const ids = selectedNodeIds.length > 1 ? selectedNodeIds : [node.id];
+    const positions = nodesRef.current.reduce<Record<string, { x: number; y: number }>>((acc, item) => {
+      if (ids.includes(item.id)) {
+        acc[item.id] = { ...item.position };
+      }
+      return acc;
+    }, {});
+    dragStartPositions.current = positions;
+  }, []);
+
   useEffect(() => {
     if (!selectedNode) return;
     if (collapsedNodeIds.has(selectedNode)) {
@@ -909,7 +984,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     if (!entry) return;
 
     try {
-      if (entry.type === 'align') {
+      if (entry.type === 'align' || entry.type === 'move') {
         const nextPositions = entry.positions;
         setNodes((prev) => prev.map((node) => {
           const position = nextPositions[node.id];
@@ -1134,9 +1209,6 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       />
 
       <div className="flow-container">
-        {dragGuideY !== null && (
-          <div className="drag-guide-line" style={{ top: dragGuideY }} />
-        )}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1145,6 +1217,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           connectionRadius={40}
@@ -1173,6 +1246,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           <Controls />
           <MiniMap />
         </ReactFlow>
+        {dragGuideY !== null && (
+          <div className="drag-guide-line" style={{ top: dragGuideY }} />
+        )}
 
         {contextMenu && (
           <ContextMenu

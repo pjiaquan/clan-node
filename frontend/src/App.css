@@ -230,6 +230,26 @@ button:hover {
   z-index: 4;
 }
 
+.drag-guide-line.vertical {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: 0;
+  border-top: none;
+  border-left: 1px dashed rgba(59, 130, 246, 0.6);
+}
+
+.drag-guide-line.vertical {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: 0;
+  border-top: none;
+  border-left: 1px dashed rgba(59, 130, 246, 0.6);
+}
+
 /* Custom Person Node */
 .person-node {
   padding: 0;

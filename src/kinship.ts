@@ -795,6 +795,20 @@ function pathToTitle(
 
   // Cousin's spouse (表兄弟姊妹的配偶)
   if (pathStr === 'up-up-down-down-spouse' || pathStr === 'up-sibling-down-spouse') {
+    const cousinIndex = pathStr === 'up-sibling-down-spouse' ? 3 : 4;
+    const cousin = getPerson(nodePath[cousinIndex]);
+    const centerDob = centerPerson.dob ? new Date(centerPerson.dob).getTime() : 0;
+    const cousinDob = cousin?.dob ? new Date(cousin.dob).getTime() : 0;
+    const isOlder = centerDob && cousinDob ? cousinDob < centerDob : null;
+
+    if (cousin?.gender === 'M') {
+      if (isOlder === null) return '表兄弟媳';
+      return isOlder ? '表嫂' : '表弟媳';
+    }
+    if (cousin?.gender === 'F') {
+      if (isOlder === null) return '表姊妹夫';
+      return isOlder ? '表姊夫' : '表妹夫';
+    }
     return target.gender === 'M' ? '表姊夫/表妹夫/表妹婿' : '表嫂/表弟媳/表弟妹';
   }
 
@@ -830,7 +844,7 @@ function pathToTitle(
     switch (p) {
       case 'up': return '父/母';
       case 'down': return '子/女';
-      case 'spouse': return '配偶';
+      case 'spouse': return '夫妻';
       case 'sibling': return '手足';
       case 'inlaw': return '姻親';
       default: return p;
