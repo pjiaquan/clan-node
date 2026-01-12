@@ -413,6 +413,17 @@ function pathToTitle(
     }
   }
 
+  // Parent's sibling's in-law (父/母 的 手足 的 姻親)
+  if (pathStr === 'up-sibling-inlaw') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncle = getPerson(nodePath[2]);
+    if (parent && auntUncle) {
+      const title = getParentSiblingSpouseTitle(parent, auntUncle);
+      if (title) return title;
+    }
+    return '姻親';
+  }
+
   // Grandparent's in-law (伯母/嬸嬸/姑丈/舅媽/姨丈) via in_law link
   if (pathStr === 'up-up-inlaw') {
     const parent = getPerson(nodePath[1]);
@@ -780,6 +791,11 @@ function pathToTitle(
      }
 
      return '堂/表兄弟姊妹';
+  }
+
+  // Cousin's spouse (表兄弟姊妹的配偶)
+  if (pathStr === 'up-up-down-down-spouse' || pathStr === 'up-sibling-down-spouse') {
+    return target.gender === 'M' ? '表姊夫/表妹夫/表妹婿' : '表嫂/表弟媳/表弟妹';
   }
 
   // Sibling's Spouse's Sibling (Sister-in-law/Brother-in-law's sibling)
