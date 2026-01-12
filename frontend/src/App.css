@@ -542,6 +542,12 @@ button:hover {
   color: #64748b;
 }
 
+.react-flow__handle {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
 .react-flow__edge-label {
   background: white;
   padding: 2px 6px;

@@ -108,12 +108,15 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   ) => {
     try {
       const metadata = metadataOverride ?? ((sourceHandle || targetHandle) ? { sourceHandle, targetHandle } : undefined);
-      await api.createRelationship(from, to, metadata, type);
-      fetchGraph();
+      const relationship = await api.createRelationship(from, to, metadata, type);
+      setGraphData((prev) => {
+        if (!prev) return prev;
+        return { ...prev, edges: [...prev.edges, relationship] };
+      });
     } catch (error) {
       console.error('Failed to create relationship:', error);
     }
-  }, [fetchGraph]);
+  }, []);
 
   const updateRelationship = useCallback(async (edgeId: string, updates: any) => {
     try {
@@ -160,11 +163,18 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   const deleteRelationship = useCallback(async (edgeId: string) => {
     try {
       await api.deleteRelationship(edgeId);
-      fetchGraph();
+      setGraphData((prev) => {
+        if (!prev) return prev;
+        const nextEdges = prev.edges.filter((edge) => {
+          const rawId = `e${edge.id}`;
+          return edgeId !== rawId && edgeId !== String(edge.id);
+        });
+        return { ...prev, edges: nextEdges };
+      });
     } catch (error) {
       console.error('Failed to delete relationship:', error);
     }
-  }, [fetchGraph]);
+  }, []);
 
   const createPerson = async (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string) => {
     try {

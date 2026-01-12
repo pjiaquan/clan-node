@@ -625,6 +625,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedEdge) {
         deleteRelationship(selectedEdge);
+        setSelectedEdge(null);
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedNode && graphData) {
@@ -712,7 +713,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         }}
         onUpdateRelationship={(type) => selectedEdge && updateRelationship(selectedEdge, { type })}
         onReverseRelationship={() => selectedEdge && reverseRelationship(selectedEdge)}
-        onDeleteRelationship={() => selectedEdge && deleteRelationship(selectedEdge)}
+        onDeleteRelationship={() => {
+          if (selectedEdge) {
+            deleteRelationship(selectedEdge);
+            setSelectedEdge(null);
+          }
+        }}
       />
 
       <div className="flow-container">
@@ -725,6 +731,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDragStop={onNodeDragStop}
+          connectionRadius={40}
           onNodeClick={(_e, node) => {
             handleNodeClick(node.id);
             setContextMenu(null);
