@@ -2,60 +2,6 @@ import type { Hono } from 'hono';
 import type { Env } from './types';
 import { safeParse } from './utils';
 
-async function linkParentsToInLaw(db: D1Database, childId: string, inLawId: string, now: string) {
-  const { results: parents } = await db.prepare(
-    "SELECT from_person_id FROM relationships WHERE type = 'parent_child' AND to_person_id = ?"
-  ).bind(childId).all();
-
-  if (!parents.length) return 0;
-
-  for (const parent of parents) {
-    const parentId = parent.from_person_id as string;
-    const hasParentChild = await db.prepare(
-      "SELECT id FROM relationships WHERE type = 'parent_child' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-    ).bind(parentId, inLawId, inLawId, parentId).first();
-    if (hasParentChild) {
-      continue;
-    }
-
-    const existingParentChild = await db.prepare(
-      "SELECT id FROM relationships WHERE type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
-    ).bind(parentId, inLawId).first();
-    if (existingParentChild) {
-      await db.prepare(
-        "DELETE FROM relationships WHERE id = ?"
-      ).bind((existingParentChild as any).id).run();
-    }
-
-    const exists = await db.prepare(
-      "SELECT id FROM relationships WHERE type = 'in_law' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-    ).bind(parentId, inLawId, inLawId, parentId).first();
-
-    if (!exists) {
-      const meta = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
-      await db.prepare(
-        "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'in_law', ?, ?)"
-      ).bind(parentId, inLawId, meta, now).run();
-    }
-  }
-  return parents.length;
-}
-
-async function shareParents(db: D1Database, personA: string, personB: string) {
-  const { results: parentsA } = await db.prepare(
-    "SELECT from_person_id FROM relationships WHERE type = 'parent_child' AND to_person_id = ?"
-  ).bind(personA).all();
-  const { results: parentsB } = await db.prepare(
-    "SELECT from_person_id FROM relationships WHERE type = 'parent_child' AND to_person_id = ?"
-  ).bind(personB).all();
-
-  const parentSetA = new Set(parentsA.map(p => p.from_person_id));
-  for (const p of parentsB) {
-    if (parentSetA.has(p.from_person_id)) return true;
-  }
-  return false;
-}
-
 async function getSiblingLinkMeta(db: D1Database, aId: string, bId: string) {
   const { results } = await db.prepare(
     'SELECT id, dob FROM people WHERE id IN (?, ?)'
@@ -320,18 +266,6 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
       }
     }
 
-    if (type === 'spouse' && !shouldSkipAutoLink) {
-      const primaryCount = await linkParentsToInLaw(c.env.DB, from_person_id, to_person_id, now);
-      if (primaryCount) {
-        await linkParentsToInLaw(c.env.DB, to_person_id, from_person_id, now);
-      } else {
-        const parentsOverlap = await shareParents(c.env.DB, from_person_id, to_person_id);
-        if (!parentsOverlap) {
-          await linkParentsToInLaw(c.env.DB, to_person_id, from_person_id, now);
-        }
-      }
-    }
-
     if (type === 'sibling' && !shouldSkipAutoLink) {
       await linkSiblingNetworks(c.env.DB, from_person_id, to_person_id, now);
     }
@@ -401,18 +335,6 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
     const nextType = type ?? (existing as any).type;
     const now = new Date().toISOString();
 
-    if (nextType === 'spouse' && !shouldSkipAutoLink) {
-      const primaryCount = await linkParentsToInLaw(c.env.DB, nextFrom, nextTo, now);
-      if (primaryCount) {
-        await linkParentsToInLaw(c.env.DB, nextTo, nextFrom, now);
-      } else {
-        const parentsOverlap = await shareParents(c.env.DB, nextFrom, nextTo);
-        if (!parentsOverlap) {
-          await linkParentsToInLaw(c.env.DB, nextTo, nextFrom, now);
-        }
-      }
-    }
-
     if (nextType === 'parent_child' && !shouldSkipAutoLink) {
       await linkSpouseToChild(c.env.DB, nextFrom, nextTo, now);
       await linkParentToSiblingChildren(c.env.DB, nextFrom, nextTo, now);
@@ -441,18 +363,6 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
         'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
       ).bind(link.fromId, link.toId, link.metadata, id).run();
       await linkSiblingNetworks(c.env.DB, nextFrom, nextTo, now);
-    }
-
-    if (nextType === 'in_law' && !shouldSkipAutoLink) {
-      const primaryCount = await linkParentsToInLaw(c.env.DB, nextFrom, nextTo, now);
-      if (primaryCount) {
-        await linkParentsToInLaw(c.env.DB, nextTo, nextFrom, now);
-      } else {
-        const parentsOverlap = await shareParents(c.env.DB, nextFrom, nextTo);
-        if (!parentsOverlap) {
-          await linkParentsToInLaw(c.env.DB, nextTo, nextFrom, now);
-        }
-      }
     }
 
     const updated = await c.env.DB.prepare(
