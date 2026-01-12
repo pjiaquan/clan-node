@@ -88,6 +88,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>({});
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -548,7 +549,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       const title = person.title || '';
       const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
 
-      const position = person.metadata?.position || (
+      const storedPosition = nodePositionMap.current[person.id];
+      const position = storedPosition || person.metadata?.position || (
         person.id === graphData.center
           ? { x: centerX, y: centerY }
           : {
@@ -628,6 +630,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  useEffect(() => {
+    nodePositionMap.current = nodes.reduce<Record<string, { x: number; y: number }>>((acc, node) => {
+      acc[node.id] = node.position;
+      return acc;
+    }, {});
+  }, [nodes]);
 
   const handleNodeClick = useCallback((event: React.MouseEvent, nodeId: string) => {
     console.log('Node clicked:', nodeId);
@@ -733,7 +742,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       person.tod,
       newMetadata,
       undefined,
-      person.avatar_url ?? undefined
+      person.avatar_url ?? undefined,
+      { skipFetch: true }
     );
   }, [graphData, nodes, createPerson]);
 
