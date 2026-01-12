@@ -33,9 +33,22 @@ export function registerGraphRoutes(app: Hono<{ Bindings: Env }>) {
       ).all();
       console.log(`Fetched ${peopleRaw.length} people`);
 
+      const { results: customFieldRows } = await c.env.DB.prepare(
+        'SELECT person_id, label, value FROM person_custom_fields'
+      ).all();
+      const customFieldMap = new Map<string, { label: string; value: string }[]>();
+      customFieldRows.forEach((row: any) => {
+        const list = customFieldMap.get(row.person_id) || [];
+        list.push({ label: row.label, value: row.value });
+        customFieldMap.set(row.person_id, list);
+      });
+
       const people = peopleRaw.map(person => ({
         ...person,
-        metadata: safeParse(person.metadata as string)
+        metadata: {
+          ...safeParse(person.metadata as string),
+          customFields: customFieldMap.get((person as any).id) || []
+        }
       }));
 
       // Get all relationships

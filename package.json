@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "deploy:build": "npm --prefix frontend run build && wrangler deploy --env production",
+    "deploy:build": "npm --prefix frontend run build && wrangler deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master",
     "d1:create": "wrangler d1 create clan-db",
     "d1:migrate": "wrangler d1 execute clan-db --local --file=./schema.sql",
     "d1:migrate:prod": "wrangler d1 execute clan-db --file=./schema.sql",

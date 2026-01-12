@@ -34,15 +34,45 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
 }
 
 export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
+  const loadCustomFields = async (db: Env['DB']) => {
+    const { results } = await db.prepare(
+      'SELECT person_id, label, value FROM person_custom_fields'
+    ).all();
+    const map = new Map<string, { label: string; value: string }[]>();
+    results.forEach((row: any) => {
+      const list = map.get(row.person_id) || [];
+      list.push({ label: row.label, value: row.value });
+      map.set(row.person_id, list);
+    });
+    return map;
+  };
+
+  const loadPersonCustomFields = async (db: Env['DB'], personId: string) => {
+    const { results } = await db.prepare(
+      'SELECT label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
+    ).bind(personId).all();
+    return results.map((row: any) => ({ label: row.label, value: row.value }));
+  };
+
+  const extractCustomFields = (body: any, metadata: any) => {
+    if (Array.isArray(body?.custom_fields)) return body.custom_fields;
+    if (Array.isArray(metadata?.customFields)) return metadata.customFields;
+    return null;
+  };
+
   // Get all people
   app.get('/api/people', async (c) => {
     const { results } = await c.env.DB.prepare(
       'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
     ).all();
+    const customFieldsMap = await loadCustomFields(c.env.DB);
 
     const parsedResults = results.map(person => ({
       ...person,
-      metadata: safeParse(person.metadata as string)
+      metadata: {
+        ...safeParse(person.metadata as string),
+        customFields: customFieldsMap.get((person as any).id) || []
+      }
     }));
 
     return c.json(parsedResults);
@@ -58,7 +88,14 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    return c.json(person);
+    const customFields = await loadPersonCustomFields(c.env.DB, id);
+    return c.json({
+      ...person,
+      metadata: {
+        ...safeParse((person as any).metadata as string),
+        customFields
+      }
+    });
   });
 
   // Create a new person
@@ -90,11 +127,34 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
       now
     ).run();
 
+    const customFields = extractCustomFields(body, metadata);
+    if (customFields) {
+      for (const field of customFields) {
+        if (!field?.label && !field?.value) continue;
+        await c.env.DB.prepare(
+          'INSERT INTO person_custom_fields (person_id, label, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+        ).bind(
+          id,
+          field.label || '',
+          field.value || '',
+          now,
+          now
+        ).run();
+      }
+    }
+
     const person = await c.env.DB.prepare(
       'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
-    return c.json(person, 201);
+    const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    return c.json({
+      ...person,
+      metadata: {
+        ...safeParse((person as any).metadata as string),
+        customFields: customFieldsResult
+      }
+    }, 201);
   });
 
   // Update a person
@@ -153,13 +213,41 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
       values.push(JSON.stringify(metadata));
     }
 
-    updates.push('updated_at = ?');
-    values.push(now);
-    values.push(id);
+    const customFields = extractCustomFields(body, metadata);
 
-    await c.env.DB.prepare(
-      `UPDATE people SET ${updates.join(', ')} WHERE id = ?`
-    ).bind(...values).run();
+    if (updates.length > 0) {
+      updates.push('updated_at = ?');
+      values.push(now);
+      values.push(id);
+
+      await c.env.DB.prepare(
+        `UPDATE people SET ${updates.join(', ')} WHERE id = ?`
+      ).bind(...values).run();
+    } else if (customFields !== null) {
+      await c.env.DB.prepare(
+        'UPDATE people SET updated_at = ? WHERE id = ?'
+      ).bind(now, id).run();
+    } else {
+      return c.json({ error: 'No fields to update' }, 400);
+    }
+
+    if (customFields !== null) {
+      await c.env.DB.prepare(
+        'DELETE FROM person_custom_fields WHERE person_id = ?'
+      ).bind(id).run();
+      for (const field of customFields) {
+        if (!field?.label && !field?.value) continue;
+        await c.env.DB.prepare(
+          'INSERT INTO person_custom_fields (person_id, label, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+        ).bind(
+          id,
+          field.label || '',
+          field.value || '',
+          now,
+          now
+        ).run();
+      }
+    }
 
     if (dob !== undefined && dob !== previousDob) {
       await updateSiblingOrdering(c.env.DB, id);
@@ -169,7 +257,14 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
       'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
-    return c.json(person);
+    const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    return c.json({
+      ...person,
+      metadata: {
+        ...safeParse((person as any).metadata as string),
+        customFields: customFieldsResult
+      }
+    });
   });
 
   // Upload avatar for a person
@@ -248,6 +343,10 @@ export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
   // Delete a person
   app.delete('/api/people/:id', async (c) => {
     const id = c.req.param('id');
+
+    await c.env.DB.prepare(
+      'DELETE FROM person_custom_fields WHERE person_id = ?'
+    ).bind(id).run();
 
     const result = await c.env.DB.prepare(
       'DELETE FROM people WHERE id = ?'
