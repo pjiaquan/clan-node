@@ -61,18 +61,23 @@ const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, file
 };
 
 const run = async () => {
-  const localCookie = await login(LOCAL_API_BASE, LOCAL_USER, LOCAL_PASS);
-  const remoteCookie = await login(REMOTE_API_BASE, REMOTE_USER, REMOTE_PASS);
+  const direction = (process.env.SYNC_DIRECTION || 'local-to-remote').toLowerCase();
+  const fromLocal = direction !== 'remote-to-local';
+  const fromBase = fromLocal ? LOCAL_API_BASE : REMOTE_API_BASE;
+  const toBase = fromLocal ? REMOTE_API_BASE : LOCAL_API_BASE;
 
-  const people = await fetchPeople(LOCAL_API_BASE, localCookie);
+  const fromCookie = await login(fromBase, fromLocal ? LOCAL_USER : REMOTE_USER, fromLocal ? LOCAL_PASS : REMOTE_PASS);
+  const toCookie = await login(toBase, fromLocal ? REMOTE_USER : LOCAL_USER, fromLocal ? REMOTE_PASS : LOCAL_PASS);
+
+  const people = await fetchPeople(fromBase, fromCookie);
   const withAvatar = people.filter((person) => person.avatar_url);
 
-  console.log(`Found ${withAvatar.length} avatars to sync.`);
+  console.log(`Found ${withAvatar.length} avatars to sync (${direction}).`);
 
   for (const person of withAvatar) {
-    const sourceUrl = resolveAvatarUrl(LOCAL_API_BASE, person.avatar_url);
+    const sourceUrl = resolveAvatarUrl(fromBase, person.avatar_url);
     if (!sourceUrl) continue;
-    const res = await fetch(sourceUrl, { headers: { Cookie: localCookie } });
+    const res = await fetch(sourceUrl, { headers: { Cookie: fromCookie } });
     if (!res.ok) {
       console.warn(`Skip ${person.id}: failed to fetch avatar (${res.status})`);
       continue;
@@ -80,7 +85,7 @@ const run = async () => {
     const buffer = await res.arrayBuffer();
     const contentType = res.headers.get('content-type') || 'image/png';
     const filename = sourceUrl.split('/').pop() || 'avatar.png';
-    await uploadAvatar(REMOTE_API_BASE, remoteCookie, person.id, buffer, contentType, filename);
+    await uploadAvatar(toBase, toCookie, person.id, buffer, contentType, filename);
     console.log(`Synced avatar for ${person.id} (${person.name || ''})`);
   }
 };

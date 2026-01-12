@@ -86,8 +86,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
+  const avatarFailures = useRef(new Set<string>());
   const canUndo = undoStack.length > 0;
+
+  useEffect(() => {
+    avatarBlobMap.current = avatarBlobs;
+  }, [avatarBlobs]);
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
@@ -163,24 +169,27 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           URL.revokeObjectURL(next[key]);
           delete next[key];
           avatarFetches.current.delete(key);
+          avatarFailures.current.delete(key);
         }
       }
       return next;
     });
 
     desired.forEach(async (key) => {
-      if (avatarFetches.current.has(key) || avatarBlobs[key]) return;
+      if (avatarFetches.current.has(key) || avatarFailures.current.has(key)) return;
+      if (avatarBlobMap.current[key]) return;
       avatarFetches.current.add(key);
       try {
         const blobUrl = await api.fetchAvatarBlobUrl(key);
         setAvatarBlobs((prev) => ({ ...prev, [key]: blobUrl }));
       } catch (error) {
+        avatarFailures.current.add(key);
         console.error('Failed to load avatar:', error);
       } finally {
         avatarFetches.current.delete(key);
       }
     });
-  }, [graphData, avatarBlobs]);
+  }, [graphData]);
 
   useEffect(() => {
     if (!centerId) return;
@@ -708,6 +717,11 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             handleNodeClick(node.id);
             setContextMenu(null);
             setAvatarPreview(null);
+          }}
+          onNodeDoubleClick={(_e, node) => {
+            setContextMenu(null);
+            setAvatarPreview(null);
+            handleEditPerson(node.id);
           }}
           onNodeContextMenu={onNodeContextMenu}
           onPaneClick={onPaneClick}
