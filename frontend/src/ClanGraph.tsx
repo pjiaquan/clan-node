@@ -88,14 +88,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
-  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(() => {
-    try {
-      const raw = localStorage.getItem('clan.nodePositions');
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  }) as React.MutableRefObject<Record<string, { x: number; y: number }>>;
+  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>({});
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -105,6 +98,17 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   useEffect(() => {
     avatarBlobMap.current = avatarBlobs;
   }, [avatarBlobs]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('clan.nodePositions');
+      if (raw) {
+        nodePositionMap.current = JSON.parse(raw);
+      }
+    } catch (error) {
+      console.warn('Failed to restore node positions:', error);
+    }
+  }, []);
 
   const collapsedNodeIds = useMemo(() => {
     if (!graphData) return new Set<string>();
