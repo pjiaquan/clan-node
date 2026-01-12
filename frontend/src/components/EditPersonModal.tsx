@@ -210,9 +210,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
 
   const saveChanges = useCallback(async () => {
     const croppedAvatar = await createCroppedAvatar();
+    const normalizedEnglish = englishName.trim();
     const nextUpdates: Partial<Person> = {
       name,
-      english_name: englishName || undefined,
+      english_name: normalizedEnglish ? normalizedEnglish : null,
       gender,
       dob: dob || undefined,
       tob: tob || undefined,

@@ -526,6 +526,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       }
       const sourcePerson = graphData?.nodes.find(node => node.id === connection.source);
       const targetPerson = graphData?.nodes.find(node => node.id === connection.target);
+      const sourceSurname = getSurname(sourcePerson?.name);
+      const targetSurname = getSurname(targetPerson?.name);
+      const sameSurname = Boolean(sourceSurname && targetSurname && sourceSurname === targetSurname);
       const gendersDifferent = Boolean(
         sourcePerson?.gender &&
         targetPerson?.gender &&
@@ -534,7 +537,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         sourcePerson.gender !== targetPerson.gender
       );
       const relationshipType = isHorizontal
-        ? (gendersDifferent ? 'spouse' : 'sibling')
+        ? (sameSurname ? 'sibling' : (gendersDifferent ? 'spouse' : 'sibling'))
         : getDefaultRelationshipType(connection.source, connection.target, undefined, { allowSpouse: false });
       createRelationship(
         connection.source,
@@ -847,7 +850,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
     await createPerson(
       person.name,
-      person.english_name ?? undefined,
+      person.english_name || undefined,
       person.gender,
       person.dob,
       person.dod,
@@ -940,7 +943,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
         await createPerson(
           copiedPerson.name,
-          copiedPerson.english_name ?? undefined,
+          copiedPerson.english_name || undefined,
           copiedPerson.gender,
           copiedPerson.dob,
           copiedPerson.dod,
