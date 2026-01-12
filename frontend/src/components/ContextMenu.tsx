@@ -14,6 +14,8 @@ interface ContextMenuProps {
   onToggleDimNonRelatives: (id: string) => void;
   onToggleCollapseMaternal: (id: string) => void;
   onToggleCollapsePaternal: (id: string) => void;
+  onToggleCollapseChildren: (id: string) => void;
+  onToggleCollapseSiblings: (id: string) => void;
   onDuplicateBottomRight: (id: string) => void;
   selectedCount: number;
   onAlignHorizontal: () => void;
@@ -22,6 +24,8 @@ interface ContextMenuProps {
   dimNonRelativesActive: boolean;
   maternalCollapsed: boolean;
   paternalCollapsed: boolean;
+  childrenCollapsed: boolean;
+  siblingsCollapsed: boolean;
   onClose: () => void;
 }
 
@@ -39,6 +43,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onToggleDimNonRelatives,
   onToggleCollapseMaternal,
   onToggleCollapsePaternal,
+  onToggleCollapseChildren,
+  onToggleCollapseSiblings,
   onDuplicateBottomRight,
   selectedCount,
   onAlignHorizontal,
@@ -47,6 +53,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   dimNonRelativesActive,
   maternalCollapsed,
   paternalCollapsed,
+  childrenCollapsed,
+  siblingsCollapsed,
   onClose 
 }) => {
   return (
@@ -62,7 +70,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         borderRadius: '0.375rem',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
         padding: '0.5rem 0',
-        minWidth: '150px'
+        minWidth: '150px',
+        maxHeight: '70vh',
+        overflowY: 'auto'
       }}
     >
       <button 
@@ -171,6 +181,28 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
         {paternalCollapsed ? '展開男方家族' : '折疊男方家族'}
+      </button>
+      <button
+        onClick={() => {
+          onToggleCollapseChildren(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {childrenCollapsed ? '展開兒女' : '折疊兒女'}
+      </button>
+      <button
+        onClick={() => {
+          onToggleCollapseSiblings(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {siblingsCollapsed ? '展開手足' : '折疊手足'}
       </button>
       <button 
         onClick={() => {

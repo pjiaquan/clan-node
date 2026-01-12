@@ -7,8 +7,8 @@ import ReactFlow, {
   type Edge,
   type Connection,
   type ReactFlowInstance,
-  useNodesState,
   useEdgesState,
+  useNodesState,
   MarkerType,
 } from 'reactflow';
 import type { Person, Relationship } from './types';
@@ -84,6 +84,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
   const [collapsedMaternalRoots, setCollapsedMaternalRoots] = useState<Set<string>>(new Set());
   const [collapsedPaternalRoots, setCollapsedPaternalRoots] = useState<Set<string>>(new Set());
+  const [collapsedChildRoots, setCollapsedChildRoots] = useState<Set<string>>(new Set());
+  const [collapsedSiblingRoots, setCollapsedSiblingRoots] = useState<Set<string>>(new Set());
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
@@ -181,9 +183,80 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     collapsedPaternalRoots.forEach((id) => {
       collectFamilySide(id, 'paternal').forEach((nodeId) => result.add(nodeId));
     });
+    const collectChildSide = (personId: string) => {
+      const childIds = graphData.edges
+        .filter(edge => edge.type === 'parent_child' && edge.from_person_id === personId)
+        .map(edge => edge.to_person_id);
+      if (!childIds.length) return new Set<string>();
+
+      const visited = new Set<string>();
+      const queue: string[] = [...childIds];
+
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (visited.has(current) || current === personId) continue;
+        visited.add(current);
+        const parentIds = graphData.edges
+          .filter(edge => edge.type === 'parent_child' && edge.to_person_id === current)
+          .map(edge => edge.from_person_id);
+
+        graphData.edges.forEach((edge) => {
+          if (edge.type === 'in_law') return;
+          const neighbor = edge.from_person_id === current
+            ? edge.to_person_id
+            : edge.to_person_id === current
+              ? edge.from_person_id
+              : null;
+          if (!neighbor || visited.has(neighbor) || neighbor === personId || parentIds.includes(neighbor)) return;
+          queue.push(neighbor);
+        });
+      }
+
+      return visited;
+    };
+
+    const collectSiblingSide = (personId: string) => {
+      const siblingIds = graphData.edges
+        .filter(edge => edge.type === 'sibling' && (edge.from_person_id === personId || edge.to_person_id === personId))
+        .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
+      if (!siblingIds.length) return new Set<string>();
+
+      const parentIds = graphData.edges
+        .filter(edge => edge.type === 'parent_child' && edge.to_person_id === personId)
+        .map(edge => edge.from_person_id);
+
+      const blockedIds = new Set<string>([personId, ...parentIds]);
+      const visited = new Set<string>();
+      const queue: string[] = [...siblingIds];
+
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (visited.has(current) || blockedIds.has(current)) continue;
+        visited.add(current);
+        graphData.edges.forEach((edge) => {
+          if (edge.type === 'in_law') return;
+          const neighbor = edge.from_person_id === current
+            ? edge.to_person_id
+            : edge.to_person_id === current
+              ? edge.from_person_id
+              : null;
+          if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
+          queue.push(neighbor);
+        });
+      }
+
+      return visited;
+    };
+
+    collapsedChildRoots.forEach((id) => {
+      collectChildSide(id).forEach((nodeId) => result.add(nodeId));
+    });
+    collapsedSiblingRoots.forEach((id) => {
+      collectSiblingSide(id).forEach((nodeId) => result.add(nodeId));
+    });
 
     return result;
-  }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots]);
+  }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
 
   useEffect(() => {
     try {
@@ -191,6 +264,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       const storedNonRelatives = localStorage.getItem('clan.dimNonRelativesId');
       const storedMaternal = localStorage.getItem('clan.collapsedMaternalRoots');
       const storedPaternal = localStorage.getItem('clan.collapsedPaternalRoots');
+      const storedChildren = localStorage.getItem('clan.collapsedChildRoots');
+      const storedSiblings = localStorage.getItem('clan.collapsedSiblingRoots');
       if (storedFocus) setDimFocusId(storedFocus);
       if (storedNonRelatives) setDimNonRelativesId(storedNonRelatives);
       if (storedMaternal) {
@@ -200,6 +275,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       if (storedPaternal) {
         const ids = storedPaternal.split(',').map((id) => id.trim()).filter(Boolean);
         setCollapsedPaternalRoots(new Set(ids));
+      }
+      if (storedChildren) {
+        const ids = storedChildren.split(',').map((id) => id.trim()).filter(Boolean);
+        setCollapsedChildRoots(new Set(ids));
+      }
+      if (storedSiblings) {
+        const ids = storedSiblings.split(',').map((id) => id.trim()).filter(Boolean);
+        setCollapsedSiblingRoots(new Set(ids));
       }
     } catch (error) {
       console.warn('Failed to restore dim state:', error);
@@ -226,10 +309,18 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         'clan.collapsedPaternalRoots',
         Array.from(collapsedPaternalRoots.values()).join(',')
       );
+      localStorage.setItem(
+        'clan.collapsedChildRoots',
+        Array.from(collapsedChildRoots.values()).join(',')
+      );
+      localStorage.setItem(
+        'clan.collapsedSiblingRoots',
+        Array.from(collapsedSiblingRoots.values()).join(',')
+      );
     } catch (error) {
       console.warn('Failed to persist dim state:', error);
     }
-  }, [dimFocusId, dimNonRelativesId, collapsedMaternalRoots, collapsedPaternalRoots]);
+  }, [dimFocusId, dimNonRelativesId, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
@@ -402,7 +493,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     []
   );
 
-  const onPaneClick = useCallback(() => setContextMenu(null), []);
+  const onPaneClick = useCallback(() => {
+    setContextMenu(null);
+    setSelectedEdge(null);
+  }, []);
 
   const onPaneMouseMove = useCallback((event: React.MouseEvent) => {
     if (!reactFlowInstance) return;
@@ -583,7 +677,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
-          hasCollapsedSide: collapsedMaternalRoots.has(person.id) || collapsedPaternalRoots.has(person.id),
+          hasCollapsedSide: collapsedMaternalRoots.has(person.id)
+            || collapsedPaternalRoots.has(person.id)
+            || collapsedChildRoots.has(person.id)
+            || collapsedSiblingRoots.has(person.id),
         },
         style: {
           background: 'transparent',
@@ -592,7 +689,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, dimIds, centerId, centerFlashId, handleAvatarClick, avatarBlobs]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, handleAvatarClick, avatarBlobs]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -1003,10 +1100,34 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 return next;
               });
             }}
+            onToggleCollapseChildren={(id) => {
+              setCollapsedChildRoots((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) {
+                  next.delete(id);
+                } else {
+                  next.add(id);
+                }
+                return next;
+              });
+            }}
+            onToggleCollapseSiblings={(id) => {
+              setCollapsedSiblingRoots((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) {
+                  next.delete(id);
+                } else {
+                  next.add(id);
+                }
+                return next;
+              });
+            }}
             dimRelativesActive={dimFocusId === contextMenu.id}
             dimNonRelativesActive={dimNonRelativesId === contextMenu.id}
             maternalCollapsed={collapsedMaternalRoots.has(contextMenu.id)}
             paternalCollapsed={collapsedPaternalRoots.has(contextMenu.id)}
+            childrenCollapsed={collapsedChildRoots.has(contextMenu.id)}
+            siblingsCollapsed={collapsedSiblingRoots.has(contextMenu.id)}
             onClose={() => setContextMenu(null)}
           />
         )}
