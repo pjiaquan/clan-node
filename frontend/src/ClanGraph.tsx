@@ -96,6 +96,34 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     avatarBlobMap.current = avatarBlobs;
   }, [avatarBlobs]);
 
+  useEffect(() => {
+    try {
+      const storedFocus = localStorage.getItem('clan.dimFocusId');
+      const storedNonRelatives = localStorage.getItem('clan.dimNonRelativesId');
+      if (storedFocus) setDimFocusId(storedFocus);
+      if (storedNonRelatives) setDimNonRelativesId(storedNonRelatives);
+    } catch (error) {
+      console.warn('Failed to restore dim state:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (dimFocusId) {
+        localStorage.setItem('clan.dimFocusId', dimFocusId);
+      } else {
+        localStorage.removeItem('clan.dimFocusId');
+      }
+      if (dimNonRelativesId) {
+        localStorage.setItem('clan.dimNonRelativesId', dimNonRelativesId);
+      } else {
+        localStorage.removeItem('clan.dimNonRelativesId');
+      }
+    } catch (error) {
+      console.warn('Failed to persist dim state:', error);
+    }
+  }, [dimFocusId, dimNonRelativesId]);
+
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
     const fromPerson = graphData.nodes.find(node => node.id === fromId);
