@@ -83,7 +83,6 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [dimFocusId, setDimFocusId] = useState<string | null>(null);
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
-  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
@@ -239,9 +238,26 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   const handleEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
     console.log('Edge clicked:', edge.id);
-    setSelectedEdge(edge.id);
+    if (!graphData) {
+      setSelectedEdge(edge.id);
+      setSelectedNode(null);
+      return;
+    }
+    const candidates = graphData.edges.filter((item) => {
+      const sameForward = item.from_person_id === edge.source && item.to_person_id === edge.target;
+      const sameReverse = item.from_person_id === edge.target && item.to_person_id === edge.source;
+      return sameForward || sameReverse;
+    }).map((item) => ({ id: `e${item.id}` }));
+    if (candidates.length > 1) {
+      const currentIndex = candidates.findIndex((item) => item.id === selectedEdge);
+      const nextIndex = currentIndex === -1 ? candidates.findIndex((item) => item.id === edge.id) : currentIndex + 1;
+      const nextEdge = candidates[nextIndex % candidates.length] || { id: edge.id };
+      setSelectedEdge(nextEdge.id);
+    } else {
+      setSelectedEdge(edge.id);
+    }
     setSelectedNode(null);
-  }, []);
+  }, [graphData, selectedEdge]);
 
   const handleAvatarClick = useCallback((person: Person, avatarUrl: string) => {
     setSelectedNode(person.id);
@@ -623,9 +639,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedEdge) {
-        deleteRelationship(selectedEdge);
-        setSelectedEdge(null);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditableTarget(e.target)) {
+        if (selectedEdge) {
+          deleteRelationship(selectedEdge);
+          setSelectedEdge(null);
+        } else if (selectedNode && !editingPersonId && !showAddModal) {
+          handleDeletePerson(selectedNode);
+        }
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedNode && graphData) {
@@ -633,6 +653,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         if (person) {
           console.log('Copied person:', person.name);
           setCopiedPerson(person);
+          showToast('已複製節點', 'success');
         }
       }
 
@@ -641,7 +662,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
         const fallbackPos = copiedPerson.metadata?.position || { x: 500, y: 300 };
         const position = lastMousePosition
-          ? { x: lastMousePosition.x + 20, y: lastMousePosition.y + 20 }
+          ? { x: lastMousePosition.x, y: lastMousePosition.y }
           : { x: fallbackPos.x + 40, y: fallbackPos.y + 40 };
         const newMetadata = {
           ...copiedPerson.metadata,
@@ -656,7 +677,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           copiedPerson.dod,
           copiedPerson.tob,
           copiedPerson.tod,
-          newMetadata
+          newMetadata,
+          undefined,
+          undefined,
+          { skipFetch: true }
         );
       }
 
@@ -737,6 +761,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             setContextMenu(null);
             setAvatarPreview(null);
           }}
+          onNodeMouseMove={(event) => {
+            onPaneMouseMove(event);
+          }}
           onNodeDoubleClick={(_e, node) => {
             setContextMenu(null);
             setAvatarPreview(null);
@@ -765,11 +792,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             onDelete={handleDeletePerson}
             onCopyTitle={(title) => {
               navigator.clipboard.writeText(title).then(() => {
-                setCopyNotice('已複製稱呼');
-                window.setTimeout(() => setCopyNotice(null), 1200);
+                showToast('已複製稱呼', 'success');
               }).catch(() => {
-                setCopyNotice('複製失敗');
-                window.setTimeout(() => setCopyNotice(null), 1200);
+                showToast('複製失敗', 'warning');
               });
             }}
             onDuplicateBottomRight={handleDuplicateBottomRight}
@@ -791,16 +816,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         )}
       </div>
 
-      {copyNotice && (
-        <div className="link-indicator" style={{ bottom: '6.5rem' }}>
-          {copyNotice}
-        </div>
-      )}
-
       {toast && (
         <div
           className={`toast toast-${toast.tone}`}
-          style={{ bottom: copyNotice ? '6.5rem' : '2.5rem' }}
+          style={{ bottom: '2.5rem' }}
         >
           {toast.message}
         </div>
@@ -843,6 +862,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onUnsavedClose={() => showToast('未儲存變更', 'warning')}
           onSubmit={async (id, updates, avatarFile, removeAvatar) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
+            const shouldRefreshAfterAvatar = Boolean(avatarFile || removeAvatar);
             if (removeAvatar) {
               nextUpdates.avatar_url = null;
             }
@@ -853,6 +873,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             await updatePerson(id, nextUpdates);
             setEditingPersonId(null);
             showToast('已儲存', 'success');
+            if (shouldRefreshAfterAvatar) {
+              window.setTimeout(() => window.location.reload(), 300);
+            }
           }}
         />
       )}

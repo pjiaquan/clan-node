@@ -33,6 +33,13 @@ export const api = {
     }
     return res.json();
   },
+  fetchRelationships: async (): Promise<Relationship[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/relationships`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  },
 
   fetchPeople: async (): Promise<Person[]> => {
     const res = await fetchWithAuth(`${API_BASE}/api/people`);
@@ -105,10 +112,14 @@ export const api = {
   },
 
   deleteRelationship: async (edgeId: string): Promise<void> => {
-    const dbId = edgeId.substring(1);
-    await fetchWithAuth(`${API_BASE}/api/relationships/${dbId}`, {
+    const dbId = edgeId.startsWith('e') ? edgeId.substring(1) : edgeId;
+    const res = await fetchWithAuth(`${API_BASE}/api/relationships/${dbId}`, {
       method: 'DELETE',
     });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
   },
 
   deletePerson: async (id: string): Promise<void> => {

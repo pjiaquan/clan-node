@@ -252,6 +252,9 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
       }
 
       await linkSpouseToChild(c.env.DB, from_person_id, to_person_id, now);
+      if (finalMetadata === null) {
+        finalMetadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
+      }
     }
 
     if (type === 'spouse') {

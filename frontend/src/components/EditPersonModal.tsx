@@ -10,6 +10,16 @@ interface EditPersonModalProps {
   onSubmit: (id: string, updates: Partial<Person>, avatarFile: File | null, removeAvatar: boolean) => void;
 }
 
+type CustomField = { label: string; value: string };
+
+const normalizeCustomFields = (fields: any): CustomField[] => {
+  if (!Array.isArray(fields)) return [];
+  return fields.map((field) => ({
+    label: typeof field?.label === 'string' ? field.label : '',
+    value: typeof field?.value === 'string' ? field.value : '',
+  }));
+};
+
 export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onUnsavedClose, onSubmit }) => {
   const [name, setName] = useState(person.name);
   const [englishName, setEnglishName] = useState(person.english_name || '');
@@ -26,6 +36,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [isDragging, setIsDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [customFields, setCustomFields] = useState<CustomField[]>(() => normalizeCustomFields(person.metadata?.customFields));
   const dragStateRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const cropperRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -47,6 +58,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setAvatarImage(null);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
+    setCustomFields(normalizeCustomFields(person.metadata?.customFields));
     clickCountRef.current = 0;
   }, [person]);
 
@@ -198,7 +210,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
 
   const saveChanges = useCallback(async () => {
     const croppedAvatar = await createCroppedAvatar();
-    onSubmit(person.id, {
+    const nextUpdates: Partial<Person> = {
       name,
       english_name: englishName || undefined,
       gender,
@@ -206,14 +218,50 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       tob: tob || undefined,
       dod: dod || undefined,
       tod: tod || undefined
-    }, croppedAvatar, removeAvatar);
-  }, [createCroppedAvatar, dob, dod, englishName, gender, name, onSubmit, person.id, removeAvatar, tob, tod]);
+    };
+
+    const normalizedCustomFields = customFields
+      .map((field) => ({
+        label: field.label.trim(),
+        value: field.value.trim(),
+      }))
+      .filter((field) => field.label || field.value);
+
+    const initialCustomFields = normalizeCustomFields(person.metadata?.customFields)
+      .map((field) => ({
+        label: field.label.trim(),
+        value: field.value.trim(),
+      }))
+      .filter((field) => field.label || field.value);
+
+    if (JSON.stringify(normalizedCustomFields) !== JSON.stringify(initialCustomFields)) {
+      nextUpdates.metadata = {
+        ...(person.metadata || {}),
+        customFields: normalizedCustomFields,
+      };
+    }
+
+    onSubmit(person.id, nextUpdates, croppedAvatar, removeAvatar);
+  }, [createCroppedAvatar, customFields, dob, dod, englishName, gender, name, onSubmit, person.id, person.metadata, removeAvatar, tob, tod]);
 
   const initialDob = person.dob || '';
   const initialDod = person.dod || '';
   const initialTob = normalizeTraditionalHour(person.tob || '');
   const initialTod = normalizeTraditionalHour(person.tod || '');
   const initialEnglish = person.english_name || '';
+  const normalizedCustomFields = customFields
+    .map((field) => ({
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label || field.value);
+  const initialCustomFields = normalizeCustomFields(person.metadata?.customFields)
+    .map((field) => ({
+      label: field.label.trim(),
+      value: field.value.trim(),
+    }))
+    .filter((field) => field.label || field.value);
+  const customFieldsDirty = JSON.stringify(normalizedCustomFields) !== JSON.stringify(initialCustomFields);
   const isDirty = name !== person.name
     || englishName !== initialEnglish
     || gender !== person.gender
@@ -221,6 +269,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     || dod !== initialDod
     || tob !== initialTob
     || tod !== initialTod
+    || customFieldsDirty
     || Boolean(avatarFile)
     || removeAvatar;
 
@@ -250,6 +299,20 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     if (!file) return;
     setAvatarFile(file);
     setRemoveAvatar(false);
+  };
+
+  const updateCustomField = (index: number, key: 'label' | 'value', value: string) => {
+    setCustomFields((prev) =>
+      prev.map((field, idx) => (idx === index ? { ...field, [key]: value } : field))
+    );
+  };
+
+  const addCustomField = () => {
+    setCustomFields((prev) => [...prev, { label: '', value: '' }]);
+  };
+
+  const removeCustomField = (index: number) => {
+    setCustomFields((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const calculateAge = () => {
@@ -449,6 +512,39 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
               </div>
             </>
           )}
+
+          <div className="form-group">
+            <label>自訂欄位</label>
+            <div className="custom-fields">
+              {customFields.length === 0 && (
+                <div className="custom-fields-empty">新增 Facebook、Line 等欄位</div>
+              )}
+              {customFields.map((field, index) => (
+                <div className="custom-field-row" key={`custom-field-${index}`}>
+                  <input
+                    value={field.label}
+                    placeholder="欄位名稱"
+                    onChange={(e) => updateCustomField(index, 'label', e.target.value)}
+                  />
+                  <input
+                    value={field.value}
+                    placeholder="內容"
+                    onChange={(e) => updateCustomField(index, 'value', e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="custom-field-remove"
+                    onClick={() => removeCustomField(index)}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="custom-field-add" onClick={addCustomField}>
+              新增欄位
+            </button>
+          </div>
 
           {displayAge !== null && (
             <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>

@@ -11,6 +11,7 @@ export interface Person {
   title?: string;
   metadata?: {
     position?: { x: number; y: number };
+    customFields?: { label: string; value: string }[];
     [key: string]: any;
   } | null;
 }

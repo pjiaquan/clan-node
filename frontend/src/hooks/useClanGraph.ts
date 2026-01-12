@@ -2,6 +2,17 @@ import { useState, useCallback, useEffect } from 'react';
 import type { GraphData } from '../types';
 import { api } from '../api';
 
+const parseMetadata = (value: any) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
 export function useClanGraph(options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
   const [graphData, setGraphData] = useState<GraphData | null>(null);
@@ -34,6 +45,15 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       setLoading(false);
     }
   }, [centerId, enabled]);
+
+  const refreshEdges = useCallback(async () => {
+    try {
+      const relationships = await api.fetchRelationships();
+      setGraphData((prev) => (prev ? { ...prev, edges: relationships } : prev));
+    } catch (error) {
+      console.error('Failed to refresh edges:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!centerId || !enabled) return;
@@ -108,24 +128,21 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   ) => {
     try {
       const metadata = metadataOverride ?? ((sourceHandle || targetHandle) ? { sourceHandle, targetHandle } : undefined);
-      const relationship = await api.createRelationship(from, to, metadata, type);
-      setGraphData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, edges: [...prev.edges, relationship] };
-      });
+      await api.createRelationship(from, to, metadata, type);
+      refreshEdges();
     } catch (error) {
       console.error('Failed to create relationship:', error);
     }
-  }, []);
+  }, [refreshEdges]);
 
   const updateRelationship = useCallback(async (edgeId: string, updates: any) => {
     try {
       await api.updateRelationship(edgeId, updates);
-      fetchGraph();
+      refreshEdges();
     } catch (error) {
       console.error('Failed to update relationship:', error);
     }
-  }, [fetchGraph]);
+  }, [refreshEdges]);
 
   const reverseRelationship = useCallback(async (edgeId: string) => {
     if (!graphData) return;
@@ -154,11 +171,11 @@ export function useClanGraph(options?: { enabled?: boolean }) {
         to_person_id: edge.from_person_id,
         metadata: newMetadata // Send updated metadata
       });
-      fetchGraph();
+      refreshEdges();
     } catch (error) {
       console.error('Failed to reverse relationship:', error);
     }
-  }, [graphData, fetchGraph]);
+  }, [graphData, refreshEdges]);
 
   const deleteRelationship = useCallback(async (edgeId: string) => {
     try {
@@ -173,14 +190,40 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       });
     } catch (error) {
       console.error('Failed to delete relationship:', error);
+      refreshEdges();
     }
-  }, []);
+  }, [refreshEdges]);
 
-  const createPerson = async (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string) => {
+  const createPerson = async (
+    name: string,
+    english_name: string | undefined,
+    gender: 'M' | 'F' | 'O',
+    dob?: string,
+    dod?: string,
+    tob?: string,
+    tod?: string,
+    metadata?: any,
+    id?: string,
+    avatar_url?: string,
+    options?: { skipFetch?: boolean }
+  ) => {
     try {
       const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, metadata, id, avatar_url);
-      fetchGraph();
-      return person;
+      const normalizedPerson = {
+        ...person,
+        metadata: parseMetadata((person as any).metadata),
+      } as typeof person;
+      if (options?.skipFetch) {
+        setGraphData((prev) => {
+          if (!prev) {
+            return { center: normalizedPerson.id, nodes: [normalizedPerson], edges: [] };
+          }
+          return { ...prev, nodes: [...prev.nodes, normalizedPerson] };
+        });
+      } else {
+        fetchGraph();
+      }
+      return normalizedPerson;
     } catch (error) {
       console.error('Failed to create person:', error);
       throw error;
@@ -212,6 +255,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     updateRelationship,
     reverseRelationship,
     deleteRelationship,
+    refreshEdges,
     createPerson,
     deletePerson
   };
