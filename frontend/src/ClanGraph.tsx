@@ -88,7 +88,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
-  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>({});
+  const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(() => {
+    try {
+      const raw = localStorage.getItem('clan.nodePositions');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }) as React.MutableRefObject<Record<string, { x: number; y: number }>>;
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -636,6 +643,11 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       acc[node.id] = node.position;
       return acc;
     }, {});
+    try {
+      localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+    } catch (error) {
+      console.warn('Failed to persist node positions:', error);
+    }
   }, [nodes]);
 
   const handleNodeClick = useCallback((event: React.MouseEvent, nodeId: string) => {
@@ -1054,6 +1066,11 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             setEditingPersonId(null);
             showToast('已儲存', 'success');
             if (shouldRefreshAfterAvatar) {
+              try {
+                localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+              } catch (error) {
+                console.warn('Failed to persist node positions:', error);
+              }
               window.setTimeout(() => window.location.reload(), 300);
             }
           }}
