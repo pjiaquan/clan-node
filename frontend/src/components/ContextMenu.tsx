@@ -12,12 +12,16 @@ interface ContextMenuProps {
   onCopyTitle: (title: string) => void;
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
+  onToggleCollapseMaternal: (id: string) => void;
+  onToggleCollapsePaternal: (id: string) => void;
   onDuplicateBottomRight: (id: string) => void;
   selectedCount: number;
   onAlignHorizontal: () => void;
   onAlignVertical: () => void;
   dimRelativesActive: boolean;
   dimNonRelativesActive: boolean;
+  maternalCollapsed: boolean;
+  paternalCollapsed: boolean;
   onClose: () => void;
 }
 
@@ -33,12 +37,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onCopyTitle,
   onToggleDimRelatives,
   onToggleDimNonRelatives,
+  onToggleCollapseMaternal,
+  onToggleCollapsePaternal,
   onDuplicateBottomRight,
   selectedCount,
   onAlignHorizontal,
   onAlignVertical,
   dimRelativesActive,
   dimNonRelativesActive,
+  maternalCollapsed,
+  paternalCollapsed,
   onClose 
 }) => {
   return (
@@ -115,6 +123,28 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
         複製到右下
+      </button>
+      <button
+        onClick={() => {
+          onToggleCollapseMaternal(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {maternalCollapsed ? '展開女方家族' : '折疊女方家族'}
+      </button>
+      <button
+        onClick={() => {
+          onToggleCollapsePaternal(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {paternalCollapsed ? '展開男方家族' : '折疊男方家族'}
       </button>
       {selectedCount > 1 && (
         <button

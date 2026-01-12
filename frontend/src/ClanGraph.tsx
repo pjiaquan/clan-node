@@ -82,6 +82,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [dimFocusId, setDimFocusId] = useState<string | null>(null);
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
+  const [collapsedMaternalRoots, setCollapsedMaternalRoots] = useState<Set<string>>(new Set());
+  const [collapsedPaternalRoots, setCollapsedPaternalRoots] = useState<Set<string>>(new Set());
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
@@ -96,12 +98,97 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     avatarBlobMap.current = avatarBlobs;
   }, [avatarBlobs]);
 
+  const collapsedNodeIds = useMemo(() => {
+    if (!graphData) return new Set<string>();
+
+    const getSpouseId = (personId: string, gender?: 'M' | 'F') => {
+      const spouseIds = graphData.edges
+        .filter(edge =>
+          edge.type === 'spouse' &&
+          (edge.from_person_id === personId || edge.to_person_id === personId)
+        )
+        .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
+      if (gender) {
+        const matched = spouseIds.find(id => graphData.nodes.find(node => node.id === id)?.gender === gender);
+        if (matched) return matched;
+      }
+      return spouseIds[0];
+    };
+
+    const collectFamilySide = (personId: string, side: 'maternal' | 'paternal') => {
+      const person = graphData.nodes.find(node => node.id === personId);
+      if (!person) return new Set<string>();
+      const shouldUseSelf = (side === 'maternal' && person.gender === 'F')
+        || (side === 'paternal' && person.gender === 'M');
+      const startId = shouldUseSelf
+        ? personId
+        : side === 'maternal'
+          ? getSpouseId(personId, 'F')
+          : getSpouseId(personId, 'M');
+      if (!startId) return new Set<string>();
+
+      const blockedIds = new Set<string>();
+      const oppositeSpouseId = getSpouseId(personId);
+      if (startId === personId) {
+        if (oppositeSpouseId) blockedIds.add(oppositeSpouseId);
+      } else {
+        blockedIds.add(personId);
+      }
+      const visited = new Set<string>();
+      const queue: string[] = [startId];
+      const skipEdgesFromSelf = startId === personId;
+
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (visited.has(current) || blockedIds.has(current)) continue;
+        visited.add(current);
+        graphData.edges.forEach((edge) => {
+          if (edge.type === 'in_law') return;
+          if (skipEdgesFromSelf && current === personId) {
+            if (edge.type === 'spouse') return;
+            if (edge.type === 'parent_child' && edge.from_person_id === personId) return;
+          }
+          const neighbor = edge.from_person_id === current
+            ? edge.to_person_id
+            : edge.to_person_id === current
+              ? edge.from_person_id
+              : null;
+          if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
+          queue.push(neighbor);
+        });
+      }
+
+      visited.delete(personId);
+      return visited;
+    };
+
+    const result = new Set<string>();
+    collapsedMaternalRoots.forEach((id) => {
+      collectFamilySide(id, 'maternal').forEach((nodeId) => result.add(nodeId));
+    });
+    collapsedPaternalRoots.forEach((id) => {
+      collectFamilySide(id, 'paternal').forEach((nodeId) => result.add(nodeId));
+    });
+
+    return result;
+  }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots]);
+
   useEffect(() => {
     try {
       const storedFocus = localStorage.getItem('clan.dimFocusId');
       const storedNonRelatives = localStorage.getItem('clan.dimNonRelativesId');
+      const storedMaternal = localStorage.getItem('clan.collapsedMaternalRoots');
+      const storedPaternal = localStorage.getItem('clan.collapsedPaternalRoots');
       if (storedFocus) setDimFocusId(storedFocus);
       if (storedNonRelatives) setDimNonRelativesId(storedNonRelatives);
+      if (storedMaternal) {
+        const ids = storedMaternal.split(',').map((id) => id.trim()).filter(Boolean);
+        setCollapsedMaternalRoots(new Set(ids));
+      }
+      if (storedPaternal) {
+        const ids = storedPaternal.split(',').map((id) => id.trim()).filter(Boolean);
+        setCollapsedPaternalRoots(new Set(ids));
+      }
     } catch (error) {
       console.warn('Failed to restore dim state:', error);
     }
@@ -119,10 +206,18 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       } else {
         localStorage.removeItem('clan.dimNonRelativesId');
       }
+      localStorage.setItem(
+        'clan.collapsedMaternalRoots',
+        Array.from(collapsedMaternalRoots.values()).join(',')
+      );
+      localStorage.setItem(
+        'clan.collapsedPaternalRoots',
+        Array.from(collapsedPaternalRoots.values()).join(',')
+      );
     } catch (error) {
       console.warn('Failed to persist dim state:', error);
     }
-  }, [dimFocusId, dimNonRelativesId]);
+  }, [dimFocusId, dimNonRelativesId, collapsedMaternalRoots, collapsedPaternalRoots]);
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
@@ -196,6 +291,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
     const desired = new Set<string>();
     for (const person of graphData.nodes) {
+      if (collapsedNodeIds.has(person.id)) continue;
       if (person.avatar_url) {
         desired.add(person.avatar_url);
       }
@@ -228,7 +324,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         avatarFetches.current.delete(key);
       }
     });
-  }, [graphData]);
+  }, [graphData, collapsedNodeIds]);
 
   useEffect(() => {
     if (!centerId) return;
@@ -457,7 +553,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     const centerX = 500;
     const centerY = 300;
 
-    return graphData.nodes.map((person, index) => {
+    const visibleNodes = graphData.nodes.filter((person) => !collapsedNodeIds.has(person.id));
+
+    return visibleNodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
       const title = person.title || '';
       const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
@@ -484,6 +582,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
+          hasCollapsedSide: collapsedMaternalRoots.has(person.id) || collapsedPaternalRoots.has(person.id),
         },
         style: {
           background: 'transparent',
@@ -492,12 +591,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         },
       };
     });
-  }, [graphData, dimIds, centerId, centerFlashId, handleAvatarClick]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, dimIds, centerId, centerFlashId, handleAvatarClick, avatarBlobs]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
 
-    return graphData.edges.map((edge) => {
+    return graphData.edges
+      .filter((edge) => !collapsedNodeIds.has(edge.from_person_id) && !collapsedNodeIds.has(edge.to_person_id))
+      .map((edge) => {
       const edgeId = `e${edge.id}`;
       const isSelected = selectedEdge === edgeId;
       const isDimmed = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
@@ -521,7 +622,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         }
       };
 
-      return {
+        return {
         id: edgeId,
         source: edge.from_person_id,
         target: edge.to_person_id,
@@ -535,7 +636,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         zIndex: isSelected ? 1000 : 0,
       };
     });
-  }, [graphData, selectedEdge, dimIds]);
+  }, [graphData, collapsedNodeIds, selectedEdge, dimIds]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -544,6 +645,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     () => nodes.filter(node => node.selected).map(node => node.id),
     [nodes]
   );
+
+  useEffect(() => {
+    if (!selectedNode) return;
+    if (collapsedNodeIds.has(selectedNode)) {
+      setSelectedNode(null);
+    }
+  }, [selectedNode, collapsedNodeIds]);
 
   const handleUndo = useCallback(async () => {
     const entry = undoStack[0];
@@ -837,8 +945,32 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
               setDimFocusId(null);
               setDimNonRelativesId(prev => (prev === id ? null : id));
             }}
+            onToggleCollapseMaternal={(id) => {
+              setCollapsedMaternalRoots((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) {
+                  next.delete(id);
+                } else {
+                  next.add(id);
+                }
+                return next;
+              });
+            }}
+            onToggleCollapsePaternal={(id) => {
+              setCollapsedPaternalRoots((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) {
+                  next.delete(id);
+                } else {
+                  next.add(id);
+                }
+                return next;
+              });
+            }}
             dimRelativesActive={dimFocusId === contextMenu.id}
             dimNonRelativesActive={dimNonRelativesId === contextMenu.id}
+            maternalCollapsed={collapsedMaternalRoots.has(contextMenu.id)}
+            paternalCollapsed={collapsedPaternalRoots.has(contextMenu.id)}
             onClose={() => setContextMenu(null)}
           />
         )}

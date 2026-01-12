@@ -20,6 +20,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         className={`person-node ${selected ? 'selected' : ''} ${data.isCenter ? 'center' : ''} ${data.flashCenter ? 'center-flash' : ''}`}
         style={{ borderColor: selected ? '#667eea' : data.genderColor }}
       >
+        {data.hasCollapsedSide && <span className="node-collapse-indicator" />}
         <div
           className="node-avatar"
           style={{ background: data.genderColor }}
