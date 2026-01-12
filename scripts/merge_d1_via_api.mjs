@@ -40,12 +40,15 @@ const apiGet = async (baseUrl, cookie, path) => {
   return res.json();
 };
 
-const apiPost = async (baseUrl, cookie, path, payload) => {
+const apiPost = async (baseUrl, cookie, path, payload, { allowConflict = false } = {}) => {
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: cookie },
     body: JSON.stringify(payload),
   });
+  if (allowConflict && res.status === 409) {
+    return null;
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`POST ${path} failed ${res.status} ${res.statusText}: ${text}`);
@@ -87,6 +90,7 @@ const mergePeople = async (local, remote) => {
       await apiPost(remote.baseUrl, remote.cookie, '/api/people', {
         id: localPerson.id,
         name: localPerson.name,
+        english_name: localPerson.english_name ?? null,
         gender: localPerson.gender,
         dob: localPerson.dob,
         dod: localPerson.dod,
@@ -103,6 +107,7 @@ const mergePeople = async (local, remote) => {
       await apiPost(local.baseUrl, local.cookie, '/api/people', {
         id: remotePerson.id,
         name: remotePerson.name,
+        english_name: remotePerson.english_name ?? null,
         gender: remotePerson.gender,
         dob: remotePerson.dob,
         dod: remotePerson.dod,
@@ -123,6 +128,7 @@ const mergePeople = async (local, remote) => {
     if (localTs > remoteTs) {
       await apiPut(remote.baseUrl, remote.cookie, `/api/people/${localPerson.id}`, {
         name: localPerson.name,
+        english_name: localPerson.english_name ?? null,
         gender: localPerson.gender,
         dob: localPerson.dob,
         dod: localPerson.dod,
@@ -135,6 +141,7 @@ const mergePeople = async (local, remote) => {
     } else if (remoteTs > localTs) {
       await apiPut(local.baseUrl, local.cookie, `/api/people/${remotePerson.id}`, {
         name: remotePerson.name,
+        english_name: remotePerson.english_name ?? null,
         gender: remotePerson.gender,
         dob: remotePerson.dob,
         dod: remotePerson.dod,
@@ -160,26 +167,34 @@ const mergeRelationships = async (local, remote) => {
     const remoteRel = remoteMap.get(key);
 
     if (localRel && !remoteRel) {
-      await apiPost(remote.baseUrl, remote.cookie, '/api/relationships', {
+      const created = await apiPost(remote.baseUrl, remote.cookie, '/api/relationships', {
         from_person_id: localRel.from_person_id,
         to_person_id: localRel.to_person_id,
         type: localRel.type,
         metadata: localRel.metadata ?? null,
         skipAutoLink: true,
-      });
-      console.log(`Created remote relationship ${key}`);
+      }, { allowConflict: true });
+      if (created) {
+        console.log(`Created remote relationship ${key}`);
+      } else {
+        console.log(`Skipped existing remote relationship ${key}`);
+      }
       continue;
     }
 
     if (!localRel && remoteRel) {
-      await apiPost(local.baseUrl, local.cookie, '/api/relationships', {
+      const created = await apiPost(local.baseUrl, local.cookie, '/api/relationships', {
         from_person_id: remoteRel.from_person_id,
         to_person_id: remoteRel.to_person_id,
         type: remoteRel.type,
         metadata: remoteRel.metadata ?? null,
         skipAutoLink: true,
-      });
-      console.log(`Created local relationship ${key}`);
+      }, { allowConflict: true });
+      if (created) {
+        console.log(`Created local relationship ${key}`);
+      } else {
+        console.log(`Skipped existing local relationship ${key}`);
+      }
       continue;
     }
 

@@ -19,7 +19,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [tod, setTod] = useState(normalizeTraditionalHour(person.tod || ''));
   const [showDod, setShowDod] = useState(!!person.dod);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(api.resolveAvatarUrl(person.avatar_url));
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
   const [avatarImage, setAvatarImage] = useState<HTMLImageElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -41,7 +41,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setTod(normalizeTraditionalHour(person.tod || ''));
     setShowDod(!!person.dod);
     setAvatarFile(null);
-    setAvatarPreview(api.resolveAvatarUrl(person.avatar_url));
+    setAvatarPreview(null);
     setRemoveAvatar(false);
     setAvatarImage(null);
     setZoom(1);
@@ -50,9 +50,44 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   }, [person]);
 
   useEffect(() => {
+    let active = true;
+    if (!person.avatar_url) {
+      setAvatarPreview(null);
+      return;
+    }
+
+    api.fetchAvatarBlobUrl(person.avatar_url)
+      .then((url) => {
+        if (active) {
+          setAvatarPreview((prev) => {
+            if (prev && prev.startsWith('blob:')) {
+              URL.revokeObjectURL(prev);
+            }
+            return url;
+          });
+        } else {
+          URL.revokeObjectURL(url);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load avatar preview:', error);
+        setAvatarPreview(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [person.avatar_url]);
+
+  useEffect(() => {
     if (!avatarFile) return;
     const url = URL.createObjectURL(avatarFile);
-    setAvatarPreview(url);
+    setAvatarPreview((prev) => {
+      if (prev && prev.startsWith('blob:')) {
+        URL.revokeObjectURL(prev);
+      }
+      return url;
+    });
     return () => URL.revokeObjectURL(url);
   }, [avatarFile]);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -25,11 +25,17 @@ const nodeTypes = {
   person: PersonNode,
 };
 
-type UndoEntry = {
-  person: Person;
-  relationships: Relationship[];
-  previousCenterId?: string;
-};
+type UndoEntry =
+  | {
+      type: 'delete';
+      person: Person;
+      relationships: Relationship[];
+      previousCenterId?: string;
+    }
+  | {
+      type: 'align';
+      positions: Record<string, { x: number; y: number }>;
+    };
 
 type Gender = Person['gender'];
 
@@ -79,6 +85,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
+  const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const avatarFetches = useRef(new Set<string>());
   const canUndo = undoStack.length > 0;
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
@@ -137,6 +145,42 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }
     return gendersDifferent ? 'spouse' : 'parent_child';
   }, [graphData, isInLawParentConnection]);
+
+  useEffect(() => {
+    if (!graphData) return;
+
+    const desired = new Set<string>();
+    for (const person of graphData.nodes) {
+      if (person.avatar_url) {
+        desired.add(person.avatar_url);
+      }
+    }
+
+    setAvatarBlobs((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (!desired.has(key)) {
+          URL.revokeObjectURL(next[key]);
+          delete next[key];
+          avatarFetches.current.delete(key);
+        }
+      }
+      return next;
+    });
+
+    desired.forEach(async (key) => {
+      if (avatarFetches.current.has(key) || avatarBlobs[key]) return;
+      avatarFetches.current.add(key);
+      try {
+        const blobUrl = await api.fetchAvatarBlobUrl(key);
+        setAvatarBlobs((prev) => ({ ...prev, [key]: blobUrl }));
+      } catch (error) {
+        console.error('Failed to load avatar:', error);
+      } finally {
+        avatarFetches.current.delete(key);
+      }
+    });
+  }, [graphData, avatarBlobs]);
 
   useEffect(() => {
     if (!centerId) return;
@@ -275,49 +319,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         setCenterId(nextCenterId);
       }
       await deletePerson(id, skipRefresh);
-      setUndoStack(prev => [{ person, relationships, previousCenterId }, ...prev].slice(0, 10));
+      setUndoStack(prev => [{ type: 'delete', person, relationships, previousCenterId } as const, ...prev].slice(0, 10));
       setSelectedNode(null);
       setSelectedEdge(null);
     } catch (error) {
       console.error('Failed to delete person:', error);
     }
   }, [graphData, deletePerson, centerId, setCenterId]);
-
-  const handleUndo = useCallback(async () => {
-    const entry = undoStack[0];
-    if (!entry) return;
-
-    try {
-      await api.createPerson(
-        entry.person.name,
-        entry.person.english_name ?? undefined,
-        entry.person.gender,
-        entry.person.dob,
-        entry.person.dod,
-        entry.person.tob,
-        entry.person.tod,
-        entry.person.metadata ?? undefined,
-        entry.person.id,
-        entry.person.avatar_url ?? undefined
-      );
-      for (const rel of entry.relationships) {
-        await api.createRelationship(
-          rel.from_person_id,
-          rel.to_person_id,
-          rel.metadata ?? undefined,
-          rel.type as 'parent_child' | 'spouse' | 'sibling' | 'in_law',
-          true
-        );
-      }
-      if (entry.previousCenterId) {
-        setCenterId(entry.previousCenterId);
-      }
-      setUndoStack(prev => prev.slice(1));
-      fetchGraph();
-    } catch (error) {
-      console.error('Failed to undo delete:', error);
-    }
-  }, [undoStack, fetchGraph, setCenterId]);
 
   const dimIds = useMemo(() => {
     if (!graphData || (!dimFocusId && !dimNonRelativesId)) return new Set<string>();
@@ -387,7 +395,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     return graphData.nodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
       const title = person.title || '';
-      const avatarUrl = api.resolveAvatarUrl(person.avatar_url);
+      const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
 
       const position = person.metadata?.position || (
         person.id === graphData.center
@@ -472,6 +480,52 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     [nodes]
   );
 
+  const handleUndo = useCallback(async () => {
+    const entry = undoStack[0];
+    if (!entry) return;
+
+    try {
+      if (entry.type === 'align') {
+        const nextPositions = entry.positions;
+        setNodes((prev) => prev.map((node) => {
+          const position = nextPositions[node.id];
+          if (!position) return node;
+          updatePersonPosition(node.id, position);
+          return { ...node, position };
+        }));
+      } else {
+        await api.createPerson(
+          entry.person.name,
+          entry.person.english_name ?? undefined,
+          entry.person.gender,
+          entry.person.dob,
+          entry.person.dod,
+          entry.person.tob,
+          entry.person.tod,
+          entry.person.metadata ?? undefined,
+          entry.person.id,
+          entry.person.avatar_url ?? undefined
+        );
+        for (const rel of entry.relationships) {
+          await api.createRelationship(
+            rel.from_person_id,
+            rel.to_person_id,
+            rel.metadata ?? undefined,
+            rel.type as 'parent_child' | 'spouse' | 'sibling' | 'in_law',
+            true
+          );
+        }
+        if (entry.previousCenterId) {
+          setCenterId(entry.previousCenterId);
+        }
+      }
+      setUndoStack(prev => prev.slice(1));
+      fetchGraph();
+    } catch (error) {
+      console.error('Failed to undo delete:', error);
+    }
+  }, [undoStack, fetchGraph, setCenterId, setNodes, updatePersonPosition]);
+
   const handleDuplicateBottomRight = useCallback(async (id: string) => {
     if (!graphData) return;
     const person = graphData.nodes.find(node => node.id === id);
@@ -505,6 +559,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     if (ids.length < 2) return;
 
     const selectedNodes = nodes.filter(node => ids.includes(node.id));
+    const previousPositions = selectedNodes.reduce<Record<string, { x: number; y: number }>>((acc, node) => {
+      acc[node.id] = { ...node.position };
+      return acc;
+    }, {});
     const sorted = [...selectedNodes].sort((a, b) => {
       return direction === 'horizontal'
         ? a.position.x - b.position.x
@@ -531,12 +589,16 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       updatePersonPosition(node.id, position);
       return { ...node, position };
     }));
+    setUndoStack(prev => [{ type: 'align', positions: previousPositions } as const, ...prev].slice(0, 10));
   }, [nodes, selectedNodeIds, setNodes, updatePersonPosition]);
 
-  useMemo(() => {
+  useEffect(() => {
     setNodes(initialNodes);
+  }, [initialNodes, setNodes]);
+
+  useEffect(() => {
     setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+  }, [initialEdges, setEdges]);
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {

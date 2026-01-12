@@ -14,6 +14,18 @@ const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => {
 
 export const api = {
   resolveAvatarUrl,
+  fetchAvatarBlobUrl: async (avatarUrl: string): Promise<string> => {
+    const resolved = resolveAvatarUrl(avatarUrl);
+    if (!resolved) {
+      throw new Error('Invalid avatar URL');
+    }
+    const res = await fetchWithAuth(resolved);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
   fetchGraph: async (centerId: string): Promise<GraphData> => {
     const res = await fetchWithAuth(`${API_BASE}/api/graph?center=${centerId}`);
     if (!res.ok) {
