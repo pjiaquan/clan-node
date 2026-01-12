@@ -72,7 +72,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ id: string; top: number; left: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: string; top: number; left: number; openUp: boolean } | null>(null);
   const [linkMode, setLinkMode] = useState<{ from: string } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
@@ -484,10 +484,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
+      const openUp = event.clientY > window.innerHeight * 0.6;
       setContextMenu({
         id: node.id,
         top: event.clientY,
         left: event.clientX,
+        openUp,
       });
     },
     []

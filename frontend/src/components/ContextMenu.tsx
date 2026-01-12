@@ -5,6 +5,7 @@ interface ContextMenuProps {
   title?: string | null;
   top: number;
   left: number;
+  openUp?: boolean;
   onSetCenter: (id: string) => void;
   onStartLink: (id: string) => void;
   onEdit: (id: string) => void;
@@ -36,6 +37,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   left, 
   id, 
   title,
+  openUp,
   onSetCenter, 
   onStartLink, 
   onEdit,
@@ -76,7 +78,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         padding: '0.5rem 0',
         minWidth: '150px',
         maxHeight: '70vh',
-        overflowY: 'auto'
+        overflowY: 'auto',
+        transform: openUp ? 'translateY(-100%)' : undefined
       }}
     >
       <button 
