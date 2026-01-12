@@ -9,6 +9,8 @@ interface ContextMenuProps {
   onStartLink: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onDeleteRelations: (id: string) => void;
+  onDeleteSiblingRelations: (id: string) => void;
   onCopyTitle: (title: string) => void;
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
@@ -38,6 +40,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onStartLink, 
   onEdit,
   onDelete,
+  onDeleteRelations,
+  onDeleteSiblingRelations,
   onCopyTitle,
   onToggleDimRelatives,
   onToggleDimNonRelatives,
@@ -236,6 +240,28 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
         刪除成員
+      </button>
+      <button
+        onClick={() => {
+          onDeleteRelations(id);
+          onClose();
+        }}
+        style={{ ...menuItemStyle, color: '#b91c1c' }}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        刪除所有關係
+      </button>
+      <button
+        onClick={() => {
+          onDeleteSiblingRelations(id);
+          onClose();
+        }}
+        style={{ ...menuItemStyle, color: '#b91c1c' }}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        刪除所有手足關係
       </button>
     </div>
   );

@@ -585,6 +585,42 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }
   }, [graphData, deletePerson, centerId, setCenterId]);
 
+  const handleDeleteRelations = useCallback(async (id: string) => {
+    if (!graphData) return;
+    const relatedEdges = graphData.edges.filter(
+      (edge) => edge.from_person_id === id || edge.to_person_id === id
+    );
+    if (!relatedEdges.length) return;
+
+    try {
+      for (const edge of relatedEdges) {
+        await deleteRelationship(`e${edge.id}`);
+      }
+      setSelectedEdge(null);
+    } catch (error) {
+      console.error('Failed to delete relations:', error);
+    }
+  }, [graphData, deleteRelationship]);
+
+  const handleDeleteSiblingRelations = useCallback(async (id: string) => {
+    if (!graphData) return;
+    const relatedEdges = graphData.edges.filter(
+      (edge) =>
+        edge.type === 'sibling' &&
+        (edge.from_person_id === id || edge.to_person_id === id)
+    );
+    if (!relatedEdges.length) return;
+
+    try {
+      for (const edge of relatedEdges) {
+        await deleteRelationship(`e${edge.id}`);
+      }
+      setSelectedEdge(null);
+    } catch (error) {
+      console.error('Failed to delete sibling relations:', error);
+    }
+  }, [graphData, deleteRelationship]);
+
   const dimIds = useMemo(() => {
     if (!graphData || (!dimFocusId && !dimNonRelativesId)) return new Set<string>();
     const focusId = dimNonRelativesId ?? dimFocusId!;
@@ -1062,6 +1098,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             onStartLink={(id) => setLinkMode({ from: id })}
             onEdit={handleEditPerson}
             onDelete={handleDeletePerson}
+            onDeleteRelations={handleDeleteRelations}
+            onDeleteSiblingRelations={handleDeleteSiblingRelations}
             onCopyTitle={(title) => {
               navigator.clipboard.writeText(title).then(() => {
                 showToast('已複製稱呼', 'success');
