@@ -6,6 +6,12 @@ node_modules/
 .dev.vars
 mf-
 
+# Env files
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+
 # Auto Claude data directory
 .auto-claude/
 
