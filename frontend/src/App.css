@@ -221,6 +221,15 @@ button:hover {
   position: relative;
 }
 
+.drag-guide-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed rgba(59, 130, 246, 0.6);
+  pointer-events: none;
+  z-index: 4;
+}
+
 /* Custom Person Node */
 .person-node {
   padding: 0;
@@ -269,12 +278,13 @@ button:hover {
 
 .node-collapse-indicator {
   position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 9px;
-  height: 9px;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: #dd604a;
+  z-index: 7;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
 }
 
