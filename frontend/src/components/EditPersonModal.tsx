@@ -6,10 +6,11 @@ import { api } from '../api';
 interface EditPersonModalProps {
   person: Person;
   onClose: () => void;
+  onUnsavedClose?: () => void;
   onSubmit: (id: string, updates: Partial<Person>, avatarFile: File | null, removeAvatar: boolean) => void;
 }
 
-export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onSubmit }) => {
+export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onUnsavedClose, onSubmit }) => {
   const [name, setName] = useState(person.name);
   const [englishName, setEnglishName] = useState(person.english_name || '');
   const [gender, setGender] = useState(person.gender);
@@ -195,8 +196,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     return new File([blob], `avatar-${person.id}.png`, { type: 'image/png' });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveChanges = useCallback(async () => {
     const croppedAvatar = await createCroppedAvatar();
     onSubmit(person.id, {
       name,
@@ -207,7 +207,44 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       dod: dod || undefined,
       tod: tod || undefined
     }, croppedAvatar, removeAvatar);
+  }, [createCroppedAvatar, dob, dod, englishName, gender, name, onSubmit, person.id, removeAvatar, tob, tod]);
+
+  const initialDob = person.dob || '';
+  const initialDod = person.dod || '';
+  const initialTob = normalizeTraditionalHour(person.tob || '');
+  const initialTod = normalizeTraditionalHour(person.tod || '');
+  const initialEnglish = person.english_name || '';
+  const isDirty = name !== person.name
+    || englishName !== initialEnglish
+    || gender !== person.gender
+    || dob !== initialDob
+    || dod !== initialDod
+    || tob !== initialTob
+    || tod !== initialTod
+    || Boolean(avatarFile)
+    || removeAvatar;
+
+  const handleClose = useCallback(() => {
+    if (isDirty) {
+      onUnsavedClose?.();
+    }
+    onClose();
+  }, [isDirty, onClose, onUnsavedClose]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveChanges();
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      handleClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleClose]);
 
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
@@ -242,7 +279,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const todRange = tod ? getModernTimeRange(tod) : '';
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>編輯成員</h2>
         <form onSubmit={handleSubmit}>
@@ -420,7 +457,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
           )}
 
           <div className="form-actions">
-            <button type="button" onClick={onClose}>
+            <button type="button" onClick={handleClose}>
               取消
             </button>
             <button type="submit" className="btn-primary">

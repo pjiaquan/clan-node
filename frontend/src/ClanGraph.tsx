@@ -84,11 +84,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
+  const toastTimer = useRef<number | null>(null);
   const canUndo = undoStack.length > 0;
 
   useEffect(() => {
@@ -151,6 +153,16 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }
     return gendersDifferent ? 'spouse' : 'parent_child';
   }, [graphData, isInLawParentConnection]);
+
+  const showToast = useCallback((message: string, tone: 'success' | 'warning') => {
+    if (toastTimer.current) {
+      window.clearTimeout(toastTimer.current);
+    }
+    setToast({ message, tone });
+    toastTimer.current = window.setTimeout(() => {
+      setToast(null);
+    }, 1400);
+  }, []);
 
   useEffect(() => {
     if (!graphData) return;
@@ -778,6 +790,15 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         </div>
       )}
 
+      {toast && (
+        <div
+          className={`toast toast-${toast.tone}`}
+          style={{ bottom: copyNotice ? '6.5rem' : '2.5rem' }}
+        >
+          {toast.message}
+        </div>
+      )}
+
       {avatarPreview && (
         <div className="modal-overlay" onClick={() => setAvatarPreview(null)}>
           <div className="avatar-modal" onClick={(event) => event.stopPropagation()}>
@@ -812,6 +833,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         <EditPersonModal
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
           onClose={() => setEditingPersonId(null)}
+          onUnsavedClose={() => showToast('未儲存變更', 'warning')}
           onSubmit={async (id, updates, avatarFile, removeAvatar) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             if (removeAvatar) {
@@ -823,6 +845,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             }
             await updatePerson(id, nextUpdates);
             setEditingPersonId(null);
+            showToast('已儲存', 'success');
           }}
         />
       )}
