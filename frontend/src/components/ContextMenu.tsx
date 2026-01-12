@@ -87,6 +87,32 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         設為中心
       </button>
+      {selectedCount > 1 && (
+        <button
+          onClick={() => {
+            onAlignHorizontal();
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          水平對齊（平均間距）
+        </button>
+      )}
+      {selectedCount > 1 && (
+        <button
+          onClick={() => {
+            onAlignVertical();
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          垂直對齊（平均間距）
+        </button>
+      )}
       <button 
         onClick={() => {
           onStartLink(id);
@@ -146,32 +172,6 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         {paternalCollapsed ? '展開男方家族' : '折疊男方家族'}
       </button>
-      {selectedCount > 1 && (
-        <button
-          onClick={() => {
-            onAlignHorizontal();
-            onClose();
-          }}
-          style={menuItemStyle}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-        >
-          水平對齊（平均間距）
-        </button>
-      )}
-      {selectedCount > 1 && (
-        <button
-          onClick={() => {
-            onAlignVertical();
-            onClose();
-          }}
-          style={menuItemStyle}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-        >
-          垂直對齊（平均間距）
-        </button>
-      )}
       <button 
         onClick={() => {
           onToggleDimRelatives(id);

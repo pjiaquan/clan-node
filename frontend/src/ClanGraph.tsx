@@ -348,18 +348,6 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [avatarPreview]);
 
-  const handleNodeClick = useCallback((nodeId: string) => {
-    console.log('Node clicked:', nodeId);
-    setSelectedNode(nodeId);
-    setSelectedEdge(null);
-
-    if (linkMode) {
-      const relationshipType = getDefaultRelationshipType(linkMode.from, nodeId);
-      createRelationship(linkMode.from, nodeId, undefined, undefined, relationshipType);
-      setLinkMode(null);
-    }
-  }, [linkMode, createRelationship, getDefaultRelationshipType]);
-
   const handleEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
     console.log('Edge clicked:', edge.id);
     if (!graphData) {
@@ -641,6 +629,28 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  const handleNodeClick = useCallback((event: React.MouseEvent, nodeId: string) => {
+    console.log('Node clicked:', nodeId);
+    const isMultiSelect = event.ctrlKey || event.metaKey;
+    if (!isMultiSelect) {
+      setNodes((prev) =>
+        prev.map((node) => {
+          const isTarget = node.id === nodeId;
+          const nextSelected = selectedNode === nodeId ? false : isTarget;
+          return node.selected === nextSelected ? node : { ...node, selected: nextSelected };
+        })
+      );
+    }
+    setSelectedNode((prev) => (prev === nodeId && !isMultiSelect ? null : nodeId));
+    setSelectedEdge(null);
+
+    if (linkMode) {
+      const relationshipType = getDefaultRelationshipType(linkMode.from, nodeId);
+      createRelationship(linkMode.from, nodeId, undefined, undefined, relationshipType);
+      setLinkMode(null);
+    }
+  }, [linkMode, createRelationship, getDefaultRelationshipType, setNodes, selectedNode]);
+
   const selectedNodeIds = useMemo(
     () => nodes.filter(node => node.selected).map(node => node.id),
     [nodes]
@@ -892,8 +902,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onConnect={onConnect}
           onNodeDragStop={onNodeDragStop}
           connectionRadius={40}
-          onNodeClick={(_e, node) => {
-            handleNodeClick(node.id);
+          onNodeClick={(event, node) => {
+            handleNodeClick(event, node.id);
             setContextMenu(null);
             setAvatarPreview(null);
           }}
