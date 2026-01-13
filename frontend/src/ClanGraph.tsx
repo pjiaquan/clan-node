@@ -94,6 +94,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [collapsedChildRoots, setCollapsedChildRoots] = useState<Set<string>>(new Set());
   const [collapsedSiblingRoots, setCollapsedSiblingRoots] = useState<Set<string>>(new Set());
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
+  const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
@@ -115,6 +116,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
   const expandSelectTimer = useRef<number | null>(null);
+  const searchFlashTimer = useRef<number | null>(null);
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -755,6 +757,35 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     setEditingPersonId(id);
   }, []);
 
+  const handleSearch = useCallback((query: string) => {
+    if (!graphData) return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    const match = graphData.nodes.find((person) =>
+      person.id === trimmed
+      || person.name === trimmed
+      || person.name.toLowerCase().includes(lower)
+      || (person.english_name?.toLowerCase().includes(lower) ?? false)
+    );
+    if (!match) {
+      showToast('找不到成員', 'warning');
+      return;
+    }
+    setSelectedEdge(null);
+    setSelectedNode(match.id);
+    setNodesRef.current?.((prev) => prev.map((node) => ({ ...node, selected: node.id === match.id })));
+    setPendingCenterId(match.id);
+    if (searchFlashTimer.current) {
+      window.clearTimeout(searchFlashTimer.current);
+    }
+    setSearchFlashId(null);
+    window.setTimeout(() => setSearchFlashId(match.id), 0);
+    searchFlashTimer.current = window.setTimeout(() => {
+      setSearchFlashId(null);
+    }, 1400);
+  }, [graphData]);
+
   const handleDeletePerson = useCallback(async (id: string) => {
     if (!graphData) return;
     const person = graphData.nodes.find(p => p.id === id);
@@ -929,6 +960,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           avatarUrl,
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
+          flashSearch: person.id === searchFlashId,
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
           hasCollapsedSide: collapsedMaternalRoots.has(person.id)
             || collapsedPaternalRoots.has(person.id)
@@ -1344,6 +1376,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         linkMode={linkMode}
         onUndo={handleUndo}
         canUndo={canUndo}
+        onSearch={handleSearch}
+        searchOptions={graphData?.nodes ?? []}
         username={username}
         onLogout={onLogout}
         onStartLink={() => selectedNode && setLinkMode({ from: selectedNode })}
@@ -1563,6 +1597,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             await updatePerson(id, nextUpdates);
             setEditingPersonId(null);
             showToast('已儲存', 'success');
+            const focusPosition = nodesRef.current.find(node => node.id === id)?.position
+              || nodePositionMap.current[id]
+              || graphData.nodes.find(node => node.id === id)?.metadata?.position;
+            if (focusPosition && reactFlowInstance?.setCenter) {
+              requestAnimationFrame(() => {
+                reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: reactFlowInstance.getZoom?.() });
+              });
+            }
             setPendingCenterId(id);
             if (shouldRefreshAfterAvatar) {
               try {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface HeaderProps {
   onAddMember: () => void;
@@ -14,6 +14,8 @@ interface HeaderProps {
   canUndo: boolean;
   username?: string | null;
   onLogout: () => void;
+  onSearch: (query: string) => void;
+  searchOptions: Array<{ id: string; name: string; english_name?: string | null }>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,11 +32,54 @@ export const Header: React.FC<HeaderProps> = ({
   canUndo,
   username,
   onLogout,
+  onSearch,
+  searchOptions,
 }) => {
+  const [searchText, setSearchText] = useState('');
+
+  const handleSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    onSearch(searchText);
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setSearchText(value);
+    if (value.trim()) {
+      onSearch(value);
+    }
+  };
+
   return (
     <header className="header">
       {/* <h1>家族譜圖 Clan Node</h1> */}
       <div className="controls">
+        <form className="search-box" onSubmit={handleSearch}>
+          <input
+            className="search-input"
+            type="text"
+            list="node-search-list"
+            placeholder="搜尋姓名"
+            value={searchText}
+            onChange={handleSearchChange}
+          />
+          <button className="btn-secondary btn-icon" type="submit" aria-label="搜尋">
+            <span className="btn-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+                <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </span>
+            <span className="btn-label">搜尋</span>
+          </button>
+          <datalist id="node-search-list">
+            {searchOptions.map((option) => (
+              <option key={option.id} value={option.name}>
+                {option.english_name ? `${option.name} (${option.english_name})` : option.name}
+              </option>
+            ))}
+          </datalist>
+        </form>
         <button onClick={onUndo} className="btn-secondary btn-icon" disabled={!canUndo} title="Ctrl+Z" aria-label="復原">
           <span className="btn-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
