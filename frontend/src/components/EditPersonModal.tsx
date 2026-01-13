@@ -337,8 +337,11 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       ? age + 1 + (gender === 'F' ? 0 : 0)
       : age;
   const birthYear = dob ? new Date(dob).getFullYear() : null;
+  const deathYear = dod ? new Date(dod).getFullYear() : null;
   const zodiac = birthYear ? getZodiacAnimal(birthYear) : '';
   const ganzhi = birthYear ? getGanzhiYear(birthYear) : '';
+  const deathZodiac = deathYear ? getZodiacAnimal(deathYear) : '';
+  const deathGanzhi = deathYear ? getGanzhiYear(deathYear) : '';
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
 
@@ -491,7 +494,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
           {showDod && (
             <>
               <div className="form-group">
-                <label>歿日</label>
+                <label>
+                  歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
+                </label>
                 <input
                   type="date"
                   value={dod}
