@@ -44,6 +44,18 @@ const resolveAvatarUrl = (baseUrl, avatarUrl) => {
   return `${baseUrl}${avatarUrl}`;
 };
 
+const resolveContentType = (contentType, filename) => {
+  if (contentType && contentType !== 'application/octet-stream') {
+    return contentType;
+  }
+  const lower = (filename || '').toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  return contentType || 'application/octet-stream';
+};
+
 const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, filename) => {
   const formData = new FormData();
   const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
@@ -73,6 +85,7 @@ const run = async () => {
   const withAvatar = people.filter((person) => person.avatar_url);
 
   console.log(`Found ${withAvatar.length} avatars to sync (${direction}).`);
+  const failures = [];
 
   for (const person of withAvatar) {
     const sourceUrl = resolveAvatarUrl(fromBase, person.avatar_url);
@@ -83,10 +96,38 @@ const run = async () => {
       continue;
     }
     const buffer = await res.arrayBuffer();
-    const contentType = res.headers.get('content-type') || 'image/png';
+    const rawContentType = res.headers.get('content-type') || 'application/octet-stream';
     const filename = sourceUrl.split('/').pop() || 'avatar.png';
-    await uploadAvatar(toBase, toCookie, person.id, buffer, contentType, filename);
-    console.log(`Synced avatar for ${person.id} (${person.name || ''})`);
+    const contentType = resolveContentType(rawContentType, filename);
+    let attempt = 0;
+    let lastError;
+    while (attempt < 3) {
+      attempt += 1;
+      try {
+        await uploadAvatar(toBase, toCookie, person.id, buffer, contentType, filename);
+        console.log(`Synced avatar for ${person.id} (${person.name || ''})`);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`Failed avatar upload for ${person.id} (${person.name || ''}) attempt ${attempt}: ${err.message}`);
+        await new Promise((resolve) => setTimeout(resolve, attempt * 300));
+      }
+    }
+    if (lastError) {
+      failures.push({ id: person.id, name: person.name || '', error: lastError.message });
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error(`Avatar sync completed with ${failures.length} failures.`);
+    failures.slice(0, 10).forEach((entry) => {
+      console.error(`- ${entry.id} ${entry.name}: ${entry.error}`);
+    });
+    if (failures.length > 10) {
+      console.error(`...and ${failures.length - 10} more.`);
+    }
+    process.exit(1);
   }
 };
 
