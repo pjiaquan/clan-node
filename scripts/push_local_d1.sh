@@ -20,8 +20,17 @@ echo "Applying schema on remote..."
 wrangler d1 execute "$DB_NAME" --remote --file="./schema.sql"
 
 echo "Importing into remote D1 (data only)..."
+DATA_PATH="$(mktemp)"
 sed '/^CREATE TABLE /,/;$/d' "$EXPORT_PATH" \
   | sed '/^CREATE INDEX /,/;$/d' \
-  | wrangler d1 execute "$DB_NAME" --remote --file=-
+  > "$DATA_PATH"
+wrangler d1 execute "$DB_NAME" --remote --file="$DATA_PATH"
+rm -f "$DATA_PATH"
+
+echo "Syncing avatars from local to remote..."
+LOCAL_API_BASE="${LOCAL_API_BASE:-http://localhost:8787}" \
+REMOTE_API_BASE="${REMOTE_API_BASE:-https://clan-node-production.pjiaquan.workers.dev}" \
+SYNC_DIRECTION="local-to-remote" \
+npm run avatars:sync
 
 echo "Done. Remote DB replaced using $EXPORT_PATH"
