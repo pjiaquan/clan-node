@@ -11,14 +11,17 @@ mkdir -p "$BACKUP_DIR"
 echo "Exporting local D1 to $EXPORT_PATH..."
 wrangler d1 export "$DB_NAME" --local --output="$EXPORT_PATH"
 
-echo "Dropping remote tables..."
+echo "Dropping remote tables (keeping users/sessions)..."
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS relationships;"
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_custom_fields;"
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS sessions;"
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS users;"
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS people;"
 
-echo "Importing into remote D1..."
-wrangler d1 execute "$DB_NAME" --remote --file="$EXPORT_PATH"
+echo "Applying schema on remote..."
+wrangler d1 execute "$DB_NAME" --remote --file="./schema.sql"
+
+echo "Importing into remote D1 (data only)..."
+sed '/^CREATE TABLE /,/;$/d' "$EXPORT_PATH" \
+  | sed '/^CREATE INDEX /,/;$/d' \
+  | wrangler d1 execute "$DB_NAME" --remote --file=-
 
 echo "Done. Remote DB replaced using $EXPORT_PATH"
