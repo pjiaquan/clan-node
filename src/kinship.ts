@@ -743,6 +743,13 @@ function pathToTitle(
     return '姪女/外甥女(姻)';
   }
 
+  // Spouse's sibling's child's spouse
+  if (pathStr === 'spouse-sibling-down-spouse' || pathStr === 'spouse-up-down-down-spouse') {
+    if (target.gender === 'M') return '姪女婿(姻)/外甥女婿(姻)';
+    if (target.gender === 'F') return '姪媳(姻)/外甥媳(姻)';
+    return '姪媳(姻)/姪女婿(姻)';
+  }
+
   // Siblings (same parents, requires checking if share parents)
   if (pathStr === 'spouse-down') {
     // Spouse's child (step-child)

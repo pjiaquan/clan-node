@@ -61,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
             list="node-search-list"
             placeholder="搜尋姓名"
             value={searchText}
+            id="clan-search-input"
             onChange={handleSearchChange}
           />
           <button className="btn-secondary btn-icon" type="submit" aria-label="搜尋">

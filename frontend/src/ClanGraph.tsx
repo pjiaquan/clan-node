@@ -1338,6 +1338,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         e.preventDefault();
         handleUndo();
       }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        const input = document.getElementById('clan-search-input') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
