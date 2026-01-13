@@ -40,7 +40,6 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   left,
   id, 
   title,
-  openUp,
   onSetCenter, 
   onStartLink, 
   onEdit,
