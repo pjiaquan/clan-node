@@ -84,6 +84,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [fitViewEnabled] = useState(false);
+  const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
   const [dragGuideY, setDragGuideY] = useState<number | null>(null);
   const [dimFocusId, setDimFocusId] = useState<string | null>(null);
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const dragSnapXRef = useRef<{ id: string; x: number } | null>(null);
   const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
+  const expandSelectTimer = useRef<number | null>(null);
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
@@ -122,71 +125,151 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     avatarBlobMap.current = avatarBlobs;
   }, [avatarBlobs]);
 
+  useEffect(() => {
+    if (editingPersonId) {
+      setCopiedPerson(null);
+    }
+  }, [editingPersonId]);
+
+
+  const getSpouseId = useCallback((personId: string, gender?: 'M' | 'F') => {
+    if (!graphData) return undefined;
+    const spouseIds = graphData.edges
+      .filter(edge =>
+        edge.type === 'spouse' &&
+        (edge.from_person_id === personId || edge.to_person_id === personId)
+      )
+      .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
+    if (gender) {
+      const matched = spouseIds.find(id => graphData.nodes.find(node => node.id === id)?.gender === gender);
+      if (matched) return matched;
+    }
+    return spouseIds[0];
+  }, [graphData]);
+
+  const collectFamilySide = useCallback((personId: string, side: 'maternal' | 'paternal') => {
+    if (!graphData) return new Set<string>();
+    const person = graphData.nodes.find(node => node.id === personId);
+    if (!person) return new Set<string>();
+    const shouldUseSelf = (side === 'maternal' && person.gender === 'F')
+      || (side === 'paternal' && person.gender === 'M');
+    const startId = shouldUseSelf
+      ? personId
+      : side === 'maternal'
+        ? getSpouseId(personId, 'F')
+        : getSpouseId(personId, 'M');
+    if (!startId) return new Set<string>();
+
+    const blockedIds = new Set<string>();
+    const oppositeSpouseId = getSpouseId(personId);
+    if (startId === personId) {
+      if (oppositeSpouseId) blockedIds.add(oppositeSpouseId);
+    } else {
+      blockedIds.add(personId);
+    }
+    const visited = new Set<string>();
+    const queue: string[] = [startId];
+    const skipEdgesFromSelf = startId === personId;
+
+    while (queue.length) {
+      const current = queue.shift()!;
+      if (visited.has(current) || blockedIds.has(current)) continue;
+      visited.add(current);
+      graphData.edges.forEach((edge) => {
+        if (edge.type === 'in_law') return;
+        if (skipEdgesFromSelf && current === personId) {
+          if (edge.type === 'spouse') return;
+          if (edge.type === 'parent_child' && edge.from_person_id === personId) return;
+        }
+        const neighbor = edge.from_person_id === current
+          ? edge.to_person_id
+          : edge.to_person_id === current
+            ? edge.from_person_id
+            : null;
+        if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
+        queue.push(neighbor);
+      });
+    }
+
+    visited.delete(personId);
+    return visited;
+  }, [graphData, getSpouseId]);
+
+  const collectChildSide = useCallback((personId: string) => {
+    if (!graphData) return new Set<string>();
+    const childIds = graphData.edges
+      .filter(edge => edge.type === 'parent_child' && edge.from_person_id === personId)
+      .map(edge => edge.to_person_id);
+    if (!childIds.length) return new Set<string>();
+
+    const visited = new Set<string>();
+    const queue: string[] = [...childIds];
+
+    while (queue.length) {
+      const current = queue.shift()!;
+      if (visited.has(current) || current === personId) continue;
+      visited.add(current);
+      const parentIds = graphData.edges
+        .filter(edge => edge.type === 'parent_child' && edge.to_person_id === current)
+        .map(edge => edge.from_person_id);
+
+      graphData.edges.forEach((edge) => {
+        if (edge.type === 'in_law') return;
+        const neighbor = edge.from_person_id === current
+          ? edge.to_person_id
+          : edge.to_person_id === current
+            ? edge.from_person_id
+            : null;
+        if (!neighbor || visited.has(neighbor) || neighbor === personId || parentIds.includes(neighbor)) return;
+        queue.push(neighbor);
+      });
+    }
+
+    return visited;
+  }, [graphData]);
+
+  const collectSiblingSide = useCallback((personId: string) => {
+    if (!graphData) return new Set<string>();
+    const siblingIds = graphData.edges
+      .filter(edge => edge.type === 'sibling' && (edge.from_person_id === personId || edge.to_person_id === personId))
+      .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
+    if (!siblingIds.length) return new Set<string>();
+
+    const parentIds = graphData.edges
+      .filter(edge => edge.type === 'parent_child' && edge.to_person_id === personId)
+      .map(edge => edge.from_person_id);
+
+    const blockedIds = new Set<string>([personId, ...parentIds]);
+    const visited = new Set<string>();
+    const queue: string[] = [...siblingIds];
+
+    while (queue.length) {
+      const current = queue.shift()!;
+      if (visited.has(current) || blockedIds.has(current)) continue;
+      visited.add(current);
+      graphData.edges.forEach((edge) => {
+        if (edge.type === 'in_law') return;
+        const neighbor = edge.from_person_id === current
+          ? edge.to_person_id
+          : edge.to_person_id === current
+            ? edge.from_person_id
+            : null;
+        if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
+        queue.push(neighbor);
+      });
+    }
+
+    return visited;
+  }, [graphData]);
+
+  const getStoredPosition = useCallback((id: string) => {
+    return nodePositionMap.current[id]
+      || graphData?.nodes.find(node => node.id === id)?.metadata?.position
+      || null;
+  }, [graphData]);
 
   const collapsedNodeIds = useMemo(() => {
     if (!graphData) return new Set<string>();
-
-    const getSpouseId = (personId: string, gender?: 'M' | 'F') => {
-      const spouseIds = graphData.edges
-        .filter(edge =>
-          edge.type === 'spouse' &&
-          (edge.from_person_id === personId || edge.to_person_id === personId)
-        )
-        .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
-      if (gender) {
-        const matched = spouseIds.find(id => graphData.nodes.find(node => node.id === id)?.gender === gender);
-        if (matched) return matched;
-      }
-      return spouseIds[0];
-    };
-
-    const collectFamilySide = (personId: string, side: 'maternal' | 'paternal') => {
-      const person = graphData.nodes.find(node => node.id === personId);
-      if (!person) return new Set<string>();
-      const shouldUseSelf = (side === 'maternal' && person.gender === 'F')
-        || (side === 'paternal' && person.gender === 'M');
-      const startId = shouldUseSelf
-        ? personId
-        : side === 'maternal'
-          ? getSpouseId(personId, 'F')
-          : getSpouseId(personId, 'M');
-      if (!startId) return new Set<string>();
-
-      const blockedIds = new Set<string>();
-      const oppositeSpouseId = getSpouseId(personId);
-      if (startId === personId) {
-        if (oppositeSpouseId) blockedIds.add(oppositeSpouseId);
-      } else {
-        blockedIds.add(personId);
-      }
-      const visited = new Set<string>();
-      const queue: string[] = [startId];
-      const skipEdgesFromSelf = startId === personId;
-
-      while (queue.length) {
-        const current = queue.shift()!;
-        if (visited.has(current) || blockedIds.has(current)) continue;
-        visited.add(current);
-        graphData.edges.forEach((edge) => {
-          if (edge.type === 'in_law') return;
-          if (skipEdgesFromSelf && current === personId) {
-            if (edge.type === 'spouse') return;
-            if (edge.type === 'parent_child' && edge.from_person_id === personId) return;
-          }
-          const neighbor = edge.from_person_id === current
-            ? edge.to_person_id
-            : edge.to_person_id === current
-              ? edge.from_person_id
-              : null;
-          if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
-          queue.push(neighbor);
-        });
-      }
-
-      visited.delete(personId);
-      return visited;
-    };
-
     const result = new Set<string>();
     collapsedMaternalRoots.forEach((id) => {
       collectFamilySide(id, 'maternal').forEach((nodeId) => result.add(nodeId));
@@ -194,71 +277,6 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     collapsedPaternalRoots.forEach((id) => {
       collectFamilySide(id, 'paternal').forEach((nodeId) => result.add(nodeId));
     });
-    const collectChildSide = (personId: string) => {
-      const childIds = graphData.edges
-        .filter(edge => edge.type === 'parent_child' && edge.from_person_id === personId)
-        .map(edge => edge.to_person_id);
-      if (!childIds.length) return new Set<string>();
-
-      const visited = new Set<string>();
-      const queue: string[] = [...childIds];
-
-      while (queue.length) {
-        const current = queue.shift()!;
-        if (visited.has(current) || current === personId) continue;
-        visited.add(current);
-        const parentIds = graphData.edges
-          .filter(edge => edge.type === 'parent_child' && edge.to_person_id === current)
-          .map(edge => edge.from_person_id);
-
-        graphData.edges.forEach((edge) => {
-          if (edge.type === 'in_law') return;
-          const neighbor = edge.from_person_id === current
-            ? edge.to_person_id
-            : edge.to_person_id === current
-              ? edge.from_person_id
-              : null;
-          if (!neighbor || visited.has(neighbor) || neighbor === personId || parentIds.includes(neighbor)) return;
-          queue.push(neighbor);
-        });
-      }
-
-      return visited;
-    };
-
-    const collectSiblingSide = (personId: string) => {
-      const siblingIds = graphData.edges
-        .filter(edge => edge.type === 'sibling' && (edge.from_person_id === personId || edge.to_person_id === personId))
-        .map(edge => edge.from_person_id === personId ? edge.to_person_id : edge.from_person_id);
-      if (!siblingIds.length) return new Set<string>();
-
-      const parentIds = graphData.edges
-        .filter(edge => edge.type === 'parent_child' && edge.to_person_id === personId)
-        .map(edge => edge.from_person_id);
-
-      const blockedIds = new Set<string>([personId, ...parentIds]);
-      const visited = new Set<string>();
-      const queue: string[] = [...siblingIds];
-
-      while (queue.length) {
-        const current = queue.shift()!;
-        if (visited.has(current) || blockedIds.has(current)) continue;
-        visited.add(current);
-        graphData.edges.forEach((edge) => {
-          if (edge.type === 'in_law') return;
-          const neighbor = edge.from_person_id === current
-            ? edge.to_person_id
-            : edge.to_person_id === current
-              ? edge.from_person_id
-              : null;
-          if (!neighbor || visited.has(neighbor) || blockedIds.has(neighbor)) return;
-          queue.push(neighbor);
-        });
-      }
-
-      return visited;
-    };
-
     collapsedChildRoots.forEach((id) => {
       collectChildSide(id).forEach((nodeId) => result.add(nodeId));
     });
@@ -267,7 +285,21 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     });
 
     return result;
-  }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
+  }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide]);
+
+  const selectExpandedNodes = useCallback((ids: Set<string>) => {
+    if (!ids.size) return;
+    if (expandSelectTimer.current) {
+      window.clearTimeout(expandSelectTimer.current);
+    }
+    expandSelectTimer.current = window.setTimeout(() => {
+      if (!setNodesRef.current) return;
+      setNodesRef.current((prev) => prev.map((node) => ({
+        ...node,
+        selected: ids.has(node.id),
+      })));
+    }, 1000);
+  }, []);
 
   useEffect(() => {
     try {
@@ -332,6 +364,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       console.warn('Failed to persist dim state:', error);
     }
   }, [dimFocusId, dimNonRelativesId, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
+
+  useEffect(() => () => {
+    if (expandSelectTimer.current) {
+      window.clearTimeout(expandSelectTimer.current);
+    }
+  }, []);
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
@@ -575,6 +613,50 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     dragSnapXRef.current = null;
     const startPositions = dragStartPositions.current;
     if (startPositions) {
+      const hiddenUpdates = new Map<string, { x: number; y: number }>();
+      selectedIds.forEach((rootId) => {
+        const start = startPositions[rootId];
+        const current = nodesRef.current.find(item => item.id === rootId)?.position;
+        if (!start || !current) return;
+        const deltaX = current.x - start.x;
+        const deltaY = current.y - start.y;
+        if (!deltaX && !deltaY) return;
+
+        const hiddenIds = new Set<string>();
+        if (collapsedMaternalRoots.has(rootId)) {
+          collectFamilySide(rootId, 'maternal').forEach((id) => hiddenIds.add(id));
+        }
+        if (collapsedPaternalRoots.has(rootId)) {
+          collectFamilySide(rootId, 'paternal').forEach((id) => hiddenIds.add(id));
+        }
+        if (collapsedChildRoots.has(rootId)) {
+          collectChildSide(rootId).forEach((id) => hiddenIds.add(id));
+        }
+        if (collapsedSiblingRoots.has(rootId)) {
+          collectSiblingSide(rootId).forEach((id) => hiddenIds.add(id));
+        }
+
+        hiddenIds.forEach((hiddenId) => {
+          if (selectedIds.includes(hiddenId)) return;
+          if (hiddenUpdates.has(hiddenId)) return;
+          const base = getStoredPosition(hiddenId);
+          if (!base) return;
+          hiddenUpdates.set(hiddenId, { x: base.x + deltaX, y: base.y + deltaY });
+        });
+      });
+
+      if (hiddenUpdates.size) {
+        hiddenUpdates.forEach((position, id) => {
+          nodePositionMap.current[id] = position;
+          updatePersonPosition(id, position);
+        });
+        try {
+          localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+        } catch (error) {
+          console.warn('Failed to persist node positions:', error);
+        }
+      }
+
       const moved = Object.entries(startPositions).some(([id, position]) => {
         const current = nodesRef.current.find(item => item.id === id)?.position;
         return current ? current.x !== position.x || current.y !== position.y : false;
@@ -584,7 +666,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       }
     }
     dragStartPositions.current = null;
-  }, [updatePersonPosition]);
+  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition]);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
     if (!reactFlowInstance) return;
@@ -919,14 +1001,56 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [nodes]);
 
   useEffect(() => {
+    if (!reactFlowInstance) return;
+    try {
+      const raw = localStorage.getItem('clan.pendingViewport');
+      if (!raw) return;
+      const viewport = JSON.parse(raw) as { x: number; y: number; zoom: number };
+      if (reactFlowInstance.setViewport) {
+        reactFlowInstance.setViewport(viewport);
+      }
+      localStorage.removeItem('clan.pendingViewport');
+    } catch (error) {
+      console.warn('Failed to restore viewport:', error);
+      localStorage.removeItem('clan.pendingViewport');
+    }
+  }, [reactFlowInstance]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('clan.pendingCenterId');
+      if (stored) {
+        setPendingCenterId(stored);
+        localStorage.removeItem('clan.pendingCenterId');
+      }
+    } catch (error) {
+      console.warn('Failed to restore pending center:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingCenterId || !reactFlowInstance) return;
+    const position = nodesRef.current.find(node => node.id === pendingCenterId)?.position
+      || nodePositionMap.current[pendingCenterId]
+      || graphData?.nodes.find(node => node.id === pendingCenterId)?.metadata?.position;
+    if (position && reactFlowInstance.setCenter) {
+      requestAnimationFrame(() => {
+        reactFlowInstance.setCenter(position.x, position.y, { zoom: reactFlowInstance.getZoom?.() });
+        setPendingCenterId(null);
+      });
+    }
+  }, [pendingCenterId, reactFlowInstance, nodes, graphData]);
+
+  useEffect(() => {
     selectedNodeIdsRef.current = nodes.filter(node => node.selected).map(node => node.id);
   }, [nodes]);
 
   useEffect(() => {
-    nodePositionMap.current = nodes.reduce<Record<string, { x: number; y: number }>>((acc, node) => {
-      acc[node.id] = node.position;
-      return acc;
-    }, {});
+    const nextPositions = { ...nodePositionMap.current };
+    nodes.forEach((node) => {
+      nextPositions[node.id] = node.position;
+    });
+    nodePositionMap.current = nextPositions;
     try {
       localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
     } catch (error) {
@@ -962,15 +1086,47 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   );
 
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
-    const ids = selectedNodeIds.length > 1 ? selectedNodeIds : [node.id];
+    const ids = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
     const positions = nodesRef.current.reduce<Record<string, { x: number; y: number }>>((acc, item) => {
       if (ids.includes(item.id)) {
         acc[item.id] = { ...item.position };
       }
       return acc;
     }, {});
+
+    ids.forEach((id) => {
+      if (collapsedMaternalRoots.has(id)) {
+        collectFamilySide(id, 'maternal').forEach((hiddenId) => {
+          if (positions[hiddenId]) return;
+          const stored = getStoredPosition(hiddenId);
+          if (stored) positions[hiddenId] = { ...stored };
+        });
+      }
+      if (collapsedPaternalRoots.has(id)) {
+        collectFamilySide(id, 'paternal').forEach((hiddenId) => {
+          if (positions[hiddenId]) return;
+          const stored = getStoredPosition(hiddenId);
+          if (stored) positions[hiddenId] = { ...stored };
+        });
+      }
+      if (collapsedChildRoots.has(id)) {
+        collectChildSide(id).forEach((hiddenId) => {
+          if (positions[hiddenId]) return;
+          const stored = getStoredPosition(hiddenId);
+          if (stored) positions[hiddenId] = { ...stored };
+        });
+      }
+      if (collapsedSiblingRoots.has(id)) {
+        collectSiblingSide(id).forEach((hiddenId) => {
+          if (positions[hiddenId]) return;
+          const stored = getStoredPosition(hiddenId);
+          if (stored) positions[hiddenId] = { ...stored };
+        });
+      }
+    });
+
     dragStartPositions.current = positions;
-  }, []);
+  }, [collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -1128,18 +1284,17 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           ? { x: lastMousePosition.x, y: lastMousePosition.y }
           : { x: fallbackPos.x + 40, y: fallbackPos.y + 40 };
         const newMetadata = {
-          ...copiedPerson.metadata,
           position
         };
 
         await createPerson(
           copiedPerson.name,
-          copiedPerson.english_name || undefined,
+          undefined,
           copiedPerson.gender,
-          copiedPerson.dob,
-          copiedPerson.dod,
-          copiedPerson.tob,
-          copiedPerson.tod,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
           newMetadata,
           undefined,
           undefined,
@@ -1238,7 +1393,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onPaneClick={onPaneClick}
           onPaneMouseMove={onPaneMouseMove}
           onEdgeClick={handleEdgeClick}
-          fitView
+          fitView={fitViewEnabled}
           minZoom={0.3}
           maxZoom={2}
         >
@@ -1281,6 +1436,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
               setDimNonRelativesId(prev => (prev === id ? null : id));
             }}
             onToggleCollapseMaternal={(id) => {
+              const shouldExpand = collapsedMaternalRoots.has(id);
               setCollapsedMaternalRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1290,8 +1446,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 }
                 return next;
               });
+              if (shouldExpand) {
+                selectExpandedNodes(collectFamilySide(id, 'maternal'));
+              }
             }}
             onToggleCollapsePaternal={(id) => {
+              const shouldExpand = collapsedPaternalRoots.has(id);
               setCollapsedPaternalRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1301,8 +1461,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 }
                 return next;
               });
+              if (shouldExpand) {
+                selectExpandedNodes(collectFamilySide(id, 'paternal'));
+              }
             }}
             onToggleCollapseChildren={(id) => {
+              const shouldExpand = collapsedChildRoots.has(id);
               setCollapsedChildRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1312,8 +1476,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 }
                 return next;
               });
+              if (shouldExpand) {
+                selectExpandedNodes(collectChildSide(id));
+              }
             }}
             onToggleCollapseSiblings={(id) => {
+              const shouldExpand = collapsedSiblingRoots.has(id);
               setCollapsedSiblingRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1323,6 +1491,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 }
                 return next;
               });
+              if (shouldExpand) {
+                selectExpandedNodes(collectSiblingSide(id));
+              }
             }}
             dimRelativesActive={dimFocusId === contextMenu.id}
             dimNonRelativesActive={dimNonRelativesId === contextMenu.id}
@@ -1392,9 +1563,16 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             await updatePerson(id, nextUpdates);
             setEditingPersonId(null);
             showToast('已儲存', 'success');
+            setPendingCenterId(id);
             if (shouldRefreshAfterAvatar) {
               try {
                 localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+                localStorage.setItem('clan.pendingCenterId', id);
+                const viewport = (reactFlowInstance as ReactFlowInstance & { toObject?: () => { viewport?: { x: number; y: number; zoom: number } } })
+                  .toObject?.().viewport;
+                if (viewport) {
+                  localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+                }
               } catch (error) {
                 console.warn('Failed to persist node positions:', error);
               }
