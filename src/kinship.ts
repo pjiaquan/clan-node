@@ -793,23 +793,99 @@ function pathToTitle(
      return '堂/表兄弟姊妹';
   }
 
+  // Cousin's child (堂/表兄弟姊妹的兒女)
+  if (pathStr === 'up-up-down-down-down' || pathStr === 'up-sibling-down-down') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncleIndex = pathStr === 'up-sibling-down-down' ? 2 : 3;
+    const auntUncle = getPerson(nodePath[auntUncleIndex]);
+    const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
+    const male = target.gender === 'M';
+    const female = target.gender === 'F';
+    if (isPaternalBrother) {
+      if (male) return '堂甥';
+      if (female) return '堂甥女';
+      return '堂甥/堂甥女';
+    }
+    if (male) return '表甥';
+    if (female) return '表甥女';
+    return '表甥/表甥女';
+  }
+
+  // Cousin's grandchild (堂/表甥的兒女)
+  if (pathStr === 'up-up-down-down-down-down' || pathStr === 'up-sibling-down-down-down') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncleIndex = pathStr === 'up-sibling-down-down-down' ? 2 : 3;
+    const auntUncle = getPerson(nodePath[auntUncleIndex]);
+    const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
+    const male = target.gender === 'M';
+    const female = target.gender === 'F';
+    if (isPaternalBrother) {
+      if (male) return '堂曾甥';
+      if (female) return '堂曾甥女';
+      return '堂曾甥/堂曾甥女';
+    }
+    if (male) return '表曾甥';
+    if (female) return '表曾甥女';
+    return '表曾甥/表曾甥女';
+  }
+
+  // Cousin's child's spouse (堂/表甥的配偶)
+  if (pathStr === 'up-up-down-down-down-spouse' || pathStr === 'up-sibling-down-down-spouse') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncleIndex = pathStr === 'up-sibling-down-down-spouse' ? 2 : 3;
+    const cousinChildIndex = pathStr === 'up-sibling-down-down-spouse' ? 4 : 5;
+    const auntUncle = getPerson(nodePath[auntUncleIndex]);
+    const cousinChild = getPerson(nodePath[cousinChildIndex]);
+    const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
+    if (cousinChild?.gender === 'M') {
+      return isPaternalBrother ? '堂甥媳' : '表甥媳';
+    }
+    if (cousinChild?.gender === 'F') {
+      return isPaternalBrother ? '堂甥女婿' : '表甥女婿';
+    }
+    return isPaternalBrother ? '堂甥媳/堂甥女婿' : '表甥媳/表甥女婿';
+  }
+
+  // Cousin's child's spouse's parent (堂/表甥媳、甥女婿的父母)
+  if (pathStr === 'up-up-down-down-down-spouse-up' || pathStr === 'up-sibling-down-down-spouse-up') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncleIndex = pathStr === 'up-sibling-down-down-spouse-up' ? 2 : 3;
+    const auntUncle = getPerson(nodePath[auntUncleIndex]);
+    const cousinChildIndex = pathStr === 'up-sibling-down-down-spouse-up' ? 4 : 5;
+    const cousinChild = getPerson(nodePath[cousinChildIndex]);
+    const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
+    if (cousinChild?.gender === 'M') {
+      return isPaternalBrother ? '堂甥媳的父母' : '表甥媳的父母';
+    }
+    if (cousinChild?.gender === 'F') {
+      return isPaternalBrother ? '堂甥女婿的父母' : '表甥女婿的父母';
+    }
+    return isPaternalBrother ? '堂甥媳/堂甥女婿的父母' : '表甥媳/表甥女婿的父母';
+  }
+
   // Cousin's spouse (表兄弟姊妹的配偶)
   if (pathStr === 'up-up-down-down-spouse' || pathStr === 'up-sibling-down-spouse') {
     const cousinIndex = pathStr === 'up-sibling-down-spouse' ? 3 : 4;
+    const auntUncleIndex = pathStr === 'up-sibling-down-spouse' ? 2 : 3;
+    const parent = getPerson(nodePath[1]);
+    const auntUncle = getPerson(nodePath[auntUncleIndex]);
     const cousin = getPerson(nodePath[cousinIndex]);
     const centerDob = centerPerson.dob ? new Date(centerPerson.dob).getTime() : 0;
     const cousinDob = cousin?.dob ? new Date(cousin.dob).getTime() : 0;
     const isOlder = centerDob && cousinDob ? cousinDob < centerDob : null;
+    const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
 
     if (cousin?.gender === 'M') {
-      if (isOlder === null) return '表兄弟媳';
-      return isOlder ? '表嫂' : '表弟媳';
+      if (isOlder === null) return isPaternalBrother ? '堂兄弟媳' : '表兄弟媳';
+      return isPaternalBrother ? (isOlder ? '堂嫂' : '堂弟媳') : (isOlder ? '表嫂' : '表弟媳');
     }
     if (cousin?.gender === 'F') {
-      if (isOlder === null) return '表姊妹夫';
-      return isOlder ? '表姊夫' : '表妹夫';
+      if (isOlder === null) return isPaternalBrother ? '堂姊妹夫' : '表姊妹夫';
+      return isPaternalBrother ? (isOlder ? '堂姊夫' : '堂妹夫') : (isOlder ? '表姊夫' : '表妹夫');
     }
-    return target.gender === 'M' ? '表姊夫/表妹夫/表妹婿' : '表嫂/表弟媳/表弟妹';
+    return target.gender === 'M'
+      ? (isPaternalBrother ? '堂姊夫/堂妹夫' : '表姊夫/表妹夫/表妹婿')
+      : (isPaternalBrother ? '堂嫂/堂弟媳' : '表嫂/表弟媳/表弟妹');
   }
 
   // Sibling's Spouse's Sibling (Sister-in-law/Brother-in-law's sibling)
