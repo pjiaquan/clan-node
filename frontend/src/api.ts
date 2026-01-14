@@ -1,6 +1,7 @@
-import type { GraphData, Person, Relationship } from './types';
+import type { AuthUser, GraphData, Person, Relationship } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+const API_BASE = import.meta.env.VITE_API_BASE
+  || `${window.location.protocol}//${window.location.hostname}:8787`;
 
 const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;
@@ -84,7 +85,7 @@ export const api = {
     from: string,
     to: string,
     metadata?: any,
-    type: 'parent_child' | 'spouse' | 'sibling' | 'in_law' = 'parent_child',
+    type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     skipAutoLink = false
   ): Promise<Relationship> => {
     const res = await fetchWithAuth(`${API_BASE}/api/relationships`, {
@@ -128,7 +129,7 @@ export const api = {
     });
   },
 
-  authMe: async (): Promise<{ user: { id: string; username: string } }> => {
+  authMe: async (): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/me`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -136,7 +137,7 @@ export const api = {
     return res.json();
   },
 
-  login: async (username: string, password: string): Promise<{ user: { id: string; username: string } }> => {
+  login: async (username: string, password: string): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -150,5 +151,18 @@ export const api = {
 
   logout: async (): Promise<void> => {
     await fetchWithAuth(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+  },
+
+  createUser: async (username: string, password: string, role: 'admin' | 'readonly'): Promise<AuthUser> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
   },
 };

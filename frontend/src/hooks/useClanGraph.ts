@@ -105,6 +105,11 @@ export function useClanGraph(options?: { enabled?: boolean }) {
 
   const updatePerson = useCallback(async (id: string, updates: any) => {
     try {
+      try {
+        localStorage.setItem('clan.lastEditedId', id);
+      } catch (error) {
+        console.warn('Failed to persist last edited id:', error);
+      }
       await api.updatePerson(id, updates);
       fetchGraph();
     } catch (error) {
@@ -133,7 +138,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     to: string, 
     sourceHandle?: string | null, 
     targetHandle?: string | null,
-    type: 'parent_child' | 'spouse' | 'sibling' | 'in_law' = 'parent_child',
+    type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     metadataOverride?: any
   ) => {
     try {

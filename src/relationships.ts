@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import type { Env } from './types';
+import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 
 async function getSiblingLinkMeta(db: D1Database, aId: string, bId: string) {
@@ -141,7 +141,7 @@ async function linkSpouseToChild(db: D1Database, parentId: string, childId: stri
   return spouseId as string;
 }
 
-export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
+export function registerRelationshipRoutes(app: Hono<AppBindings>) {
   // Get all relationships
   app.get('/api/relationships', async (c) => {
     const { results } = await c.env.DB.prepare(
@@ -166,8 +166,8 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
       return c.json({ error: 'from_person_id, to_person_id, and type are required' }, 400);
     }
 
-    if (!['parent_child', 'spouse', 'sibling', 'in_law'].includes(type)) {
-      return c.json({ error: 'type must be parent_child, spouse, sibling, or in_law' }, 400);
+    if (!['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law'].includes(type)) {
+      return c.json({ error: 'type must be parent_child, spouse, ex_spouse, sibling, or in_law' }, 400);
     }
 
     if (from_person_id === to_person_id) {
@@ -203,10 +203,10 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
       }
     }
 
-    if (type === 'spouse') {
+    if (type === 'spouse' || type === 'ex_spouse') {
       const existing = await c.env.DB.prepare(
-        "SELECT id FROM relationships WHERE type = 'spouse' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-      ).bind(from_person_id, to_person_id, to_person_id, from_person_id).first();
+        "SELECT id FROM relationships WHERE type = ? AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
+      ).bind(type, from_person_id, to_person_id, to_person_id, from_person_id).first();
       if (existing) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
@@ -295,8 +295,8 @@ export function registerRelationshipRoutes(app: Hono<{ Bindings: Env }>) {
     }
 
     if (type !== undefined) {
-      if (!['parent_child', 'spouse', 'sibling', 'in_law'].includes(type)) {
-        return c.json({ error: 'type must be parent_child, spouse, sibling, or in_law' }, 400);
+      if (!['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law'].includes(type)) {
+        return c.json({ error: 'type must be parent_child, spouse, ex_spouse, sibling, or in_law' }, 400);
       }
     }
 

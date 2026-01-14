@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import type { AuthUser } from './types';
 import { LoginPage } from './components/LoginPage';
 import { ClanGraph } from './ClanGraph';
 import './App.css';
@@ -8,7 +9,7 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authUser, setAuthUser] = useState<{ id: string; username: string } | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   useEffect(() => {
     let cancelled = false;
     const checkAuth = async () => {
@@ -66,7 +67,14 @@ function App() {
     return <LoginPage error={authError} onLogin={handleLogin} />;
   }
 
-  return <ClanGraph username={authUser?.username || null} onLogout={handleLogout} />;
+  return (
+    <ClanGraph
+      username={authUser?.username || null}
+      readOnly={authUser?.role === 'readonly'}
+      isAdmin={authUser?.role === 'admin'}
+      onLogout={handleLogout}
+    />
+  );
 }
 
 export default App;

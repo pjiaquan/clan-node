@@ -7,6 +7,7 @@ interface ContextMenuProps {
   bottom?: number;
   left: number;
   openUp?: boolean;
+  readOnly?: boolean;
   onSetCenter: (id: string) => void;
   onStartLink: (id: string) => void;
   onEdit: (id: string) => void;
@@ -40,6 +41,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   left,
   id, 
   title,
+  readOnly,
   onSetCenter, 
   onStartLink, 
   onEdit,
@@ -70,6 +72,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [dimOpen, setDimOpen] = useState(false);
+  const canEdit = !readOnly;
 
   return (
     <div 
@@ -92,17 +95,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         transform: undefined
       }}
     >
-      <button 
-        onClick={() => {
-          onEdit(id);
-          onClose();
-        }}
-        style={menuItemStyle}
-        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        編輯成員...
-      </button>
+      {canEdit && (
+        <button 
+          onClick={() => {
+            onEdit(id);
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          編輯成員...
+        </button>
+      )}
       <button 
         onClick={() => {
           onSetCenter(id);
@@ -114,7 +119,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         設為中心
       </button>
-      {selectedCount > 1 && (
+      {canEdit && selectedCount > 1 && (
         <button
           onClick={() => {
             onAlignHorizontal();
@@ -127,7 +132,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           水平對齊（平均間距）
         </button>
       )}
-      {selectedCount > 1 && (
+      {canEdit && selectedCount > 1 && (
         <button
           onClick={() => {
             onAlignVertical();
@@ -140,17 +145,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           垂直對齊（平均間距）
         </button>
       )}
-      <button 
-        onClick={() => {
-          onStartLink(id);
-          onClose();
-        }}
-        style={menuItemStyle}
-        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        建立關係...
-      </button>
+      {canEdit && (
+        <button 
+          onClick={() => {
+            onStartLink(id);
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          建立關係...
+        </button>
+      )}
       <button
         onClick={() => setCopyOpen((prev) => !prev)}
         style={menuItemStyle}
@@ -176,17 +183,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           >
             複製稱呼
           </button>
-          <button
-            onClick={() => {
-              onDuplicateBottomRight(id);
-              onClose();
-            }}
-            style={submenuItemStyle}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-          >
-            複製到右下
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => {
+                onDuplicateBottomRight(id);
+                onClose();
+              }}
+              style={submenuItemStyle}
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              複製到右下
+            </button>
+          )}
         </>
       )}
       <button
@@ -279,60 +288,64 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           </button>
         </>
       )}
-      <button
-        onClick={() => setDeleteOpen((prev) => !prev)}
-        style={{ ...menuItemStyle, color: '#b91c1c' }}
-        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        刪除 {deleteOpen ? '▾' : '▸'}
-      </button>
-      {deleteOpen && (
+      {canEdit && (
         <>
-          <button 
-            onClick={() => {
-              onDelete(id);
-              onClose();
-            }}
-            style={{ ...submenuItemStyle, color: '#b91c1c' }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-          >
-            刪除成員
-          </button>
           <button
-            onClick={() => {
-              onDeleteRelations(id);
-              onClose();
-            }}
-            style={{ ...submenuItemStyle, color: '#b91c1c' }}
+            onClick={() => setDeleteOpen((prev) => !prev)}
+            style={{ ...menuItemStyle, color: '#b91c1c' }}
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            刪除所有關係
+            刪除 {deleteOpen ? '▾' : '▸'}
           </button>
-          <button
-            onClick={() => {
-              onDeleteSiblingRelations(id);
-              onClose();
-            }}
-            style={{ ...submenuItemStyle, color: '#b91c1c' }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-          >
-            刪除所有手足關係
-          </button>
-          <button
-            onClick={() => {
-              onDeleteChildRelations(id);
-              onClose();
-            }}
-            style={{ ...submenuItemStyle, color: '#b91c1c' }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-          >
-            刪除所有子女關係
-          </button>
+          {deleteOpen && (
+            <>
+              <button 
+                onClick={() => {
+                  onDelete(id);
+                  onClose();
+                }}
+                style={{ ...submenuItemStyle, color: '#b91c1c' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                刪除成員
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteRelations(id);
+                  onClose();
+                }}
+                style={{ ...submenuItemStyle, color: '#b91c1c' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                刪除所有關係
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteSiblingRelations(id);
+                  onClose();
+                }}
+                style={{ ...submenuItemStyle, color: '#b91c1c' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                刪除所有手足關係
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteChildRelations(id);
+                  onClose();
+                }}
+                style={{ ...submenuItemStyle, color: '#b91c1c' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                刪除所有子女關係
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

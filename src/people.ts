@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import type { Env } from './types';
+import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 
 async function updateSiblingOrdering(db: D1Database, personId: string) {
@@ -33,7 +33,7 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
   }
 }
 
-export function registerPeopleRoutes(app: Hono<{ Bindings: Env }>) {
+export function registerPeopleRoutes(app: Hono<AppBindings>) {
   const loadCustomFields = async (db: Env['DB']) => {
     const { results } = await db.prepare(
       'SELECT person_id, label, value FROM person_custom_fields'

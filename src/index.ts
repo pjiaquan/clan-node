@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import type { Env } from './types';
-import { registerAuthRoutes, requireAuth } from './auth';
+import type { AppBindings } from './types';
+import { registerAuthRoutes, requireAuth, requireWriteAccess } from './auth';
 import { registerPeopleRoutes } from './people';
 import { registerRelationshipRoutes } from './relationships';
 import { registerGraphRoutes } from './graph';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppBindings>();
 
 // Enable CORS for frontend
 app.use('*', cors({
@@ -29,6 +29,7 @@ app.get('/', (c) => {
 });
 
 app.use('/api/*', requireAuth);
+app.use('/api/*', requireWriteAccess);
 registerAuthRoutes(app);
 registerPeopleRoutes(app);
 registerRelationshipRoutes(app);

@@ -18,7 +18,7 @@ bucket_name = "clan-avatars"
 
 [vars]
 ENVIRONMENT = "development"
-FRONTEND_ORIGIN = "http://localhost:5173"
+FRONTEND_ORIGIN = "http://localhost:5173,http://192.168.0.196:5173"
 
 [env.production.vars]
 ENVIRONMENT = "production"

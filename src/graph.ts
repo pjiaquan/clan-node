@@ -1,9 +1,9 @@
 import type { Hono } from 'hono';
-import type { Env } from './types';
+import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { calculateKinship } from './kinship';
 
-export function registerGraphRoutes(app: Hono<{ Bindings: Env }>) {
+export function registerGraphRoutes(app: Hono<AppBindings>) {
   // Get graph data centered on a person with kinship titles
   app.get('/api/graph', async (c) => {
     try {
@@ -68,10 +68,10 @@ export function registerGraphRoutes(app: Hono<{ Bindings: Env }>) {
       const graphNodes = people.map((person: any) => {
         try {
           if (person.id === centerId) {
-            return { ...person, title: '我' };
+        return { ...person, title: '我', formal_title: '我' };
           }
-          const { title } = calculateKinship(centerId, person.id, relationships, people, center as any);
-          return { ...person, title };
+          const { title, formalTitle } = calculateKinship(centerId, person.id, relationships, people, center as any);
+          return { ...person, title, formal_title: formalTitle };
         } catch (err) {
           console.error(`Error calculating title for person ${person.id}:`, err);
           return { ...person, title: 'Error' };

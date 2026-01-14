@@ -7,7 +7,21 @@ export function calculateKinship(
   relationships: Relationship[],
   people: Person[],
   centerPerson: Person
-): { title: string } {
+): { title: string; formalTitle: string } {
+  const formatResult = (rawTitle: string) => {
+    const trimmed = rawTitle.trim();
+    const match = trimmed.match(/^(.*)（(.*)）$/);
+    if (match) {
+      const colloquial = match[1].trim();
+      const formal = match[2].trim();
+      return {
+        title: colloquial || trimmed,
+        formalTitle: formal || trimmed
+      };
+    }
+    return { title: trimmed, formalTitle: trimmed };
+  };
+
   const parentMap = new Map<string, string[]>();
   relationships.forEach(r => {
     if (r.type === 'parent_child') {
@@ -27,7 +41,7 @@ export function calculateKinship(
   while (queueAnc.length > 0) {
     const current = queueAnc.shift()!;
     if (current.id === targetId && current.path.length > 0) {
-      return { title: pathToTitle(current.path, current.nodePath, centerPerson, people, targetId, relationships) };
+      return formatResult(pathToTitle(current.path, current.nodePath, centerPerson, people, targetId, relationships));
     }
     const parents = parentMap.get(current.id) || [];
     for (const parentId of parents) {
@@ -43,7 +57,7 @@ export function calculateKinship(
   }
 
   // Build adjacency list for graph traversal
-  const adj = new Map<string, Array<{ id: string; type: string; direction: 'up' | 'down' | 'spouse' | 'sibling' | 'inlaw' }>>();
+  const adj = new Map<string, Array<{ id: string; type: string; direction: 'up' | 'down' | 'spouse' | 'ex_spouse' | 'sibling' | 'inlaw' }>>();
 
   for (const r of relationships) {
     if (!r.from_person_id || !r.to_person_id) continue; // Skip invalid relationships
@@ -61,6 +75,9 @@ export function calculateKinship(
       } else if (r.type === 'spouse') {
         fromNode.push({ id: r.to_person_id, type: 'spouse', direction: 'spouse' });
         toNode.push({ id: r.from_person_id, type: 'spouse', direction: 'spouse' });
+      } else if (r.type === 'ex_spouse') {
+        fromNode.push({ id: r.to_person_id, type: 'ex_spouse', direction: 'ex_spouse' });
+        toNode.push({ id: r.from_person_id, type: 'ex_spouse', direction: 'ex_spouse' });
       } else if (r.type === 'sibling') {
         fromNode.push({ id: r.to_person_id, type: 'sibling', direction: 'sibling' });
         toNode.push({ id: r.from_person_id, type: 'sibling', direction: 'sibling' });
@@ -125,12 +142,10 @@ export function calculateKinship(
   }
 
   if (bestPath) {
-    return {
-      title: pathToTitle(bestPath.path, bestPath.nodePath, centerPerson, people, targetId, relationships)
-    };
+    return formatResult(pathToTitle(bestPath.path, bestPath.nodePath, centerPerson, people, targetId, relationships));
   }
 
-  return { title: '未知' };
+  return formatResult('未知');
 }
 
 // Convert path (array of directions) to Chinese kinship title
@@ -243,6 +258,43 @@ function pathToTitle(
     return { relation: 'older', rank: index + 1 };
   };
 
+  const getInLawSpouseTitle = () => {
+    if (target.gender === 'M') return '姻親夫';
+    if (target.gender === 'F') return '姻親妻';
+    return '姻親';
+  };
+
+  const formatDualTitle = (colloquial: string, formal: string) => `${colloquial}（${formal}）`;
+
+  const getCousinInLawTitle = (reference: Person | undefined, cousin: Person | undefined) => {
+    if (!reference || !cousin) return '姻親表親配偶';
+    const refDob = reference.dob ? new Date(reference.dob).getTime() : 0;
+    const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
+    const isOlder = refDob && cousinDob ? cousinDob < refDob : null;
+
+    if (cousin.gender === 'F') {
+      if (isOlder === null) return formatDualTitle('表姐夫/表妹婿', '姻親表姐夫/姻親表妹婿');
+      return isOlder ? formatDualTitle('表姐夫', '姻親表姐夫') : formatDualTitle('表妹婿', '姻親表妹婿');
+    }
+    if (cousin.gender === 'M') {
+      if (isOlder === null) return formatDualTitle('表嫂/表弟媳', '姻親表嫂/姻親表弟媳');
+      return isOlder ? formatDualTitle('表嫂', '姻親表嫂') : formatDualTitle('表弟媳', '姻親表弟媳');
+    }
+    return '姻親表親配偶';
+  };
+
+  const getInLawElderTitle = () => {
+    if (target.gender === 'M') return formatDualTitle('伯父', '姻伯父');
+    if (target.gender === 'F') return formatDualTitle('伯母', '姻伯母');
+    return formatDualTitle('伯父/伯母', '姻伯父/姻伯母');
+  };
+
+  const getUncleAuntieTitle = () => {
+    if (target.gender === 'M') return formatDualTitle('Uncle', '姻伯父');
+    if (target.gender === 'F') return formatDualTitle('Auntie', '姻伯母');
+    return formatDualTitle('Uncle/Auntie', '姻伯父/姻伯母');
+  };
+
   const getParentSiblingSpouseTitle = (parent: Person, auntUncle: Person) => {
     if (parent.gender === 'M') {
       if (auntUncle.gender === 'M') {
@@ -295,8 +347,19 @@ function pathToTitle(
 
   // Direct relationships
   if (pathStr === 'up' || pathStr === 'sibling-up') return target.gender === 'M' ? '父親' : '母親';
+  if (pathStr === 'up-spouse') {
+    if (target.gender === 'M') return '父親';
+    if (target.gender === 'F') return '母親';
+    return '父/母';
+  }
+  if (pathStr === 'up-ex_spouse') {
+    if (target.gender === 'M') return '繼父';
+    if (target.gender === 'F') return '繼母';
+    return '繼父/繼母';
+  }
   if (pathStr === 'down') return target.gender === 'M' ? '兒子' : '女兒';
   if (pathStr === 'spouse') return centerPerson.gender === 'M' ? '妻子' : '丈夫';
+  if (pathStr === 'ex_spouse') return centerPerson.gender === 'M' ? '前妻' : '前夫';
   if (pathStr === 'inlaw') {
     if (isSpouseOfChild(centerPerson.id, targetId)) {
       return target.gender === 'M' ? '女婿' : '媳婦';
@@ -364,6 +427,27 @@ function pathToTitle(
     return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
   }
 
+  // Great-grandparents' spouse and beyond (all ups, then spouse)
+  if (path.length >= 4 && path.slice(0, -1).every(p => p === 'up') && path[path.length - 1] === 'spouse') {
+    const ancestorDepth = path.length - 1;
+    const parent = getPerson(nodePath[1]);
+    const isMaternal = parent?.gender === 'F';
+    const baseNames = [
+      '',
+      '',
+      '',
+      '曾祖',
+      '高祖',
+      '曾高祖',
+      '玄祖',
+      '曾玄祖',
+      '來祖'
+    ];
+    const base = baseNames[ancestorDepth] || `第${ancestorDepth - 1}代祖`;
+    const prefix = isMaternal ? '外' : '';
+    return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
+  }
+
   // Uncles/Aunts (Parent's Sibling)
   // Path can be: up-sibling (explicit) OR up-up-down (via grandparent)
   if (pathStr === 'up-sibling' || pathStr === 'up-up-down') {
@@ -403,6 +487,14 @@ function pathToTitle(
     }
   }
 
+  // Grandparent's spouse (父/母 的 父/母 的 夫妻)
+  if (pathStr === 'up-up-spouse') {
+    const parent = getPerson(nodePath[1]);
+    const isMaternal = parent?.gender === 'F';
+    const prefix = isMaternal ? '外' : '';
+    return `${prefix}${target.gender === 'M' ? '祖父' : '祖母'}`;
+  }
+
   // Uncle/Aunt's spouse (伯母/嬸嬸/姑丈/舅媽/姨丈)
   if (pathStr === 'up-sibling-spouse' || pathStr === 'up-up-down-spouse') {
     const parent = getPerson(nodePath[1]);
@@ -411,6 +503,17 @@ function pathToTitle(
       const title = getParentSiblingSpouseTitle(parent, auntUncle);
       if (title) return title;
     }
+  }
+
+  // Uncle/Aunt's ex-spouse (前伯母/前嬸嬸/前姑丈/前舅媽/前姨丈)
+  if (pathStr === 'up-sibling-ex_spouse' || pathStr === 'up-up-down-ex_spouse') {
+    const parent = getPerson(nodePath[1]);
+    const auntUncle = getPerson(nodePath[2]);
+    if (parent && auntUncle) {
+      const title = getParentSiblingSpouseTitle(parent, auntUncle);
+      if (title) return `前${title}`;
+    }
+    return '前姻親';
   }
 
   // Parent's sibling's in-law (父/母 的 手足 的 姻親)
@@ -510,6 +613,132 @@ function pathToTitle(
     }
   }
 
+  // Grandparent's sibling's child (父/母 的 父/母 的 手足 的 子/女)
+  if (pathStr === 'up-up-sibling-down' || pathStr === 'up-up-up-down-down') {
+    const parent = getPerson(nodePath[1]);
+    const grandparent = getPerson(nodePath[2]);
+    const gpSiblingIndex = pathStr === 'up-up-sibling-down' ? 3 : 4;
+    const grandparentSibling = getPerson(nodePath[gpSiblingIndex]);
+
+    if (parent?.gender === 'M' && grandparent?.gender === 'M' && grandparentSibling?.gender === 'M') {
+      const rank = getGrandparentSiblingRank(grandparent, grandparentSibling);
+      if (rank?.relation === 'older') {
+        if (target.gender === 'M') return '從伯叔';
+        if (target.gender === 'F') return '從姑';
+        return '從伯叔/從姑';
+      }
+    }
+
+    if (parent && grandparent && grandparentSibling) {
+      const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
+      const prefix = isSameSurnameLine ? '堂' : '表';
+      if (target.gender === 'M') {
+        const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
+        const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+        if (parentDob && targetDob) {
+          return targetDob < parentDob ? `${prefix}伯` : `${prefix}叔`;
+        }
+        return `${prefix}伯/叔`;
+      }
+      if (target.gender === 'F') {
+        return `${prefix}姑`;
+      }
+      return `${prefix}親`;
+    }
+  }
+
+  // Grandparent's sibling's child's spouse (父/母 的 父/母 的 手足 的 子/女 的 夫妻)
+  if (pathStr === 'up-up-sibling-down-spouse' || pathStr === 'up-up-up-down-down-spouse') {
+    const parent = getPerson(nodePath[1]);
+    const grandparent = getPerson(nodePath[2]);
+    const gpSiblingIndex = pathStr === 'up-up-sibling-down-spouse' ? 3 : 4;
+    const cousinIndex = pathStr === 'up-up-sibling-down-spouse' ? 4 : 5;
+    const grandparentSibling = getPerson(nodePath[gpSiblingIndex]);
+    const cousin = getPerson(nodePath[cousinIndex]);
+
+    if (parent && grandparent && grandparentSibling && cousin) {
+      const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
+      const prefix = isSameSurnameLine ? '堂' : '表';
+      if (cousin.gender === 'M') {
+        const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
+        const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
+        if (parentDob && cousinDob) {
+          return cousinDob < parentDob ? `${prefix}伯母` : `${prefix}嬸`;
+        }
+        return `${prefix}伯母/嬸`;
+      }
+      if (cousin.gender === 'F') {
+        return `${prefix}姑丈`;
+      }
+      return `${prefix}姻親`;
+    }
+  }
+
+  // Grandparent's sibling's child's child (父/母 的 父/母 的 手足 的 子/女 的 子/女)
+  if (pathStr === 'up-up-sibling-down-down' || pathStr === 'up-up-up-down-down-down') {
+    const parent = getPerson(nodePath[1]);
+    const grandparent = getPerson(nodePath[2]);
+    const gpSiblingIndex = pathStr === 'up-up-sibling-down-down' ? 3 : 4;
+    const grandparentSibling = getPerson(nodePath[gpSiblingIndex]);
+
+    if (parent && grandparent && grandparentSibling) {
+      const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
+      const prefix = isSameSurnameLine ? '再堂' : '再表';
+      const centerDob = centerPerson.dob ? new Date(centerPerson.dob).getTime() : 0;
+      const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+      const isOlder = centerDob && targetDob ? targetDob < centerDob : null;
+      const genderLabel = target.gender === 'M'
+        ? (isOlder === false ? '弟' : '兄')
+        : (isOlder === false ? '妹' : '姊');
+      if (target.gender === 'M' || target.gender === 'F') {
+        return isOlder === null ? `${prefix}兄弟姊妹` : `${prefix}${genderLabel}`;
+      }
+      return `${prefix}親`;
+    }
+  }
+
+  // Grandparent's sibling's child's child's spouse (父/母 的 父/母 的 手足 的 子/女 的 子/女 的 夫妻)
+  if (pathStr === 'up-up-sibling-down-down-spouse' || pathStr === 'up-up-up-down-down-down-spouse') {
+    const parent = getPerson(nodePath[1]);
+    const grandparent = getPerson(nodePath[2]);
+    const gpSiblingIndex = pathStr === 'up-up-sibling-down-down-spouse' ? 3 : 4;
+    const cousinChildIndex = pathStr === 'up-up-sibling-down-down-spouse' ? 5 : 6;
+    const grandparentSibling = getPerson(nodePath[gpSiblingIndex]);
+    const cousinChild = getPerson(nodePath[cousinChildIndex]);
+
+    if (parent && grandparent && grandparentSibling && cousinChild) {
+      const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
+      const prefix = isSameSurnameLine ? '再堂' : '再表';
+      if (cousinChild.gender === 'M') {
+        return `${prefix}姻親`;
+      }
+      if (cousinChild.gender === 'F') {
+        return `${prefix}姻親`;
+      }
+      return `${prefix}姻親`;
+    }
+  }
+
+  // Grandparent's sibling's child's child's child (父/母 的 父/母 的 手足 的 子/女 的 子/女 的 子/女)
+  if (pathStr === 'up-up-sibling-down-down-down' || pathStr === 'up-up-up-down-down-down-down') {
+    const parent = getPerson(nodePath[1]);
+    const grandparent = getPerson(nodePath[2]);
+    const gpSiblingIndex = pathStr === 'up-up-sibling-down-down-down' ? 3 : 4;
+    const grandparentSibling = getPerson(nodePath[gpSiblingIndex]);
+
+    if (parent && grandparent && grandparentSibling) {
+      const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
+      const prefix = isSameSurnameLine ? '再堂' : '再表';
+      if (target.gender === 'M') {
+        return `${prefix}甥`;
+      }
+      if (target.gender === 'F') {
+        return `${prefix}甥女`;
+      }
+      return `${prefix}甥/甥女`;
+    }
+  }
+
   // Parent's in-law's sibling (父/母的姻親的手足)
   if (pathStr === 'up-inlaw-sibling' || pathStr === 'up-spouse-up-down' || pathStr === 'up-spouse-sibling') {
     const parent = getPerson(nodePath[1]);
@@ -523,6 +752,18 @@ function pathToTitle(
         return target.gender === 'M' ? '伯公/叔公' : '姑婆';
       }
     }
+  }
+
+  // Parent's in-law's sibling's child (父/母 的 姻親 的 手足 的 子/女)
+  if (pathStr === 'up-inlaw-sibling-down' || pathStr === 'up-spouse-up-down-down' || pathStr === 'up-spouse-sibling-down') {
+    if (target.gender === 'M') return '從伯叔';
+    if (target.gender === 'F') return '從姑';
+    return '從伯叔/從姑';
+  }
+
+  // In-law's sibling's child (姻親 的 手足 的 子/女)
+  if (pathStr === 'inlaw-sibling-down') {
+    return '姻親的子女';
   }
 
   // Nephews/Nieces and their descendants (Sibling's line)
@@ -607,6 +848,35 @@ function pathToTitle(
   // Child-in-law (down -> spouse)
   if (pathStr === 'down-spouse') {
     return target.gender === 'M' ? '女婿' : '媳婦';
+  }
+
+  // Child-in-law's parent (子/女 的 夫妻 的 父/母)
+  if (pathStr === 'down-spouse-up' || pathStr === 'down-inlaw-up') {
+    return target.gender === 'M' ? '親家公' : '親家婆';
+  }
+
+  // Child-in-law's parent's spouse (子/女 的 夫妻 的 父/母 的 夫妻)
+  if (pathStr === 'down-spouse-up-spouse' || pathStr === 'down-inlaw-up-spouse') {
+    if (target.gender === 'M') return '親家公';
+    if (target.gender === 'F') return '親家婆';
+    return '親家公/親家婆';
+  }
+
+  // Child-in-law's sibling (子/女 的 夫妻 的 手足)
+  if (pathStr === 'down-spouse-sibling' || pathStr === 'down-inlaw-sibling') {
+    if (target.gender === 'M') return '姻親兄弟';
+    if (target.gender === 'F') return '姻親姊妹';
+    return '姻親兄弟/姻親姊妹';
+  }
+
+  // Child-in-law's sibling's spouse (子/女 的 夫妻 的 手足 的 夫妻)
+  if (pathStr === 'down-spouse-sibling-spouse' || pathStr === 'down-inlaw-sibling-spouse') {
+    return '姻親';
+  }
+
+  // Child-in-law's sibling's child (子/女 的 夫妻 的 手足 的 子/女)
+  if (pathStr === 'down-spouse-sibling-down' || pathStr === 'down-inlaw-sibling-down') {
+    return '姻親的子女';
   }
 
   // Sibling-in-law (up -> down -> spouse)
@@ -734,7 +1004,12 @@ function pathToTitle(
   // Spouse's sibling (spouse -> up -> down) OR spouse -> sibling
   if (pathStr === 'spouse-up-down' || pathStr === 'spouse-sibling') {
     if (target.gender === 'M') return '大伯/小叔/內兄/內弟';
-    return '大姑/小姑/姨姐/姨妹';
+    return '姑嫂';
+  }
+
+  // Spouse's parent's sibling's child (岳父/岳母 的 手足 的 子/女)
+  if (pathStr === 'spouse-up-sibling-down' || pathStr === 'spouse-up-up-down-down') {
+    return '姻親表親';
   }
 
   // Spouse's sibling's child
@@ -743,11 +1018,18 @@ function pathToTitle(
     return '姪女/外甥女(姻)';
   }
 
+  // Spouse's sibling's grandchild (夫妻 的 手足 的 子/女 的 子/女)
+  if (pathStr === 'spouse-sibling-down-down' || pathStr === 'spouse-up-down-down-down') {
+    if (target.gender === 'M') return '姻親孫';
+    if (target.gender === 'F') return '姻親孫女';
+    return '姻親孫/孫女';
+  }
+
   // Spouse's sibling's child's spouse
   if (pathStr === 'spouse-sibling-down-spouse' || pathStr === 'spouse-up-down-down-spouse') {
-    if (target.gender === 'M') return '姪女婿(姻)/外甥女婿(姻)';
-    if (target.gender === 'F') return '姪媳(姻)/外甥媳(姻)';
-    return '姪媳(姻)/姪女婿(姻)';
+    if (target.gender === 'M') return '姪女婿/外甥女婿';
+    if (target.gender === 'F') return '姪媳/外甥媳';
+    return '姪媳/姪女婿';
   }
 
   // Siblings (same parents, requires checking if share parents)
@@ -771,6 +1053,104 @@ function pathToTitle(
   if (pathStr === 'spouse-up') {
     if (target.gender === 'M') return '岳父/公公';
     return '岳母/婆婆';
+  }
+
+  // Parent-in-law's sibling (夫妻 的 父/母 的 手足)
+  if (pathStr === 'spouse-up-sibling' || pathStr === 'spouse-up-up-down') {
+    const spouse = getPerson(nodePath[1]);
+    const inLawParent = getPerson(nodePath[2]);
+    if (centerPerson.gender === 'M') {
+      if (target.gender === 'M' && inLawParent) {
+        const rank = getParentSiblingRank(inLawParent, target);
+        if (rank?.relation === 'older') return '岳伯';
+        return '岳叔';
+      }
+      if (target.gender === 'F') return '岳姑';
+      return '岳伯/岳叔';
+    }
+    if (centerPerson.gender === 'F') {
+      if (target.gender === 'M' && inLawParent) {
+        const rank = getParentSiblingRank(inLawParent, target);
+        if (rank?.relation === 'older') return '公伯';
+        if (rank) return '公叔';
+        return '公伯/公叔';
+      }
+      if (target.gender === 'F') return '婆姑';
+      return '公伯/公叔';
+    }
+    return target.gender === 'M' ? '姻親伯叔' : '姻親姑';
+  }
+
+  // Parent-in-law's sibling's spouse (夫妻 的 父/母 的 手足 的 夫妻)
+  if (pathStr === 'spouse-up-sibling-spouse' || pathStr === 'spouse-up-up-down-spouse') {
+    const inLawParent = getPerson(nodePath[2]);
+    const inLawSibling = getPerson(nodePath[3]);
+    const inLawSiblingRank = inLawParent && inLawSibling
+      ? getParentSiblingRank(inLawParent, inLawSibling)
+      : null;
+    const isOlder = inLawSiblingRank?.relation === 'older';
+    if (centerPerson.gender === 'M') {
+      if (target.gender === 'M') return '岳姑丈';
+      if (target.gender === 'F') return isOlder === undefined ? '岳伯母/岳嬸' : (isOlder ? '岳伯母' : '岳嬸');
+      return '岳伯母/岳嬸';
+    }
+    if (centerPerson.gender === 'F') {
+      if (target.gender === 'M') return '婆姑丈';
+      if (target.gender === 'F') return isOlder === undefined ? '公伯母/公嬸' : (isOlder ? '公伯母' : '公嬸');
+      return '公伯母/公嬸';
+    }
+    return '姻親';
+  }
+
+  // Parent-in-law's sibling's child's spouse (夫妻 的 父/母 的 手足 的 子/女 的 夫妻)
+  if (pathStr === 'spouse-up-sibling-down-spouse' || pathStr === 'spouse-up-up-down-down-spouse') {
+    const inLaw = getPerson(nodePath[1]);
+    const cousin = getPerson(nodePath[pathStr === 'spouse-up-sibling-down-spouse' ? 4 : 5]);
+    return getCousinInLawTitle(inLaw, cousin);
+  }
+
+  // Sibling-in-law's in-law cousin's spouse (手足 的 夫妻 的 父/母 的 手足 的 子/女 的 夫妻)
+  if (pathStr === 'sibling-spouse-up-sibling-down-spouse' || pathStr === 'up-down-spouse-up-sibling-down-spouse') {
+    const inLaw = getPerson(nodePath[pathStr === 'sibling-spouse-up-sibling-down-spouse' ? 2 : 3]);
+    const cousin = getPerson(nodePath[pathStr === 'sibling-spouse-up-sibling-down-spouse' ? 5 : 6]);
+    return getCousinInLawTitle(inLaw, cousin);
+  }
+
+  // Parent-in-law's sibling's grandchild (夫妻 的 父/母 的 手足 的 子/女 的 子/女)
+  if (pathStr === 'spouse-up-sibling-down-down' || pathStr === 'spouse-up-up-down-down-down') {
+    return '姻親表親';
+  }
+
+  // Parent-in-law's sibling's grandchild's spouse (夫妻 的 父/母 的 手足 的 子/女 的 子/女 的 夫妻)
+  if (pathStr === 'spouse-up-sibling-down-down-spouse' || pathStr === 'spouse-up-up-down-down-down-spouse') {
+    return '姻親表親的配偶';
+  }
+
+  // Parent-in-law's sibling's great-grandchild (夫妻 的 父/母 的 手足 的 子/女 的 子/女 的 子/女)
+  if (pathStr === 'spouse-up-sibling-down-down-down' || pathStr === 'spouse-up-up-down-down-down-down') {
+    return '姻親表親的子女';
+  }
+
+  // Parents-in-law's parents (岳祖父/岳祖母)
+  if (pathStr === 'spouse-up-up') {
+    if (centerPerson.gender === 'M') {
+      return target.gender === 'M' ? '岳祖父' : '岳祖母';
+    }
+    if (centerPerson.gender === 'F') {
+      return target.gender === 'M' ? '夫祖父' : '夫祖母';
+    }
+    return target.gender === 'M' ? '配偶祖父' : '配偶祖母';
+  }
+
+  // Parents-in-law's parents' spouse (夫妻 的 父/母 的 父/母 的 夫妻)
+  if (pathStr === 'spouse-up-up-spouse') {
+    if (centerPerson.gender === 'M') {
+      return target.gender === 'M' ? '岳祖父' : '岳祖母';
+    }
+    if (centerPerson.gender === 'F') {
+      return target.gender === 'M' ? '夫祖父' : '夫祖母';
+    }
+    return target.gender === 'M' ? '配偶祖父' : '配偶祖母';
   }
 
   // Cousins (parent's sibling's child: up-up-down-down or up-sibling-down)
@@ -922,6 +1302,49 @@ function pathToTitle(
     }
   }
 
+  // Sibling's spouse's sibling's spouse (手足 的 夫妻 的 手足 的 夫妻)
+  if (pathStr === 'up-down-spouse-sibling-spouse' || pathStr === 'sibling-spouse-sibling-spouse') {
+    return '姻親';
+  }
+
+  // Spouse's sibling's spouse (夫妻 的 手足 的 夫妻)
+  if (pathStr === 'spouse-sibling-spouse' || pathStr === 'spouse-up-down-spouse') {
+    return '姻親';
+  }
+
+  // Sibling's spouse's sibling's child (手足 的 夫妻 的 手足 的 子/女)
+  if (pathStr === 'up-down-spouse-sibling-down' || pathStr === 'sibling-spouse-sibling-down') {
+    return '姻親的子女';
+  }
+
+  // Sibling's spouse's parent (手足 的 夫妻 的 父/母)
+  if (pathStr === 'sibling-spouse-up' || pathStr === 'up-down-spouse-up') {
+    return getUncleAuntieTitle();
+  }
+
+  // Sibling's spouse's parent's spouse (手足 的 夫妻 的 父/母 的 夫妻)
+  if (pathStr === 'sibling-spouse-up-spouse' || pathStr === 'up-down-spouse-up-spouse') {
+    return '姻親父母';
+  }
+
+  // Sibling's spouse's parent's sibling's spouse (手足 的 夫妻 的 父/母 的 手足 的 夫妻)
+  if (pathStr === 'sibling-spouse-up-sibling-spouse' || pathStr === 'up-down-spouse-up-sibling-spouse') {
+    return getUncleAuntieTitle();
+  }
+
+  // Sibling's spouse's parent's sibling's child (手足 的 夫妻 的 父/母 的 手足 的 子/女)
+  if (pathStr === 'sibling-spouse-up-sibling-down' || pathStr === 'up-down-spouse-up-sibling-down') {
+    if (target.gender === 'M') return formatDualTitle('表兄弟', '姻親表兄弟');
+    if (target.gender === 'F') return formatDualTitle('表姊妹', '姻親表姊妹');
+    return formatDualTitle('表兄弟/表姊妹', '姻親表親');
+  }
+
+  // Two-level in-law elders ("親家的親家" 長輩)
+  const inlawSteps = path.filter(p => p === 'spouse' || p === 'inlaw' || p === 'ex_spouse').length;
+  if (path[path.length - 1] === 'up' && inlawSteps >= 2) {
+    return getInLawElderTitle();
+  }
+
   // Default: show path for debugging in Chinese
   const chinesePath = path.map(p => {
     switch (p) {
@@ -929,6 +1352,7 @@ function pathToTitle(
       case 'down': return '子/女';
       case 'spouse': return '夫妻';
       case 'sibling': return '手足';
+      case 'ex_spouse': return '前夫/前妻';
       case 'inlaw': return '姻親';
       default: return p;
     }

@@ -9,6 +9,7 @@ export interface Person {
   tod?: string;
   avatar_url?: string | null;
   title?: string;
+  formal_title?: string;
   metadata?: {
     position?: { x: number; y: number };
     customFields?: { label: string; value: string }[];
@@ -32,4 +33,12 @@ export interface GraphData {
   center: string;
   nodes: Person[];
   edges: Relationship[];
+}
+
+export type UserRole = 'admin' | 'readonly';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: UserRole;
 }

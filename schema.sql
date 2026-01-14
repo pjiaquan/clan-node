@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_person_id TEXT NOT NULL,
     to_person_id TEXT NOT NULL,
-    type TEXT CHECK(type IN ('parent_child', 'spouse', 'sibling', 'in_law')) NOT NULL,
+    type TEXT CHECK(type IN ('parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law')) NOT NULL,
     metadata TEXT, -- JSON for: adopted, divorced, etc.
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(from_person_id) REFERENCES people(id) ON DELETE CASCADE,
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

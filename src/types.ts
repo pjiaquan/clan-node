@@ -6,6 +6,21 @@ export type Env = {
   ENVIRONMENT?: string;
 };
 
+export type UserRole = 'admin' | 'readonly';
+
+export type SessionUser = {
+  userId: string;
+  username: string;
+  role: UserRole;
+};
+
+export type AppBindings = {
+  Bindings: Env;
+  Variables: {
+    sessionUser?: SessionUser;
+  };
+};
+
 export interface Relationship {
   id: number;
   from_person_id: string;
@@ -19,4 +34,6 @@ export interface Person {
   english_name?: string | null;
   gender: string;
   dob?: string;
+  title?: string;
+  formal_title?: string;
 }

@@ -316,26 +316,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setCustomFields((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  const calculateAge = () => {
-    if (!dob) return null;
-    const birth = new Date(dob);
-    const end = dod ? new Date(dod) : new Date();
-
-    let age = end.getFullYear() - birth.getFullYear();
-    const m = end.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && end.getDate() < birth.getDate())) {
-      age--;
-    }
-
-    return age;
-  };
-
-  const age = calculateAge();
-  const displayAge = age === null
-    ? null
-    : dod
-      ? age + 1 + (gender === 'F' ? 0 : 0)
-      : age;
   const birthYear = dob ? new Date(dob).getFullYear() : null;
   const deathYear = dod ? new Date(dod).getFullYear() : null;
   const zodiac = birthYear ? getZodiacAnimal(birthYear) : '';
@@ -344,6 +324,25 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const deathGanzhi = deathYear ? getGanzhiYear(deathYear) : '';
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
+  const calculateWesternAge = () => {
+    if (!dob) return null;
+    const birth = new Date(dob);
+    const end = dod ? new Date(dod) : new Date();
+    let age = end.getFullYear() - birth.getFullYear();
+    const m = end.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && end.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
+  };
+  const calculateTraditionalAge = () => {
+    if (!dob) return null;
+    const birth = new Date(dob);
+    const end = dod ? new Date(dod) : new Date();
+    return end.getFullYear() - birth.getFullYear() + 1;
+  };
+  const westernAge = calculateWesternAge();
+  const traditionalAge = calculateTraditionalAge();
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
@@ -552,9 +551,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
             </button>
           </div>
 
-          {displayAge !== null && (
+          {(westernAge !== null || traditionalAge !== null) && (
             <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>
-              {dod ? `享壽 ${displayAge} 歲` : `目前 ${displayAge} 歲`}
+              {westernAge !== null && (
+                <div>{dod ? `西元享壽 ${westernAge} 歲` : `西元目前 ${westernAge} 歲`}</div>
+              )}
+              {traditionalAge !== null && (
+                <div>{dod ? `中華享壽(虛歲) ${traditionalAge} 歲` : `中華目前(虛歲) ${traditionalAge} 歲`}</div>
+              )}
             </div>
           )}
 

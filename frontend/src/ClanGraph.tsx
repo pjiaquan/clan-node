@@ -19,6 +19,7 @@ import { ContextMenu } from './components/ContextMenu';
 import { AddPersonModal } from './components/AddPersonModal';
 import { Header } from './components/Header';
 import { EditPersonModal } from './components/EditPersonModal';
+import { CreateUserModal } from './components/CreateUserModal';
 import 'reactflow/dist/style.css';
 
 const nodeTypes = {
@@ -53,10 +54,14 @@ const isEditableTarget = (target: EventTarget | null) => {
 
 type ClanGraphProps = {
   username: string | null;
+  readOnly?: boolean;
+  isAdmin?: boolean;
   onLogout: () => void;
 };
 
-export function ClanGraph({ username, onLogout }: ClanGraphProps) {
+export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphProps) {
+  const isReadOnly = Boolean(readOnly);
+  const canManageUsers = Boolean(isAdmin);
   const {
     graphData,
     loading,
@@ -79,13 +84,17 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [contextMenu, setContextMenu] = useState<{ id: string; top?: number; bottom?: number; left: number; openUp: boolean } | null>(null);
   const [linkMode, setLinkMode] = useState<{ from: string } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [copiedPerson, setCopiedPerson] = useState<Person | null>(null);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [fitViewEnabled] = useState(false);
+  const [isLocked, setIsLocked] = useState(true);
+  const [lockLoaded, setLockLoaded] = useState(false);
   const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<{ id: string; zoom: number } | null>(null);
   const [dragGuideY, setDragGuideY] = useState<number | null>(null);
   const [dimFocusId, setDimFocusId] = useState<string | null>(null);
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
@@ -95,9 +104,16 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const [collapsedSiblingRoots, setCollapsedSiblingRoots] = useState<Set<string>>(new Set());
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
+  const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
+  const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const flowWrapperRef = useRef<HTMLDivElement | null>(null);
+  const baseLockStorageKey = 'clan.flowLocked';
+  const lockStorageKey = useMemo(() => (
+    username ? `${baseLockStorageKey}.${username}` : baseLockStorageKey
+  ), [username]);
   const getInitialNodePositions = () => {
     if (typeof window === 'undefined') return {};
     try {
@@ -113,14 +129,18 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   const setNodesRef = useRef<React.Dispatch<React.SetStateAction<Node[]>> | null>(null);
   const dragSnapRef = useRef<{ id: string; y: number } | null>(null);
   const dragSnapXRef = useRef<{ id: string; x: number } | null>(null);
+  const spouseSnapRef = useRef<{ id: string; spouseId: string; x: number; y: number } | null>(null);
   const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
   const expandSelectTimer = useRef<number | null>(null);
   const searchFlashTimer = useRef<number | null>(null);
+  const focusHoverTimer = useRef<number | null>(null);
+  const lastEditedFocusTimer = useRef<number | null>(null);
   const avatarBlobMap = useRef<Record<string, string>>({});
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
   const toastTimer = useRef<number | null>(null);
+  const expandRelayoutTimer = useRef<number | null>(null);
   const canUndo = undoStack.length > 0;
 
   useEffect(() => {
@@ -132,6 +152,43 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       setCopiedPerson(null);
     }
   }, [editingPersonId]);
+
+  const handleInteractiveChange = useCallback((isInteractive: boolean) => {
+    setIsLocked(!isInteractive);
+  }, []);
+
+  useEffect(() => {
+    setLockLoaded(false);
+    try {
+      let stored = localStorage.getItem(lockStorageKey);
+      if (stored === null && lockStorageKey !== baseLockStorageKey) {
+        stored = localStorage.getItem(baseLockStorageKey);
+        if (stored !== null) {
+          localStorage.setItem(lockStorageKey, stored);
+        }
+      }
+      if (stored === null) {
+        setIsLocked(true);
+        setLockLoaded(true);
+        return;
+      }
+      setIsLocked(stored === 'true');
+    } catch (error) {
+      console.warn('Failed to restore lock state:', error);
+      setIsLocked(true);
+    } finally {
+      setLockLoaded(true);
+    }
+  }, [lockStorageKey]);
+
+  useEffect(() => {
+    if (!lockLoaded) return;
+    try {
+      localStorage.setItem(lockStorageKey, String(isLocked));
+    } catch (error) {
+      console.warn('Failed to persist lock state:', error);
+    }
+  }, [lockStorageKey, isLocked, lockLoaded]);
 
 
   const getSpouseId = useCallback((personId: string, gender?: 'M' | 'F') => {
@@ -303,6 +360,87 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }, 1000);
   }, []);
 
+  const shiftExpandedNodes = useCallback((ids: Set<string>) => {
+    if (!ids.size || !setNodesRef.current) return;
+    const expandedIds = new Set(ids);
+    const baseNodes = nodesRef.current.filter((node) => !expandedIds.has(node.id));
+    const expandedNodes = nodesRef.current.filter((node) => expandedIds.has(node.id));
+    if (!expandedNodes.length || !baseNodes.length) return;
+
+    const getSize = (node: Node) => ({
+      width: node.width ?? 120,
+      height: node.height ?? 120
+    });
+
+    const overlaps = (offsetX: number, offsetY: number) => {
+      for (const exp of expandedNodes) {
+        const size = getSize(exp);
+        const ax = exp.position.x + offsetX;
+        const ay = exp.position.y + offsetY;
+        const aw = size.width;
+        const ah = size.height;
+        for (const base of baseNodes) {
+          const bSize = getSize(base);
+          const bx = base.position.x;
+          const by = base.position.y;
+          const bw = bSize.width;
+          const bh = bSize.height;
+          const intersects = ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+          if (intersects) return true;
+        }
+      }
+      return false;
+    };
+
+    let offsetX = 0;
+    let offsetY = 0;
+    if (overlaps(0, 0)) {
+      const stepX = 200;
+      const stepY = 140;
+      for (let i = 1; i <= 10; i += 1) {
+        const tryX = stepX * i;
+        const tryY = stepY * i;
+        if (!overlaps(tryX, tryY)) {
+          offsetX = tryX;
+          offsetY = tryY;
+          break;
+        }
+      }
+      if (!offsetX && !offsetY) {
+        offsetX = stepX;
+        offsetY = stepY;
+      }
+    }
+
+    if (!offsetX && !offsetY) return;
+
+    setNodesRef.current((prev) => prev.map((node) => {
+      if (!expandedIds.has(node.id)) return node;
+      const position = { x: node.position.x + offsetX, y: node.position.y + offsetY };
+      nodePositionMap.current[node.id] = position;
+      if (!isReadOnly) {
+        updatePersonPosition(node.id, position);
+      }
+      return { ...node, position };
+    }));
+
+    try {
+      localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+    } catch (error) {
+      console.warn('Failed to persist node positions:', error);
+    }
+  }, [isReadOnly, updatePersonPosition]);
+
+  const scheduleExpandedRelayout = useCallback((ids: Set<string>) => {
+    if (!ids.size) return;
+    if (expandRelayoutTimer.current) {
+      window.clearTimeout(expandRelayoutTimer.current);
+    }
+    expandRelayoutTimer.current = window.setTimeout(() => {
+      shiftExpandedNodes(ids);
+    }, 120);
+  }, [shiftExpandedNodes]);
+
   useEffect(() => {
     try {
       const storedFocus = localStorage.getItem('clan.dimFocusId');
@@ -370,6 +508,9 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   useEffect(() => () => {
     if (expandSelectTimer.current) {
       window.clearTimeout(expandSelectTimer.current);
+    }
+    if (lastEditedFocusTimer.current) {
+      window.clearInterval(lastEditedFocusTimer.current);
     }
   }, []);
 
@@ -439,6 +580,24 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       setToast(null);
     }, 1400);
   }, []);
+
+  const handleCreateUser = useCallback(async (username: string, password: string, role: 'admin' | 'readonly') => {
+    try {
+      await api.createUser(username, password, role);
+      showToast('帳號已建立', 'success');
+      setShowCreateUserModal(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '建立帳號失敗';
+      showToast(message, 'warning');
+      throw error;
+    }
+  }, [showToast]);
+
+  const ensureEditable = useCallback(() => {
+    if (!isReadOnly) return true;
+    showToast('只讀模式，無法編輯', 'warning');
+    return false;
+  }, [isReadOnly, showToast]);
 
   useEffect(() => {
     if (!graphData) return;
@@ -547,6 +706,17 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     []
   );
 
+  const openContextMenuAt = useCallback((id: string, x: number, y: number) => {
+    const openUp = y > window.innerHeight * 0.6;
+    setContextMenu({
+      id,
+      top: openUp ? undefined : y,
+      bottom: openUp ? window.innerHeight - y : undefined,
+      left: x,
+      openUp,
+    });
+  }, []);
+
   const onPaneClick = useCallback(() => {
     setContextMenu(null);
     setSelectedEdge(null);
@@ -567,7 +737,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     if (flowPoint) {
       setLastMousePosition(flowPoint);
     }
-  }, [reactFlowInstance]);
+  }, [reactFlowInstance, graphData, getSpouseId]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (connection.source && connection.target) {
@@ -613,6 +783,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     setDragGuideY(null);
     dragSnapRef.current = null;
     dragSnapXRef.current = null;
+    spouseSnapRef.current = null;
     const startPositions = dragStartPositions.current;
     if (startPositions) {
       const hiddenUpdates = new Map<string, { x: number; y: number }>();
@@ -679,10 +850,22 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     const threshold = 30;
     const releaseThreshold = 40;
     const guideThresholdY = 2000;
+    const spouseSnapThreshold = 40;
+    const spouseReleaseThreshold = 60;
+    const spouseGap = 0;
     let nearestYGuide: number | null = null;
     let nearestYGuideDistance = Number.POSITIVE_INFINITY;
     let nearestX: number | null = null;
     let nearestXDistance = Number.POSITIVE_INFINITY;
+    let spouseSnapTarget: {
+      x: number;
+      y: number;
+      spouseId: string;
+      nodeWidth: number;
+      nodeHeight: number;
+      spouseWidth: number;
+      spouseHeight: number;
+    } | null = null;
 
     nodesRef.current.forEach((other) => {
       if (other.id === node.id) return;
@@ -720,10 +903,70 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       dragSnapXRef.current = { id: node.id, x: nearestX };
     }
 
+    const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+    const isSingleDrag = selectedIds.length === 1 && selectedIds[0] === node.id;
+    const spouseId = graphData && isSingleDrag ? getSpouseId(node.id) : undefined;
+    const spouseNode = spouseId ? nodesRef.current.find((item) => item.id === spouseId) : undefined;
+    if (spouseId && spouseNode && isSingleDrag) {
+      const nodeWidth = node.width ?? 140;
+      const nodeHeight = node.height ?? 100;
+      const spouseWidth = spouseNode.width ?? 140;
+      const spouseHeight = spouseNode.height ?? 100;
+      const isLeftSide = node.position.x < spouseNode.position.x;
+      const targetX = isLeftSide
+        ? spouseNode.position.x - nodeWidth - spouseGap
+        : spouseNode.position.x + spouseWidth + spouseGap;
+      const targetY = spouseNode.position.y;
+      const distanceToTarget = Math.hypot(node.position.x - targetX, node.position.y - targetY);
+      const existingSpouseSnap = spouseSnapRef.current;
+      if (existingSpouseSnap && existingSpouseSnap.id === node.id) {
+        const distanceFromSnap = Math.hypot(node.position.x - existingSpouseSnap.x, node.position.y - existingSpouseSnap.y);
+        if (distanceFromSnap <= spouseReleaseThreshold) {
+          spouseSnapTarget = {
+            x: existingSpouseSnap.x,
+            y: existingSpouseSnap.y,
+            spouseId: existingSpouseSnap.spouseId,
+            nodeWidth,
+            nodeHeight,
+            spouseWidth,
+            spouseHeight
+          };
+        } else {
+          spouseSnapRef.current = null;
+        }
+      } else if (distanceToTarget <= spouseSnapThreshold) {
+        spouseSnapTarget = { x: targetX, y: targetY, spouseId, nodeWidth, nodeHeight, spouseWidth, spouseHeight };
+      }
+    }
+
     const snapTarget = dragSnapRef.current?.id === node.id ? dragSnapRef.current.y : null;
     const snapTargetX = dragSnapXRef.current?.id === node.id ? dragSnapXRef.current.x : null;
-    if ((snapTarget !== null || snapTargetX !== null) && setNodesRef.current) {
-      const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+    if (spouseSnapTarget && setNodesRef.current) {
+      spouseSnapRef.current = { id: node.id, spouseId: spouseSnapTarget.spouseId, x: spouseSnapTarget.x, y: spouseSnapTarget.y };
+      const deltaX = spouseSnapTarget.x - node.position.x;
+      const deltaY = spouseSnapTarget.y - node.position.y;
+      setNodesRef.current((prev) =>
+        prev.map((item) => {
+          if (item.id !== node.id) return item;
+          const nextX = item.position.x + deltaX;
+          const nextY = item.position.y + deltaY;
+          if (nextX === item.position.x && nextY === item.position.y) return item;
+          return {
+            ...item,
+            position: {
+              x: nextX,
+              y: nextY,
+            },
+          };
+        })
+      );
+    } else {
+      if (spouseSnapRef.current?.id === node.id) {
+        spouseSnapRef.current = null;
+      }
+    }
+
+    if (!spouseSnapTarget && (snapTarget !== null || snapTargetX !== null) && setNodesRef.current) {
       const deltaY = snapTarget !== null ? snapTarget - node.position.y : 0;
       setNodesRef.current((prev) =>
         prev.map((item) => {
@@ -753,9 +996,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [reactFlowInstance]);
 
   const handleEditPerson = useCallback((id: string) => {
+    if (!ensureEditable()) return;
     setCopiedPerson(null);
     setEditingPersonId(id);
-  }, []);
+  }, [ensureEditable]);
 
   const handleSearch = useCallback((query: string) => {
     if (!graphData) return;
@@ -786,7 +1030,79 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     }, 1400);
   }, [graphData]);
 
+  const getFocusPosition = useCallback((id: string) => {
+    if (!graphData) return null;
+    return nodesRef.current.find(node => node.id === id)?.position
+      || nodePositionMap.current[id]
+      || graphData.nodes.find(node => node.id === id)?.metadata?.position
+      || null;
+  }, [graphData]);
+
+  const getViewportForNode = useCallback((id: string, zoom = 1.0) => {
+    const focusPosition = getFocusPosition(id);
+    if (!focusPosition) return null;
+    const bounds = flowWrapperRef.current?.getBoundingClientRect();
+    const width = bounds?.width || window.innerWidth;
+    const height = bounds?.height || window.innerHeight;
+    return {
+      x: width / 2 - focusPosition.x * zoom,
+      y: height / 2 - focusPosition.y * zoom,
+      zoom,
+    };
+  }, [getFocusPosition]);
+
+  const focusNodeById = useCallback((id: string, zoom = 1.0) => {
+    if (!reactFlowInstance) return false;
+    const viewport = getViewportForNode(id, zoom);
+    const focusPosition = getFocusPosition(id);
+    if (!viewport || !focusPosition || !reactFlowInstance.setCenter) return false;
+    const instance = reactFlowInstance as ReactFlowInstance & {
+      setViewport?: (viewport: { x: number; y: number; zoom: number }) => void;
+      setCenter?: (x: number, y: number, opts?: { zoom?: number }) => void;
+    };
+    const applyFocus = () => {
+      if (instance.setViewport) {
+        instance.setViewport(viewport);
+      } else {
+        instance.setCenter?.(focusPosition.x, focusPosition.y, { zoom });
+      }
+    };
+    requestAnimationFrame(() => {
+      applyFocus();
+      window.setTimeout(applyFocus, 100);
+    });
+    return true;
+  }, [getViewportForNode, getFocusPosition, reactFlowInstance]);
+
+  const handleFocusMe = useCallback(() => {
+    if (!graphData) return;
+    const meId = graphData.center
+      || graphData.nodes.find((person) => person.title === '我')?.id
+      || centerId;
+    if (!meId) return;
+    setCenterId(meId);
+    setPendingFocus({ id: meId, zoom: 1.0 });
+    focusNodeById(meId, 1.0);
+    if (searchFlashTimer.current) {
+      window.clearTimeout(searchFlashTimer.current);
+    }
+    setSearchFlashId(null);
+    window.setTimeout(() => setSearchFlashId(meId), 0);
+    searchFlashTimer.current = window.setTimeout(() => {
+      setSearchFlashId(null);
+    }, 1400);
+    if (focusHoverTimer.current) {
+      window.clearTimeout(focusHoverTimer.current);
+    }
+    setFocusHoverId(meId);
+    focusHoverTimer.current = window.setTimeout(() => {
+      setFocusHoverId(null);
+    }, 500);
+    // Do not set pending center here to avoid overriding the zoom change.
+  }, [graphData, centerId, focusNodeById, setCenterId]);
+
   const handleDeletePerson = useCallback(async (id: string) => {
+    if (!ensureEditable()) return;
     if (!graphData) return;
     const person = graphData.nodes.find(p => p.id === id);
     if (!person) return;
@@ -811,9 +1127,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     } catch (error) {
       console.error('Failed to delete person:', error);
     }
-  }, [graphData, deletePerson, centerId, setCenterId]);
+  }, [ensureEditable, graphData, deletePerson, centerId, setCenterId]);
 
   const handleDeleteRelations = useCallback(async (id: string) => {
+    if (!ensureEditable()) return;
     if (!graphData) return;
     const relatedEdges = graphData.edges.filter(
       (edge) => edge.from_person_id === id || edge.to_person_id === id
@@ -828,9 +1145,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     } catch (error) {
       console.error('Failed to delete relations:', error);
     }
-  }, [graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationship]);
 
   const handleDeleteSiblingRelations = useCallback(async (id: string) => {
+    if (!ensureEditable()) return;
     if (!graphData) return;
     const relatedEdges = graphData.edges.filter(
       (edge) =>
@@ -847,9 +1165,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     } catch (error) {
       console.error('Failed to delete sibling relations:', error);
     }
-  }, [graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationship]);
 
   const handleDeleteChildRelations = useCallback(async (id: string) => {
+    if (!ensureEditable()) return;
     if (!graphData) return;
     const relatedEdges = graphData.edges.filter(
       (edge) => edge.type === 'parent_child' && edge.from_person_id === id
@@ -864,7 +1183,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     } catch (error) {
       console.error('Failed to delete child relations:', error);
     }
-  }, [graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationship]);
 
   const dimIds = useMemo(() => {
     if (!graphData || (!dimFocusId && !dimNonRelativesId)) return new Set<string>();
@@ -936,6 +1255,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     return visibleNodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
       const title = person.title || '';
+      const formalTitle = person.formal_title || '';
       const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
 
       const storedPosition = nodePositionMap.current[person.id];
@@ -956,12 +1276,19 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           name: person.name,
           initial: person.name.charAt(0),
           title: title,
+          formalTitle,
           genderColor: genderColor,
           avatarUrl,
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
           flashSearch: person.id === searchFlashId,
+          focusHover: person.id === focusHoverId,
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
+          onNodeLongPress: (clientX: number, clientY: number) => {
+            openContextMenuAt(person.id, clientX, clientY);
+          },
+          allowNodeLongPress: isLocked || isReadOnly,
+          interactionLocked: isLocked || isReadOnly,
           hasCollapsedSide: collapsedMaternalRoots.has(person.id)
             || collapsedPaternalRoots.has(person.id)
             || collapsedChildRoots.has(person.id)
@@ -974,7 +1301,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, handleAvatarClick, avatarBlobs]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isLocked, isReadOnly]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -990,6 +1317,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         if (selected) return { stroke: '#ef4444', strokeWidth: 4 };
         switch (type) {
           case 'spouse': return { stroke: '#ec4899', strokeWidth: 2 };
+          case 'ex_spouse': return { stroke: '#9ca3af', strokeWidth: 2, strokeDasharray: '6 4' };
           case 'sibling': return { stroke: '#10b981', strokeWidth: 2 };
           case 'in_law': return { stroke: '#f59e0b', strokeWidth: 2 };
           default: return { stroke: '#6366f1', strokeWidth: 2 };
@@ -999,6 +1327,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       const getLabel = (type: string) => {
         switch (type) {
           case 'spouse': return '夫妻';
+          case 'ex_spouse': return '前配偶';
           case 'sibling': return '手足';
           case 'in_law': return '姻親';
           default: return '親子';
@@ -1011,7 +1340,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         target: edge.to_person_id,
         sourceHandle: edge.metadata?.sourceHandle,
         targetHandle: edge.metadata?.targetHandle,
-        type: edge.type === 'spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
+        type: edge.type === 'spouse' || edge.type === 'ex_spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
         animated: edge.type === 'spouse',
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { ...getEdgeStyle(edge.type, isSelected), opacity: isSelected ? 1 : (isDimmed ? 0.35 : 1) },
@@ -1023,6 +1352,58 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const spouseHandleMap = useMemo(() => {
+    if (!graphData) return {};
+    const nodesById = new Map(nodes.map((item) => [item.id, item]));
+    const handleMap = new Map<string, Set<string>>();
+    const tolerance = 2;
+
+    graphData.edges
+      .filter((edge) => edge.type === 'spouse')
+      .forEach((edge) => {
+        const leftNode = nodesById.get(edge.from_person_id);
+        const rightNode = nodesById.get(edge.to_person_id);
+        if (!leftNode || !rightNode) return;
+        const leftWidth = leftNode.width ?? 140;
+        const rightWidth = rightNode.width ?? 140;
+        const leftRight = leftNode.position.x + leftWidth;
+        const rightRight = rightNode.position.x + rightWidth;
+        const yAligned = Math.abs(leftNode.position.y - rightNode.position.y) <= tolerance;
+        if (!yAligned) return;
+
+        let leftSide: 'left' | 'right' | null = null;
+        let rightSide: 'left' | 'right' | null = null;
+        if (Math.abs(leftRight - rightNode.position.x) <= tolerance) {
+          leftSide = 'right';
+          rightSide = 'left';
+        } else if (Math.abs(rightRight - leftNode.position.x) <= tolerance) {
+          leftSide = 'left';
+          rightSide = 'right';
+        }
+        if (!leftSide || !rightSide) return;
+
+        const leftHandles = handleMap.get(leftNode.id) ?? new Set<string>();
+        leftHandles.add(`${leftSide}-s`);
+        leftHandles.add(`${leftSide}-t`);
+        handleMap.set(leftNode.id, leftHandles);
+
+        const rightHandles = handleMap.get(rightNode.id) ?? new Set<string>();
+        rightHandles.add(`${rightSide}-s`);
+        rightHandles.add(`${rightSide}-t`);
+        handleMap.set(rightNode.id, rightHandles);
+      });
+
+    return Object.fromEntries(
+      Array.from(handleMap.entries()).map(([id, set]) => [id, Array.from(set.values())])
+    );
+  }, [graphData, nodes]);
+  const nodesWithHighlights = useMemo(
+    () => nodes.map((node) => ({
+      ...node,
+      data: { ...node.data, highlightHandles: spouseHandleMap[node.id] ?? [] },
+    })),
+    [nodes, spouseHandleMap]
+  );
 
   useEffect(() => {
     setNodesRef.current = setNodes;
@@ -1047,6 +1428,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       localStorage.removeItem('clan.pendingViewport');
     }
   }, [reactFlowInstance]);
+
 
   useEffect(() => {
     try {
@@ -1074,6 +1456,50 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [pendingCenterId, reactFlowInstance, nodes, graphData]);
 
   useEffect(() => {
+    if (!pendingFocus || !reactFlowInstance) return;
+    const viewport = getViewportForNode(pendingFocus.id, pendingFocus.zoom);
+    const focusPosition = getFocusPosition(pendingFocus.id);
+    if (!viewport || !focusPosition) return;
+    if (reactFlowInstance.setViewport) {
+      reactFlowInstance.setViewport(viewport);
+    } else if (reactFlowInstance.setCenter) {
+      reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: pendingFocus.zoom });
+    }
+    setPendingFocus(null);
+  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition]);
+
+  useEffect(() => {
+    try {
+      const editedId = localStorage.getItem('clan.lastEditedId');
+      if (editedId) setLastEditedId(editedId);
+    } catch (error) {
+      console.warn('Failed to restore last edited id:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!lastEditedId) return;
+    if (!graphData || !reactFlowInstance) return;
+    if (lastEditedFocusTimer.current) {
+      window.clearInterval(lastEditedFocusTimer.current);
+    }
+    let attempts = 0;
+    lastEditedFocusTimer.current = window.setInterval(() => {
+      attempts += 1;
+    const focused = focusNodeById(lastEditedId, 1.0);
+      if (focused || attempts >= 40) {
+        if (lastEditedFocusTimer.current) {
+          window.clearInterval(lastEditedFocusTimer.current);
+          lastEditedFocusTimer.current = null;
+        }
+        if (focused) {
+          setLastEditedId(null);
+        }
+      }
+    }, 150);
+  }, [lastEditedId, focusNodeById, graphData, reactFlowInstance]);
+
+  useEffect(() => {
     selectedNodeIdsRef.current = nodes.filter(node => node.selected).map(node => node.id);
   }, [nodes]);
 
@@ -1091,7 +1517,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [nodes]);
 
   const handleNodeClick = useCallback((event: React.MouseEvent, nodeId: string) => {
-    console.log('Node clicked:', nodeId);
+    console.log('Node: ', nodeId);
     const isMultiSelect = event.ctrlKey || event.metaKey;
     if (!isMultiSelect) {
       setNodes((prev) =>
@@ -1168,6 +1594,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   }, [selectedNode, collapsedNodeIds]);
 
   const handleUndo = useCallback(async () => {
+    if (!ensureEditable()) return;
     const entry = undoStack[0];
     if (!entry) return;
 
@@ -1198,7 +1625,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             rel.from_person_id,
             rel.to_person_id,
             rel.metadata ?? undefined,
-            rel.type as 'parent_child' | 'spouse' | 'sibling' | 'in_law',
+            rel.type as 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law',
             true
           );
         }
@@ -1211,9 +1638,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     } catch (error) {
       console.error('Failed to undo delete:', error);
     }
-  }, [undoStack, fetchGraph, setCenterId, setNodes, updatePersonPosition]);
+  }, [ensureEditable, undoStack, fetchGraph, setCenterId, setNodes, updatePersonPosition]);
 
   const handleDuplicateBottomRight = useCallback(async (id: string) => {
+    if (!ensureEditable()) return;
     if (!graphData) return;
     const person = graphData.nodes.find(node => node.id === id);
     if (!person) return;
@@ -1240,9 +1668,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       person.avatar_url ?? undefined,
       { skipFetch: true }
     );
-  }, [graphData, nodes, createPerson]);
+  }, [ensureEditable, graphData, nodes, createPerson]);
 
   const alignSelectedNodes = useCallback((direction: 'horizontal' | 'vertical') => {
+    if (!ensureEditable()) return;
     const ids = selectedNodeIds.length > 1 ? selectedNodeIds : [];
     if (ids.length < 2) return;
 
@@ -1278,10 +1707,16 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       return { ...node, position };
     }));
     setUndoStack(prev => [{ type: 'align', positions: previousPositions } as const, ...prev].slice(0, 10));
-  }, [nodes, selectedNodeIds, setNodes, updatePersonPosition]);
+  }, [ensureEditable, nodes, selectedNodeIds, setNodes, updatePersonPosition]);
 
   useEffect(() => {
-    setNodes(initialNodes);
+    setNodes((prev) => {
+      const selectedMap = new Map(prev.map((node) => [node.id, node.selected]));
+      return initialNodes.map((node) => ({
+        ...node,
+        selected: selectedMap.get(node.id) ?? node.selected,
+      }));
+    });
   }, [initialNodes, setNodes]);
 
   useEffect(() => {
@@ -1291,6 +1726,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditableTarget(e.target)) {
+        if (isReadOnly) {
+          showToast('只讀模式，無法編輯', 'warning');
+          return;
+        }
         if (selectedEdge) {
           deleteRelationship(selectedEdge);
           setSelectedEdge(null);
@@ -1309,6 +1748,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'v' && copiedPerson) {
+        if (isReadOnly) {
+          showToast('只讀模式，無法編輯', 'warning');
+          return;
+        }
         console.log('Pasting person:', copiedPerson.name);
 
         const fallbackPos = copiedPerson.metadata?.position || { x: 500, y: 300 };
@@ -1336,6 +1779,10 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !isEditableTarget(e.target)) {
         e.preventDefault();
+        if (isReadOnly) {
+          showToast('只讀模式，無法編輯', 'warning');
+          return;
+        }
         handleUndo();
       }
 
@@ -1348,7 +1795,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationship, createPerson, handleUndo, lastMousePosition]);
+  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationship, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast]);
 
   if (loading) {
     return (
@@ -1377,7 +1824,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
   return (
     <div className="app">
       <Header
-        onAddMember={() => setShowAddModal(true)}
+        readOnly={isReadOnly}
+        isAdmin={canManageUsers}
+        onCreateUser={() => setShowCreateUserModal(true)}
+        onAddMember={() => {
+          if (!ensureEditable()) return;
+          setShowAddModal(true);
+        }}
+        onFocusMe={handleFocusMe}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
         linkMode={linkMode}
@@ -1387,16 +1841,32 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         searchOptions={graphData?.nodes ?? []}
         username={username}
         onLogout={onLogout}
-        onStartLink={() => selectedNode && setLinkMode({ from: selectedNode })}
+        onStartLink={() => {
+          if (!ensureEditable()) return;
+          if (selectedNode) {
+            setLinkMode({ from: selectedNode });
+          }
+        }}
         onSetCenter={() => {
           if (selectedNode) {
             setCenterId(selectedNode);
             setSelectedNode(null);
           }
         }}
-        onUpdateRelationship={(type) => selectedEdge && updateRelationship(selectedEdge, { type })}
-        onReverseRelationship={() => selectedEdge && reverseRelationship(selectedEdge)}
+        onUpdateRelationship={(type) => {
+          if (!ensureEditable()) return;
+          if (selectedEdge) {
+            updateRelationship(selectedEdge, { type });
+          }
+        }}
+        onReverseRelationship={() => {
+          if (!ensureEditable()) return;
+          if (selectedEdge) {
+            reverseRelationship(selectedEdge);
+          }
+        }}
         onDeleteRelationship={() => {
+          if (!ensureEditable()) return;
           if (selectedEdge) {
             deleteRelationship(selectedEdge);
             setSelectedEdge(null);
@@ -1404,28 +1874,30 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         }}
       />
 
-      <div className="flow-container">
+      <div className="flow-container" ref={flowWrapperRef}>
         <ReactFlow
-          nodes={nodes}
+          nodes={nodesWithHighlights}
           edges={edges}
           nodeTypes={nodeTypes}
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeDragStart={onNodeDragStart}
-          onNodeDrag={onNodeDrag}
-          onNodeDragStop={onNodeDragStop}
+          onConnect={isLocked || isReadOnly ? undefined : onConnect}
+          onNodeDragStart={isLocked || isReadOnly ? undefined : onNodeDragStart}
+          onNodeDrag={isLocked || isReadOnly ? undefined : onNodeDrag}
+          onNodeDragStop={isLocked || isReadOnly ? undefined : onNodeDragStop}
+          noPanClassName="nopan"
+          noDragClassName="nodrag"
           connectionRadius={40}
-          onNodeClick={(event, node) => {
+          onNodeMouseMove={isLocked ? undefined : (event) => {
+            onPaneMouseMove(event);
+          }}
+          onNodeClick={isLocked ? undefined : (event, node) => {
             handleNodeClick(event, node.id);
             setContextMenu(null);
             setAvatarPreview(null);
           }}
-          onNodeMouseMove={(event) => {
-            onPaneMouseMove(event);
-          }}
-          onNodeDoubleClick={(_e, node) => {
+          onNodeDoubleClick={isLocked || isReadOnly ? undefined : (_e, node) => {
             setContextMenu(null);
             setAvatarPreview(null);
             handleEditPerson(node.id);
@@ -1433,13 +1905,21 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onNodeContextMenu={onNodeContextMenu}
           onPaneClick={onPaneClick}
           onPaneMouseMove={onPaneMouseMove}
-          onEdgeClick={handleEdgeClick}
+          onEdgeClick={isLocked ? undefined : handleEdgeClick}
           fitView={fitViewEnabled}
           minZoom={0.3}
           maxZoom={2}
+          nodesDraggable={!isLocked && !isReadOnly}
+          nodesConnectable={!isLocked && !isReadOnly}
+          elementsSelectable
+          panOnDrag
+          panOnScroll={false}
+          zoomOnScroll
+          zoomOnPinch
+          zoomOnDoubleClick
         >
           <Background />
-          <Controls />
+          <Controls showInteractive onInteractiveChange={handleInteractiveChange} />
           <MiniMap />
         </ReactFlow>
         {dragGuideY !== null && (
@@ -1449,16 +1929,36 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         {contextMenu && (
           <ContextMenu
             {...contextMenu}
+            readOnly={isReadOnly}
             title={graphData?.nodes.find(node => node.id === contextMenu.id)?.title ?? null}
             onSetCenter={setCenterId}
-            onStartLink={(id) => setLinkMode({ from: id })}
+            onStartLink={(id) => {
+              if (!ensureEditable()) return;
+              setLinkMode({ from: id });
+            }}
             onEdit={handleEditPerson}
             onDelete={handleDeletePerson}
             onDeleteRelations={handleDeleteRelations}
             onDeleteSiblingRelations={handleDeleteSiblingRelations}
             onDeleteChildRelations={handleDeleteChildRelations}
             onCopyTitle={(title) => {
-              navigator.clipboard.writeText(title).then(() => {
+              const copyViaClipboard = () => navigator.clipboard.writeText(title);
+              const copyViaFallback = () => {
+                const textarea = document.createElement('textarea');
+                textarea.value = title;
+                textarea.setAttribute('readonly', 'true');
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(textarea);
+                return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+              };
+              const copyPromise = navigator.clipboard && window.isSecureContext
+                ? copyViaClipboard()
+                : copyViaFallback();
+              copyPromise.then(() => {
                 showToast('已複製稱呼', 'success');
               }).catch(() => {
                 showToast('複製失敗', 'warning');
@@ -1478,6 +1978,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             }}
             onToggleCollapseMaternal={(id) => {
               const shouldExpand = collapsedMaternalRoots.has(id);
+              const expandedIds = shouldExpand ? collectFamilySide(id, 'maternal') : new Set<string>();
               setCollapsedMaternalRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1488,11 +1989,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 return next;
               });
               if (shouldExpand) {
-                selectExpandedNodes(collectFamilySide(id, 'maternal'));
+                selectExpandedNodes(expandedIds);
+                scheduleExpandedRelayout(expandedIds);
               }
             }}
             onToggleCollapsePaternal={(id) => {
               const shouldExpand = collapsedPaternalRoots.has(id);
+              const expandedIds = shouldExpand ? collectFamilySide(id, 'paternal') : new Set<string>();
               setCollapsedPaternalRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1503,11 +2006,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 return next;
               });
               if (shouldExpand) {
-                selectExpandedNodes(collectFamilySide(id, 'paternal'));
+                selectExpandedNodes(expandedIds);
+                scheduleExpandedRelayout(expandedIds);
               }
             }}
             onToggleCollapseChildren={(id) => {
               const shouldExpand = collapsedChildRoots.has(id);
+              const expandedIds = shouldExpand ? collectChildSide(id) : new Set<string>();
               setCollapsedChildRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1518,11 +2023,13 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 return next;
               });
               if (shouldExpand) {
-                selectExpandedNodes(collectChildSide(id));
+                selectExpandedNodes(expandedIds);
+                scheduleExpandedRelayout(expandedIds);
               }
             }}
             onToggleCollapseSiblings={(id) => {
               const shouldExpand = collapsedSiblingRoots.has(id);
+              const expandedIds = shouldExpand ? collectSiblingSide(id) : new Set<string>();
               setCollapsedSiblingRoots((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) {
@@ -1533,7 +2040,8 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
                 return next;
               });
               if (shouldExpand) {
-                selectExpandedNodes(collectSiblingSide(id));
+                selectExpandedNodes(expandedIds);
+                scheduleExpandedRelayout(expandedIds);
               }
             }}
             dimRelativesActive={dimFocusId === contextMenu.id}
@@ -1572,7 +2080,7 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         </div>
       )}
 
-      {showAddModal && (
+      {!isReadOnly && showAddModal && (
         <AddPersonModal
           onClose={() => setShowAddModal(false)}
           onSubmit={async (name, englishName, gender, dob, dod, tob, tod) => {
@@ -1586,7 +2094,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
         />
       )}
 
-      {editingPersonId && graphData && (
+      {canManageUsers && showCreateUserModal && (
+        <CreateUserModal
+          onClose={() => setShowCreateUserModal(false)}
+          onSubmit={handleCreateUser}
+        />
+      )}
+
+      {!isReadOnly && editingPersonId && graphData && (
         <EditPersonModal
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
           onClose={() => setEditingPersonId(null)}
@@ -1594,6 +2109,12 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
           onSubmit={async (id, updates, avatarFile, removeAvatar) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const shouldRefreshAfterAvatar = Boolean(avatarFile || removeAvatar);
+            setLastEditedId(id);
+            try {
+              localStorage.setItem('clan.lastEditedId', id);
+            } catch (error) {
+              console.warn('Failed to persist last edited id:', error);
+            }
             if (removeAvatar) {
               nextUpdates.avatar_url = null;
             }
@@ -1604,15 +2125,14 @@ export function ClanGraph({ username, onLogout }: ClanGraphProps) {
             await updatePerson(id, nextUpdates);
             setEditingPersonId(null);
             showToast('已儲存', 'success');
-            const focusPosition = nodesRef.current.find(node => node.id === id)?.position
-              || nodePositionMap.current[id]
-              || graphData.nodes.find(node => node.id === id)?.metadata?.position;
-            if (focusPosition && reactFlowInstance?.setCenter) {
-              requestAnimationFrame(() => {
-                reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: reactFlowInstance.getZoom?.() });
-              });
+            const viewport = getViewportForNode(id, 1.0);
+            if (viewport && reactFlowInstance?.setViewport) {
+              reactFlowInstance.setViewport(viewport);
+              localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
             }
             setPendingCenterId(id);
+            localStorage.setItem('clan.pendingCenterId', id);
+            focusNodeById(id, 1.0);
             if (shouldRefreshAfterAvatar) {
               try {
                 localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
