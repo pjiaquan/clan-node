@@ -20,6 +20,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const centerStorageKey = 'clan.centerId';
+  const defaultCenterId = '296f7664-ec3c-49c4-946c-4c54e8ce96e4';
 
   const setCenterId = useCallback((id: string) => {
     setCenterIdState(id);
@@ -84,7 +85,8 @@ export function useClanGraph(options?: { enabled?: boolean }) {
         const people = await api.fetchPeople();
         if (!cancelled) {
           if (people.length) {
-            setCenterId(people[0].id);
+            const hasDefault = people.some((person) => person.id === defaultCenterId);
+            setCenterId(hasDefault ? defaultCenterId : people[0].id);
           } else {
             setError('No people found');
             setLoading(false);
@@ -121,6 +123,12 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     if (!graphData) return;
     const person = graphData.nodes.find(p => p.id === id);
     if (!person) return;
+    const currentPosition = person.metadata?.position;
+    if (currentPosition
+      && currentPosition.x === position.x
+      && currentPosition.y === position.y) {
+      return;
+    }
 
     try {
       const newMetadata = {

@@ -107,6 +107,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
+  const [syncingPositions, setSyncingPositions] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -115,14 +116,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     username ? `${baseLockStorageKey}.${username}` : baseLockStorageKey
   ), [username]);
   const getInitialNodePositions = () => {
-    if (typeof window === 'undefined') return {};
-    try {
-      const raw = localStorage.getItem('clan.nodePositions');
-      return raw ? JSON.parse(raw) : {};
-    } catch (error) {
-      console.warn('Failed to restore node positions:', error);
-      return {};
-    }
+    return {};
   };
   const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(getInitialNodePositions());
   const nodesRef = useRef<Node[]>([]);
@@ -322,8 +316,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   }, [graphData]);
 
   const getStoredPosition = useCallback((id: string) => {
-    return nodePositionMap.current[id]
-      || graphData?.nodes.find(node => node.id === id)?.metadata?.position
+    return graphData?.nodes.find(node => node.id === id)?.metadata?.position
+      || nodePositionMap.current[id]
       || null;
   }, [graphData]);
 
@@ -581,6 +575,50 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     }, 1400);
   }, []);
 
+  const hashAvatarFile = useCallback(async (file: File) => {
+    if (!window.crypto?.subtle) {
+      return null;
+    }
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }, []);
+
+  const ensureEditable = useCallback(() => {
+    if (!isReadOnly) return true;
+    showToast('只讀模式，無法編輯', 'warning');
+    return false;
+  }, [isReadOnly, showToast]);
+
+  const syncAllPositions = useCallback(async () => {
+    if (!ensureEditable()) return;
+    if (!graphData) return;
+    setSyncingPositions(true);
+    try {
+      const updates = graphData.nodes.map(async (person) => {
+        const position = nodesRef.current.find(node => node.id === person.id)?.position
+          || nodePositionMap.current[person.id]
+          || person.metadata?.position;
+        if (!position) return;
+        const nextMetadata = {
+          ...(person.metadata ?? {}),
+          position
+        };
+        await api.updatePerson(person.id, { metadata: nextMetadata });
+      });
+      await Promise.all(updates);
+      showToast('已同步全部位置', 'success');
+      fetchGraph();
+    } catch (error) {
+      console.error('Failed to sync positions:', error);
+      showToast('同步失敗', 'warning');
+    } finally {
+      setSyncingPositions(false);
+    }
+  }, [ensureEditable, graphData, fetchGraph, showToast]);
+
   const handleCreateUser = useCallback(async (username: string, password: string, role: 'admin' | 'readonly') => {
     try {
       await api.createUser(username, password, role);
@@ -592,12 +630,6 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       throw error;
     }
   }, [showToast]);
-
-  const ensureEditable = useCallback(() => {
-    if (!isReadOnly) return true;
-    showToast('只讀模式，無法編輯', 'warning');
-    return false;
-  }, [isReadOnly, showToast]);
 
   useEffect(() => {
     if (!graphData) return;
@@ -775,16 +807,18 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
     const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+    const startPositions = dragStartPositions.current;
     nodesRef.current.forEach((item) => {
-      if (selectedIds.includes(item.id)) {
-        updatePersonPosition(item.id, item.position);
-      }
+      if (!selectedIds.includes(item.id)) return;
+      const start = startPositions?.[item.id];
+      if (!start) return;
+      if (start.x === item.position.x && start.y === item.position.y) return;
+      updatePersonPosition(item.id, item.position);
     });
     setDragGuideY(null);
     dragSnapRef.current = null;
     dragSnapXRef.current = null;
     spouseSnapRef.current = null;
-    const startPositions = dragStartPositions.current;
     if (startPositions) {
       const hiddenUpdates = new Map<string, { x: number; y: number }>();
       selectedIds.forEach((rootId) => {
@@ -1410,6 +1444,20 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   }, [setNodes]);
 
   useEffect(() => {
+    if (!graphData) return;
+    graphData.nodes.forEach((person) => {
+      if (person.metadata?.position) {
+        nodePositionMap.current[person.id] = { ...person.metadata.position };
+      }
+    });
+    try {
+      localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+    } catch (error) {
+      console.warn('Failed to persist node positions:', error);
+    }
+  }, [graphData]);
+
+  useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
 
@@ -1832,6 +1880,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           setShowAddModal(true);
         }}
         onFocusMe={handleFocusMe}
+        onSyncPositions={syncAllPositions}
+        syncingPositions={syncingPositions}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
         linkMode={linkMode}
@@ -1897,7 +1947,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
             setContextMenu(null);
             setAvatarPreview(null);
           }}
-          onNodeDoubleClick={isLocked || isReadOnly ? undefined : (_e, node) => {
+          onNodeDoubleClick={isReadOnly ? undefined : (_e, node) => {
             setContextMenu(null);
             setAvatarPreview(null);
             handleEditPerson(node.id);
@@ -2109,20 +2159,81 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           onSubmit={async (id, updates, avatarFile, removeAvatar) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const shouldRefreshAfterAvatar = Boolean(avatarFile || removeAvatar);
+            const person = graphData.nodes.find(p => p.id === id);
+            const existingMetadata = person?.metadata ?? {};
+            let mergedMetadata = updates.metadata
+              ? { ...existingMetadata, ...updates.metadata }
+              : undefined;
+
+            if (removeAvatar) {
+              nextUpdates.avatar_url = null;
+              if (!mergedMetadata) {
+                mergedMetadata = { ...existingMetadata };
+              }
+              delete (mergedMetadata as any).avatarHash;
+            }
+
+            if (avatarFile) {
+              const nextHash = await hashAvatarFile(avatarFile);
+              const existingHash = (existingMetadata as any).avatarHash as string | undefined;
+              if (!nextHash || nextHash !== existingHash) {
+                const { avatar_url } = await api.uploadAvatar(id, avatarFile);
+                nextUpdates.avatar_url = avatar_url;
+                if (!mergedMetadata) {
+                  mergedMetadata = { ...existingMetadata };
+                }
+                if (nextHash) {
+                  (mergedMetadata as any).avatarHash = nextHash;
+                } else {
+                  delete (mergedMetadata as any).avatarHash;
+                }
+              }
+            }
+
+            if (mergedMetadata) {
+              nextUpdates.metadata = mergedMetadata;
+            }
+            const filteredUpdates: Partial<Person> & { avatar_url?: string | null; metadata?: any } = {};
+            const assignIfChanged = (key: keyof Person | 'avatar_url', value: any, current: any) => {
+              if (value === undefined) return;
+              const nextValue = value ?? null;
+              const currentValue = current ?? null;
+              if (nextValue !== currentValue) {
+                (filteredUpdates as any)[key] = value;
+              }
+            };
+
+            assignIfChanged('name', nextUpdates.name, person?.name);
+            assignIfChanged('english_name', nextUpdates.english_name, person?.english_name ?? null);
+            assignIfChanged('gender', nextUpdates.gender, person?.gender);
+            assignIfChanged('dob', nextUpdates.dob, person?.dob ?? null);
+            assignIfChanged('dod', nextUpdates.dod, person?.dod ?? null);
+            assignIfChanged('tob', nextUpdates.tob, person?.tob ?? null);
+            assignIfChanged('tod', nextUpdates.tod, person?.tod ?? null);
+            assignIfChanged('avatar_url', nextUpdates.avatar_url, person?.avatar_url ?? null);
+
+            if (nextUpdates.metadata !== undefined) {
+              const currentMetadata = person?.metadata ?? {};
+              const nextMetadata = nextUpdates.metadata ?? {};
+              if (JSON.stringify(currentMetadata) !== JSON.stringify(nextMetadata)) {
+                filteredUpdates.metadata = nextUpdates.metadata;
+              }
+            }
+
+            if (Object.keys(filteredUpdates).length === 0) {
+              setEditingPersonId(null);
+              showToast('沒有變更', 'warning');
+              return;
+            }
+
             setLastEditedId(id);
             try {
               localStorage.setItem('clan.lastEditedId', id);
             } catch (error) {
               console.warn('Failed to persist last edited id:', error);
             }
-            if (removeAvatar) {
-              nextUpdates.avatar_url = null;
-            }
-            if (avatarFile) {
-              const { avatar_url } = await api.uploadAvatar(id, avatarFile);
-              nextUpdates.avatar_url = avatar_url;
-            }
-            await updatePerson(id, nextUpdates);
+
+            await updatePerson(id, filteredUpdates);
             setEditingPersonId(null);
             showToast('已儲存', 'success');
             const viewport = getViewportForNode(id, 1.0);

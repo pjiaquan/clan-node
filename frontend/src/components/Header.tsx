@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 interface HeaderProps {
   onAddMember: () => void;
   onFocusMe: () => void;
+  onSyncPositions: () => void;
+  syncingPositions?: boolean;
   selectedNode: string | null;
   selectedEdge: string | null;
   linkMode: { from: string } | null;
@@ -25,6 +27,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onAddMember,
   onFocusMe,
+  onSyncPositions,
+  syncingPositions,
   selectedNode,
   selectedEdge,
   linkMode,
@@ -201,6 +205,17 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 className="header-action-item"
                 onClick={() => {
+                  onSyncPositions();
+                  closeMobileMenu();
+                }}
+                disabled={editDisabled || syncingPositions}
+              >
+                {syncingPositions ? '同步中...' : '同步位置'}
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
                   onUndo();
                   closeMobileMenu();
                 }}
@@ -358,6 +373,15 @@ export const Header: React.FC<HeaderProps> = ({
             </svg>
           </span>
           <span className="btn-label">復原</span>
+        </button>
+        <button
+          onClick={onSyncPositions}
+          className="btn-secondary btn-icon"
+          disabled={editDisabled || syncingPositions}
+          aria-label="同步位置"
+          title="同步全部節點位置"
+        >
+          <span className="btn-label">{syncingPositions ? '同步中...' : '同步位置'}</span>
         </button>
         <button onClick={onFocusMe} className="btn-secondary btn-icon" aria-label="我的位置">
           <span className="btn-icon">

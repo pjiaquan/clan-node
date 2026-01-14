@@ -3,7 +3,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 
 const PersonNode = memo(({ data, selected }: NodeProps) => {
   const highlightHandles = new Set<string>(data.highlightHandles ?? []);
-  const tapRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const tapRef = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null);
   const longPressRef = useRef<{ timer: number | null; x: number; y: number } | null>(null);
   const rawTitle = typeof data.title === 'string' ? data.title : '';
   const isLongTitle = rawTitle.length > 4;
@@ -67,7 +67,8 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         style={{ background: data.genderColor }}
         onPointerDown={(event) => {
           if (!data.onAvatarClick) return;
-          tapRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+          tapRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+          event.currentTarget.setPointerCapture?.(event.pointerId);
           event.stopPropagation();
         }}
         onPointerMove={(event) => {
@@ -76,7 +77,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           const deltaX = Math.abs(event.clientX - tap.x);
           const deltaY = Math.abs(event.clientY - tap.y);
           if (deltaX > 8 || deltaY > 8) {
-            tapRef.current = null;
+            tap.moved = true;
           }
         }}
         onPointerUp={(event) => {
@@ -85,14 +86,24 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           if (!tap || tap.pointerId !== event.pointerId) return;
           const deltaX = Math.abs(event.clientX - tap.x);
           const deltaY = Math.abs(event.clientY - tap.y);
-          if (deltaX <= 6 && deltaY <= 6) {
+          if (!tap.moved && deltaX <= 10 && deltaY <= 10) {
             data.onAvatarClick();
           }
           tapRef.current = null;
+          event.currentTarget.releasePointerCapture?.(event.pointerId);
           event.stopPropagation();
         }}
         onPointerCancel={() => {
           tapRef.current = null;
+        }}
+        onTouchEnd={(event) => {
+          if (!data.onAvatarClick) return;
+          const tap = tapRef.current;
+          if (tap && !tap.moved) {
+            data.onAvatarClick();
+          }
+          tapRef.current = null;
+          event.stopPropagation();
         }}
         onClick={(event) => {
           if (!data.onAvatarClick) return;

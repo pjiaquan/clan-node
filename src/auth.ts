@@ -1,6 +1,7 @@
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
+import { notifyUpdate } from './notify';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
@@ -61,6 +62,15 @@ const clearSessionCookie = (c: Context<AppBindings>) => {
   deleteCookie(c, SESSION_COOKIE, { path: '/', sameSite: isSecure ? 'None' : 'Lax', secure: isSecure });
 };
 
+const getSessionIdFromRequest = (c: Context<AppBindings>) => {
+  const cookieSession = getCookie(c, SESSION_COOKIE);
+  if (cookieSession) return cookieSession;
+  const authHeader = c.req.header('Authorization') || c.req.header('authorization');
+  if (!authHeader) return null;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+};
+
 export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
   const path = c.req.path;
   if (path.startsWith('/api/auth/login') || path.startsWith('/api/auth/setup')) {
@@ -70,7 +80,7 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     return next();
   }
 
-  const sessionId = getCookie(c, SESSION_COOKIE);
+  const sessionId = getSessionIdFromRequest(c);
   if (!sessionId) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
@@ -136,6 +146,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       'INSERT INTO users (id, username, password_hash, password_salt, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(id, username, passwordHash, salt, 'admin', now, now).run();
 
+    notifyUpdate(c, 'user:setup', {
+      id,
+      username,
+      role: 'admin'
+    });
     return c.json({ id, username }, 201);
   });
 
@@ -178,6 +193,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     });
 
     return c.json({
+      session_id: sessionId,
       user: {
         id: (user as any).id,
         username: (user as any).username,
@@ -187,7 +203,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/logout', async (c) => {
-    const sessionId = getCookie(c, SESSION_COOKIE);
+    const sessionId = getSessionIdFromRequest(c);
     if (sessionId) {
       await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
     }
@@ -196,7 +212,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.get('/api/auth/me', async (c) => {
-    const sessionId = getCookie(c, SESSION_COOKIE);
+    const sessionId = getSessionIdFromRequest(c);
     if (!sessionId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
@@ -208,6 +224,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     return c.json({
+      session_id: sessionId,
       user: {
         id: sessionUser.userId,
         username: sessionUser.username,
@@ -245,6 +262,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       'INSERT INTO users (id, username, password_hash, password_salt, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(id, username, passwordHash, salt, finalRole, now, now).run();
 
+    notifyUpdate(c, 'user:create', {
+      id,
+      username,
+      role: finalRole
+    });
     return c.json({ id, username, role: finalRole }, 201);
   });
 }

@@ -11,12 +11,14 @@ const app = new Hono<AppBindings>();
 // Enable CORS for frontend
 app.use('*', cors({
   origin: (origin, c) => {
+    const normalize = (value: string) => value.replace(/\/+$/, '').toLowerCase();
     const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')
       .split(',')
-      .map(entry => entry.trim())
+      .map(entry => normalize(entry.trim()))
       .filter(Boolean);
     if (!origin) return allowedOrigins[0] || '';
-    return allowedOrigins.includes(origin) ? origin : '';
+    const normalizedOrigin = normalize(origin);
+    return allowedOrigins.includes(normalizedOrigin) ? origin : '';
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],

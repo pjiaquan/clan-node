@@ -13,6 +13,7 @@ export interface Person {
   metadata?: {
     position?: { x: number; y: number };
     customFields?: { label: string; value: string }[];
+    avatarHash?: string;
     [key: string]: any;
   } | null;
 }

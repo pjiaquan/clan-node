@@ -3,6 +3,29 @@ import type { AuthUser, GraphData, Person, Relationship } from './types';
 const API_BASE = import.meta.env.VITE_API_BASE
   || `${window.location.protocol}//${window.location.hostname}:8787`;
 
+const SESSION_TOKEN_KEY = 'clan.sessionToken';
+
+const getSessionToken = () => {
+  try {
+    return localStorage.getItem(SESSION_TOKEN_KEY);
+  } catch (error) {
+    console.warn('Failed to read session token:', error);
+    return null;
+  }
+};
+
+const setSessionToken = (token: string | null) => {
+  try {
+    if (token) {
+      localStorage.setItem(SESSION_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(SESSION_TOKEN_KEY);
+    }
+  } catch (error) {
+    console.warn('Failed to persist session token:', error);
+  }
+};
+
 const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;
   if (/^https?:\/\//i.test(avatarUrl)) return avatarUrl;
@@ -10,7 +33,14 @@ const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
 };
 
 const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => {
-  return fetch(input, { credentials: 'include', ...init });
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Authorization')) {
+    const token = getSessionToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+  return fetch(input, { credentials: 'include', ...init, headers });
 };
 
 export const api = {
@@ -129,15 +159,19 @@ export const api = {
     });
   },
 
-  authMe: async (): Promise<{ user: AuthUser }> => {
+  authMe: async (): Promise<{ user: AuthUser; session_id?: string }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/me`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    return res.json();
+    const data = await res.json();
+    if (data?.session_id) {
+      setSessionToken(data.session_id);
+    }
+    return data;
   },
 
-  login: async (username: string, password: string): Promise<{ user: AuthUser }> => {
+  login: async (username: string, password: string): Promise<{ user: AuthUser; session_id?: string }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -146,11 +180,16 @@ export const api = {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    return res.json();
+    const data = await res.json();
+    if (data?.session_id) {
+      setSessionToken(data.session_id);
+    }
+    return data;
   },
 
   logout: async (): Promise<void> => {
     await fetchWithAuth(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+    setSessionToken(null);
   },
 
   createUser: async (username: string, password: string, role: 'admin' | 'readonly'): Promise<AuthUser> => {

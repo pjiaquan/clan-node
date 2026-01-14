@@ -4,6 +4,7 @@ const LOCAL_USER = process.env.LOCAL_USER || '';
 const LOCAL_PASS = process.env.LOCAL_PASS || '';
 const REMOTE_USER = process.env.REMOTE_USER || '';
 const REMOTE_PASS = process.env.REMOTE_PASS || '';
+const FETCH_TIMEOUT_MS = Number.parseInt(process.env.FETCH_TIMEOUT_MS || '20000', 10);
 
 if (!LOCAL_USER || !LOCAL_PASS || !REMOTE_USER || !REMOTE_PASS) {
   console.error('Missing credentials. Set LOCAL_USER, LOCAL_PASS, REMOTE_USER, REMOTE_PASS.');
@@ -15,8 +16,18 @@ const parseSetCookie = (setCookieHeaders = []) => {
   return cookies.join('; ');
 };
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const login = async (baseUrl, username, password) => {
-  const res = await fetch(`${baseUrl}/api/auth/login`, {
+  const res = await fetchWithTimeout(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -29,7 +40,7 @@ const login = async (baseUrl, username, password) => {
 };
 
 const fetchPeople = async (baseUrl, cookie) => {
-  const res = await fetch(`${baseUrl}/api/people`, {
+  const res = await fetchWithTimeout(`${baseUrl}/api/people`, {
     headers: { Cookie: cookie },
   });
   if (!res.ok) {
@@ -60,7 +71,7 @@ const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, file
   const formData = new FormData();
   const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
   formData.append('file', blob, filename || 'avatar.png');
-  const res = await fetch(`${baseUrl}/api/people/${personId}/avatar`, {
+  const res = await fetchWithTimeout(`${baseUrl}/api/people/${personId}/avatar`, {
     method: 'POST',
     headers: { Cookie: cookie },
     body: formData,
@@ -90,7 +101,7 @@ const run = async () => {
   for (const person of withAvatar) {
     const sourceUrl = resolveAvatarUrl(fromBase, person.avatar_url);
     if (!sourceUrl) continue;
-    const res = await fetch(sourceUrl, { headers: { Cookie: fromCookie } });
+    const res = await fetchWithTimeout(sourceUrl, { headers: { Cookie: fromCookie } });
     if (!res.ok) {
       console.warn(`Skip ${person.id}: failed to fetch avatar (${res.status})`);
       continue;

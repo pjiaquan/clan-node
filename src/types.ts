@@ -4,6 +4,8 @@ export type Env = {
   ADMIN_SETUP_TOKEN?: string;
   FRONTEND_ORIGIN?: string;
   ENVIRONMENT?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';

@@ -1,6 +1,7 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
+import { notifyUpdate } from './notify';
 
 async function updateSiblingOrdering(db: D1Database, personId: string) {
   const person = await db.prepare(
@@ -52,6 +53,35 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       'SELECT label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
     ).bind(personId).all();
     return results.map((row: any) => ({ label: row.label, value: row.value }));
+  };
+
+  const resolveAvatarPhoto = async (c: Context<AppBindings>, avatarUrl?: string | null) => {
+    if (!avatarUrl) return undefined;
+    const url = new URL(avatarUrl, c.req.url);
+    const path = url.pathname;
+    if (path.startsWith('/api/avatars/')) {
+      const key = path.replace('/api/avatars/', '');
+      const object = await c.env.AVATARS.get(key);
+      if (!object) return undefined;
+      const data = await object.arrayBuffer();
+      return {
+        data,
+        contentType: object.httpMetadata?.contentType || 'application/octet-stream',
+        filename: key
+      };
+    }
+    const isDev = (c.env.ENVIRONMENT || 'development') === 'development';
+    if (!isDev) return undefined;
+    const response = await fetch(url.toString());
+    if (!response.ok) return undefined;
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const data = await response.arrayBuffer();
+    const filename = path.split('/').pop() || 'avatar';
+    return {
+      data,
+      contentType,
+      filename
+    };
   };
 
   const extractCustomFields = (body: any, metadata: any) => {
@@ -148,6 +178,32 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    const metadataKeys = metadata && typeof metadata === 'object'
+      ? Object.keys(metadata as Record<string, unknown>)
+      : [];
+    const customFieldsCount = Array.isArray(customFields) ? customFields.length : 0;
+    const customFieldsSummary = Array.isArray(customFields)
+      ? customFields.map(field => ({
+        label: field?.label || '',
+        value: field?.value || ''
+      }))
+      : [];
+    const avatarLink = avatar_url ? new URL(avatar_url, c.req.url).toString() : undefined;
+    const avatarPhoto = await resolveAvatarPhoto(c, avatar_url);
+    notifyUpdate(c, 'people:create', {
+      id,
+      name,
+      english_name,
+      gender,
+      dob,
+      dod,
+      tob,
+      tod,
+      avatar_url,
+      metadata_keys: metadataKeys,
+      custom_fields_count: customFieldsCount,
+      custom_fields: customFieldsSummary
+    }, avatarPhoto ? { photoData: avatarPhoto } : (avatarLink ? { photoUrl: avatarLink } : undefined));
     return c.json({
       ...person,
       metadata: {
@@ -164,53 +220,65 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const { name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     const existing = await c.env.DB.prepare(
-      'SELECT id, dob FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?'
     ).bind(id).first();
 
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    const previousDob = (existing as any).dob as string | null;
+    const existingAny = existing as any;
+    const previousDob = existingAny.dob as string | null;
+    const existingCustomFields = await loadPersonCustomFields(c.env.DB, id);
 
     const now = new Date().toISOString();
     const updates: string[] = [];
     const values: unknown[] = [];
+    const changedFields: string[] = [];
 
     if (name !== undefined) {
       updates.push('name = ?');
       values.push(name);
+      changedFields.push('name');
     }
     if (english_name !== undefined) {
       updates.push('english_name = ?');
       values.push(english_name);
+      changedFields.push('english_name');
     }
     if (gender !== undefined) {
       updates.push('gender = ?');
       values.push(gender);
+      changedFields.push('gender');
     }
     if (dob !== undefined) {
       updates.push('dob = ?');
       values.push(dob);
+      changedFields.push('dob');
     }
     if (dod !== undefined) {
       updates.push('dod = ?');
       values.push(dod);
+      changedFields.push('dod');
     }
     if (tob !== undefined) {
       updates.push('tob = ?');
       values.push(tob);
+      changedFields.push('tob');
     }
     if (tod !== undefined) {
       updates.push('tod = ?');
       values.push(tod);
+      changedFields.push('tod');
     }
     if (avatar_url !== undefined) {
       updates.push('avatar_url = ?');
       values.push(avatar_url);
+      changedFields.push('avatar_url');
     }
     if (metadata !== undefined) {
       updates.push('metadata = ?');
       values.push(JSON.stringify(metadata));
+      changedFields.push('metadata');
     }
 
     const customFields = extractCustomFields(body, metadata);
@@ -258,6 +326,63 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    const formatCustomFields = (fields: { label: string; value: string }[]) => (
+      fields.map((field) => ({
+        label: field.label || '',
+        value: field.value || ''
+      }))
+    );
+
+    const updateDetails: Record<string, unknown> = {
+      id,
+      changed: changedFields
+    };
+    if (name !== undefined) {
+      updateDetails.name = {
+        old: existingAny.name ?? null,
+        new: name
+      };
+    }
+    if (english_name !== undefined) {
+      updateDetails.english_name = {
+        old: existingAny.english_name ?? null,
+        new: english_name
+      };
+    }
+    if (gender !== undefined) updateDetails.gender = gender;
+    if (dob !== undefined) updateDetails.dob = dob;
+    if (dod !== undefined) updateDetails.dod = dod;
+    if (tob !== undefined) updateDetails.tob = tob;
+    if (tod !== undefined) updateDetails.tod = tod;
+    let avatarLink: string | undefined;
+    let avatarPhoto: Awaited<ReturnType<typeof resolveAvatarPhoto>> | undefined;
+    if (avatar_url !== undefined) {
+      const prevAvatar = existingAny.avatar_url ?? null;
+      updateDetails.avatar_url = {
+        old: prevAvatar,
+        new: avatar_url
+      };
+      if (avatar_url) {
+        avatarLink = new URL(avatar_url, c.req.url).toString();
+        avatarPhoto = await resolveAvatarPhoto(c, avatar_url);
+      }
+    }
+    if (metadata !== undefined && typeof metadata === 'object') {
+      updateDetails.metadata_keys = Object.keys(metadata as Record<string, unknown>);
+    }
+    if (customFields !== null) {
+      const nextFields = Array.isArray(customFields) ? customFields : [];
+      const previousFields = formatCustomFields(existingCustomFields);
+      const formattedNext = formatCustomFields(nextFields);
+      if (JSON.stringify(previousFields) !== JSON.stringify(formattedNext)) {
+        updateDetails.custom_fields = {
+          old: previousFields,
+          new: formattedNext
+        };
+        updateDetails.custom_fields_count = formattedNext.length;
+      }
+    }
+    notifyUpdate(c, 'people:update', updateDetails, avatarPhoto ? { photoData: avatarPhoto } : (avatarLink ? { photoUrl: avatarLink } : undefined));
     return c.json({
       ...person,
       metadata: {
@@ -278,40 +403,58 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Person not found' }, 404);
     }
 
-    const formData = await c.req.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return c.json({ error: 'file is required' }, 400);
+    try {
+      const formData = await c.req.formData();
+      const file = formData.get('file');
+      if (!(file instanceof File)) {
+        return c.json({ error: 'file is required' }, 400);
+      }
+
+      const allowedTypes: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif'
+      };
+      const ext = allowedTypes[file.type];
+      if (!ext) {
+        return c.json({ error: 'unsupported file type' }, 400);
+      }
+
+      const prevUrl = (existing as any).avatar_url as string | null;
+      if (prevUrl && prevUrl.startsWith('/api/avatars/')) {
+        const prevKey = prevUrl.replace('/api/avatars/', '');
+        await c.env.AVATARS.delete(prevKey);
+      }
+
+      const key = `person-${id}-${Date.now()}.${ext}`;
+      await c.env.AVATARS.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type }
+      });
+
+      const avatarUrl = `/api/avatars/${key}`;
+      await c.env.DB.prepare(
+        'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
+      ).bind(avatarUrl, new Date().toISOString(), id).run();
+
+    const avatarLink = new URL(avatarUrl, c.req.url).toString();
+    const maxPhotoSize = 9 * 1024 * 1024;
+    const avatarPhoto = file.size <= maxPhotoSize
+      ? {
+        data: await file.arrayBuffer(),
+        contentType: file.type || 'application/octet-stream',
+        filename: key
+      }
+      : undefined;
+      notifyUpdate(c, 'people:avatar', {
+        id,
+        avatar_url: avatarUrl
+      }, avatarPhoto ? { photoData: avatarPhoto } : { photoUrl: avatarLink });
+      return c.json({ avatar_url: avatarUrl });
+    } catch (error) {
+      console.error('Avatar upload failed:', error);
+      return c.json({ error: 'Avatar upload failed' }, 500);
     }
-
-    const allowedTypes: Record<string, string> = {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'image/gif': 'gif'
-    };
-    const ext = allowedTypes[file.type];
-    if (!ext) {
-      return c.json({ error: 'unsupported file type' }, 400);
-    }
-
-    const prevUrl = (existing as any).avatar_url as string | null;
-    if (prevUrl && prevUrl.startsWith('/api/avatars/')) {
-      const prevKey = prevUrl.replace('/api/avatars/', '');
-      await c.env.AVATARS.delete(prevKey);
-    }
-
-    const key = `person-${id}-${Date.now()}.${ext}`;
-    await c.env.AVATARS.put(key, file.stream(), {
-      httpMetadata: { contentType: file.type }
-    });
-
-    const avatarUrl = `/api/avatars/${key}`;
-    await c.env.DB.prepare(
-      'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-    ).bind(avatarUrl, new Date().toISOString(), id).run();
-
-    return c.json({ avatar_url: avatarUrl });
   });
 
   // Serve avatar images from R2
@@ -353,6 +496,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     ).bind(id).run();
 
     if (result.success && (result.meta.changes ?? 0) > 0) {
+      notifyUpdate(c, 'people:delete', { id });
       return c.json({ success: true, id });
     }
     return c.json({ error: 'Person not found' }, 404);

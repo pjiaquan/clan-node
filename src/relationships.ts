@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
+import { notifyUpdate } from './notify';
 
 async function getSiblingLinkMeta(db: D1Database, aId: string, bId: string) {
   const { results } = await db.prepare(
@@ -244,6 +245,17 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       'INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, ?, ?)'
     ).bind(fromId, toId, type, finalMetadata, now).run();
 
+    const metadataSummary = typeof finalMetadata === 'string'
+      ? safeParse(finalMetadata)
+      : finalMetadata;
+    notifyUpdate(c, 'relationships:create', {
+      id: result.meta.last_row_id ?? undefined,
+      from_person_id: fromId,
+      to_person_id: toId,
+      type,
+      source_handle: metadataSummary?.sourceHandle,
+      target_handle: metadataSummary?.targetHandle
+    });
     if (type === 'parent_child' && !shouldSkipAutoLink) {
       await linkSpouseToChild(c.env.DB, from_person_id, to_person_id, now);
       await linkParentToSiblingChildren(c.env.DB, from_person_id, to_person_id, now);
@@ -302,22 +314,27 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
     const updates: string[] = [];
     const values: unknown[] = [];
+    const changedFields: string[] = [];
 
     if (from_person_id !== undefined) {
       updates.push('from_person_id = ?');
       values.push(from_person_id);
+      changedFields.push('from_person_id');
     }
     if (to_person_id !== undefined) {
       updates.push('to_person_id = ?');
       values.push(to_person_id);
+      changedFields.push('to_person_id');
     }
     if (type !== undefined) {
       updates.push('type = ?');
       values.push(type);
+      changedFields.push('type');
     }
     if (metadata !== undefined) {
       updates.push('metadata = ?');
       values.push(JSON.stringify(metadata));
+      changedFields.push('metadata');
     }
 
     if (updates.length === 0) {
@@ -369,6 +386,18 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       'SELECT * FROM relationships WHERE id = ?'
     ).bind(id).first();
 
+    const updateDetails: Record<string, unknown> = {
+      id,
+      changed: changedFields,
+      from_person_id: nextFrom,
+      to_person_id: nextTo,
+      type: nextType
+    };
+    if (metadata !== undefined && typeof metadata === 'object') {
+      updateDetails.source_handle = (metadata as any)?.sourceHandle;
+      updateDetails.target_handle = (metadata as any)?.targetHandle;
+    }
+    notifyUpdate(c, 'relationships:update', updateDetails);
     return c.json(updated);
   });
 
@@ -385,6 +414,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       console.log('Delete result:', JSON.stringify(result));
 
       if (result.success && (result.meta.changes ?? 0) > 0) {
+        notifyUpdate(c, 'relationships:delete', { id });
         return c.json({ success: true, id });
       }
       return c.json({ error: 'Relationship not found' }, 404);

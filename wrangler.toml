@@ -32,3 +32,18 @@ database_id = "85073827-66a2-4647-b7ff-9d0cbdcc3e60"
 [[env.production.r2_buckets]]
 binding = "AVATARS"
 bucket_name = "clan-avatars"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = false
+head_sampling_rate = 1
+persist = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+persist = false
+head_sampling_rate = 1

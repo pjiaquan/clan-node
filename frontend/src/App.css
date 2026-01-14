@@ -423,7 +423,7 @@ button:disabled:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   transition: all 0.2s;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .person-node:hover {
@@ -490,7 +490,7 @@ button:disabled:hover {
   height: 14px;
   border-radius: 50%;
   background: #dd604a;
-  z-index: 7;
+  z-index: 2;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
 }
 
@@ -544,6 +544,7 @@ button:disabled:hover {
   color: white;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  touch-action: manipulation;
 }
 
 .node-avatar:hover {
@@ -587,6 +588,7 @@ button:disabled:hover {
   background: #f1f5f9;
   border-radius: 0 0 8px 8px;
   position: relative;
+  z-index: 5;
 }
 
 .node-title-text {
@@ -608,11 +610,12 @@ button:disabled:hover {
   padding: 0.35rem 0.5rem;
   border-radius: 6px;
   white-space: nowrap;
+  text-align: center;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
-  z-index: 6;
+  z-index: 30;
 }
 
 .node-title-tooltip::after {
@@ -907,6 +910,14 @@ button:disabled:hover {
   }
 
   .header-action-menu {
+    display: none;
+  }
+
+  .react-flow__panel.react-flow__controls {
+    display: none;
+  }
+
+  .react-flow__minimap {
     display: none;
   }
 
