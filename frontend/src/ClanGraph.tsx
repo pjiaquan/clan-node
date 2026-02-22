@@ -57,10 +57,12 @@ type ClanGraphProps = {
   username: string | null;
   readOnly?: boolean;
   isAdmin?: boolean;
+  onManageUsers?: () => void;
+  onManageSessions?: () => void;
   onLogout: () => void;
 };
 
-export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphProps) {
+export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManageSessions, onLogout }: ClanGraphProps) {
   const isReadOnly = Boolean(readOnly);
   const canManageUsers = Boolean(isAdmin);
   const {
@@ -911,10 +913,78 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     return [draggedId];
   }, []);
 
+  const resolveOverlapAfterDrop = useCallback((selectedIds: string[], draggedId: string) => {
+    const draggedNode = nodesRef.current.find((item) => item.id === draggedId);
+    if (!draggedNode) return;
+
+    const selectedSet = new Set(selectedIds);
+    const draggedWidth = draggedNode.width ?? 120;
+    const draggedHeight = draggedNode.height ?? 120;
+    const repelGap = 24;
+    let nextX = draggedNode.position.x;
+    let nextY = draggedNode.position.y;
+
+    for (let i = 0; i < 10; i += 1) {
+      let overlappingNode: Node | null = null;
+      let maxOverlapArea = 0;
+
+      for (const other of nodesRef.current) {
+        if (selectedSet.has(other.id)) continue;
+        const otherWidth = other.width ?? 120;
+        const otherHeight = other.height ?? 120;
+        const overlapWidth = Math.min(nextX + draggedWidth, other.position.x + otherWidth) - Math.max(nextX, other.position.x);
+        const overlapHeight = Math.min(nextY + draggedHeight, other.position.y + otherHeight) - Math.max(nextY, other.position.y);
+        if (overlapWidth <= 0 || overlapHeight <= 0) continue;
+        const overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea > maxOverlapArea) {
+          maxOverlapArea = overlapArea;
+          overlappingNode = other;
+        }
+      }
+
+      if (!overlappingNode) break;
+
+      const otherWidth = overlappingNode.width ?? 120;
+      const otherHeight = overlappingNode.height ?? 120;
+      const dxRight = (overlappingNode.position.x + otherWidth + repelGap) - nextX;
+      const dxLeft = (overlappingNode.position.x - repelGap) - (nextX + draggedWidth);
+      const dyDown = (overlappingNode.position.y + otherHeight + repelGap) - nextY;
+      const dyUp = (overlappingNode.position.y - repelGap) - (nextY + draggedHeight);
+      const candidates = [
+        { dx: dxLeft, dy: 0, abs: Math.abs(dxLeft), prefer: 0 },
+        { dx: dxRight, dy: 0, abs: Math.abs(dxRight), prefer: 1 },
+        { dx: 0, dy: dyUp, abs: Math.abs(dyUp), prefer: 2 },
+        { dx: 0, dy: dyDown, abs: Math.abs(dyDown), prefer: 3 },
+      ].sort((a, b) => (a.abs - b.abs) || (a.prefer - b.prefer));
+
+      nextX += candidates[0].dx;
+      nextY += candidates[0].dy;
+    }
+
+    const shiftX = nextX - draggedNode.position.x;
+    const shiftY = nextY - draggedNode.position.y;
+    if (!shiftX && !shiftY) return;
+
+    const shiftedNodes = nodesRef.current.map((item) => {
+      if (!selectedSet.has(item.id)) return item;
+      return {
+        ...item,
+        position: {
+          x: item.position.x + shiftX,
+          y: item.position.y + shiftY,
+        },
+      };
+    });
+
+    nodesRef.current = shiftedNodes;
+    setNodesRef.current?.(shiftedNodes);
+  }, []);
+
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     setMobileNodeDragging(false);
     const selectedIds = getDragSelectionIds(node.id, draggingNodes);
     const startPositions = dragStartPositions.current;
+    resolveOverlapAfterDrop(selectedIds, node.id);
     nodesRef.current.forEach((item) => {
       if (!selectedIds.includes(item.id)) return;
       const start = startPositions?.[item.id];
@@ -980,7 +1050,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       }
     }
     dragStartPositions.current = null;
-  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds]);
+  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds, resolveOverlapAfterDrop]);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (!reactFlowInstance) return;
@@ -2283,6 +2353,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       <Header
         readOnly={isReadOnly}
         isAdmin={canManageUsers}
+        onManageUsers={canManageUsers ? onManageUsers : undefined}
+        onManageSessions={onManageSessions}
         onCreateUser={() => setShowCreateUserModal(true)}
         onAddMember={() => {
           if (!ensureEditable()) return;

@@ -3,13 +3,56 @@ import { api } from './api';
 import type { AuthUser } from './types';
 import { LoginPage } from './components/LoginPage';
 import { ClanGraph } from './ClanGraph';
+import { UserManagementPage } from './components/UserManagementPage';
+import { SessionManagementPage } from './components/SessionManagementPage';
 import './App.css';
+
+type AppView = 'graph' | 'users' | 'sessions';
+
+const getViewFromHash = (): AppView => {
+  if (window.location.hash === '#/users') return 'users';
+  if (window.location.hash === '#/sessions') return 'sessions';
+  return 'graph';
+};
 
 function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [view, setView] = useState<AppView>(() => getViewFromHash());
+
+  const navigateTo = useCallback((next: AppView) => {
+    const nextHash = next === 'users'
+      ? '#/users'
+      : next === 'sessions'
+        ? '#/sessions'
+        : '#/graph';
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+    setView(next);
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setView(getViewFromHash());
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setIsAuthed(false);
+      setAuthUser(null);
+      setAuthError('登入已過期，請重新登入');
+      navigateTo('graph');
+    };
+    window.addEventListener('clan:unauthorized', onUnauthorized as EventListener);
+    return () => window.removeEventListener('clan:unauthorized', onUnauthorized as EventListener);
+  }, [navigateTo]);
+
   useEffect(() => {
     let cancelled = false;
     const checkAuth = async () => {
@@ -71,7 +114,39 @@ function App() {
     await api.logout();
     setIsAuthed(false);
     setAuthUser(null);
-  }, []);
+    navigateTo('graph');
+  }, [navigateTo]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    if (view === 'users' && authUser?.role !== 'admin') {
+      navigateTo('graph');
+    }
+  }, [view, authUser, isAuthed, navigateTo]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    let cancelled = false;
+    const verify = async () => {
+      try {
+        const data = await api.authMe();
+        if (cancelled) return;
+        setAuthUser(data.user);
+      } catch {
+        if (cancelled) return;
+        setIsAuthed(false);
+        setAuthUser(null);
+        setAuthError('登入已過期，請重新登入');
+        navigateTo('graph');
+      }
+    };
+    const timer = window.setInterval(verify, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isAuthed, navigateTo]);
+
   if (!authChecked) {
     return (
       <div className="app">
@@ -86,12 +161,44 @@ function App() {
   if (!isAuthed) {
     return <LoginPage error={authError} onLogin={handleLogin} />;
   }
+  if (!authUser) {
+    return (
+      <div className="app">
+        <div className="loading">
+          <div className="spinner"></div>
+          <p>載入使用者資訊...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'users' && authUser.role === 'admin') {
+    return (
+      <UserManagementPage
+        currentUser={authUser}
+        onBack={() => navigateTo('graph')}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (view === 'sessions') {
+    return (
+      <SessionManagementPage
+        currentUser={authUser}
+        onBack={() => navigateTo('graph')}
+        onLogout={handleLogout}
+      />
+    );
+  }
 
   return (
     <ClanGraph
-      username={authUser?.username || null}
-      readOnly={authUser?.role === 'readonly'}
-      isAdmin={authUser?.role === 'admin'}
+      username={authUser.username || null}
+      readOnly={authUser.role === 'readonly'}
+      isAdmin={authUser.role === 'admin'}
+      onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+      onManageSessions={() => navigateTo('sessions')}
       onLogout={handleLogout}
     />
   );

@@ -43,3 +43,25 @@ export interface AuthUser {
   username: string;
   role: UserRole;
 }
+
+export interface ManagedUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthSession {
+  id: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  last_seen_at?: string | null;
+  user_agent?: string | null;
+  ip_address?: string | null;
+  browser: string;
+  platform: string;
+  device_label: string;
+  current: boolean;
+}

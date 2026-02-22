@@ -3,7 +3,17 @@ import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 
-async function getSiblingLinkMeta(db: D1Database, aId: string, bId: string) {
+type SiblingHandlePreference = {
+  sourceHandle?: string;
+  targetHandle?: string;
+};
+
+async function getSiblingLinkMeta(
+  db: D1Database,
+  aId: string,
+  bId: string,
+  preferredHandles?: SiblingHandlePreference
+) {
   const { results } = await db.prepare(
     'SELECT id, dob FROM people WHERE id IN (?, ?)'
   ).bind(aId, bId).all();
@@ -20,6 +30,17 @@ async function getSiblingLinkMeta(db: D1Database, aId: string, bId: string) {
       fromId: olderId,
       toId: youngerId,
       metadata: JSON.stringify({ sourceHandle: 'right-s', targetHandle: 'left-t' })
+    };
+  }
+
+  if (preferredHandles?.sourceHandle && preferredHandles?.targetHandle) {
+    return {
+      fromId: aId,
+      toId: bId,
+      metadata: JSON.stringify({
+        sourceHandle: preferredHandles.sourceHandle,
+        targetHandle: preferredHandles.targetHandle
+      })
     };
   }
 
@@ -264,7 +285,13 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
 
-      const link = await getSiblingLinkMeta(c.env.DB, from_person_id, to_person_id);
+      const preferredHandles = metadata && typeof metadata === 'object'
+        ? {
+          sourceHandle: (metadata as any).sourceHandle,
+          targetHandle: (metadata as any).targetHandle
+        }
+        : undefined;
+      const link = await getSiblingLinkMeta(c.env.DB, from_person_id, to_person_id, preferredHandles);
       fromId = link.fromId;
       toId = link.toId;
       finalMetadata = link.metadata;
@@ -417,7 +444,13 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     }
 
     if (nextType === 'sibling' && !shouldSkipAutoLink) {
-      const link = await getSiblingLinkMeta(c.env.DB, nextFrom, nextTo);
+      const preferredHandles = metadata && typeof metadata === 'object'
+        ? {
+          sourceHandle: (metadata as any).sourceHandle,
+          targetHandle: (metadata as any).targetHandle
+        }
+        : undefined;
+      const link = await getSiblingLinkMeta(c.env.DB, nextFrom, nextTo, preferredHandles);
       await c.env.DB.prepare(
         'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
       ).bind(link.fromId, link.toId, link.metadata, id).run();

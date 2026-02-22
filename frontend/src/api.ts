@@ -1,4 +1,4 @@
-import type { AuthUser, GraphData, Person, Relationship } from './types';
+import type { AuthSession, AuthUser, GraphData, ManagedUser, Person, Relationship } from './types';
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const API_BASE = import.meta.env.VITE_API_BASE
@@ -11,7 +11,12 @@ const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
 };
 
 const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => (
-  fetch(input, { credentials: 'include', ...init })
+  fetch(input, { credentials: 'include', ...init }).then((res) => {
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent('clan:unauthorized'));
+    }
+    return res;
+  })
 );
 
 export const api = {
@@ -162,6 +167,72 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, role }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  fetchUsers: async (): Promise<ManagedUser[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/users`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  updateUser: async (
+    id: string,
+    updates: { role?: 'admin' | 'readonly'; password?: string }
+  ): Promise<ManagedUser> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/users/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  deleteUser: async (id: string): Promise<void> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/users/${id}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+  },
+
+  fetchSessions: async (): Promise<AuthSession[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/sessions`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  revokeSession: async (id: string): Promise<{ ok: boolean; current: boolean }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/sessions/${id}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  revokeOtherSessions: async (): Promise<{ ok: boolean; deleted: number }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/sessions/revoke-others`, {
+      method: 'POST',
     });
     if (!res.ok) {
       const text = await res.text();

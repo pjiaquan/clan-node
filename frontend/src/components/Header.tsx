@@ -19,6 +19,8 @@ interface HeaderProps {
   canUndo: boolean;
   readOnly?: boolean;
   isAdmin?: boolean;
+  onManageUsers?: () => void;
+  onManageSessions?: () => void;
   onCreateUser?: () => void;
   username?: string | null;
   onLogout: () => void;
@@ -45,6 +47,8 @@ export const Header: React.FC<HeaderProps> = ({
   canUndo,
   readOnly,
   isAdmin,
+  onManageUsers,
+  onManageSessions,
   onCreateUser,
   username,
   onLogout,
@@ -192,6 +196,18 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="header-mobile-panel">
               {username && <div className="header-mobile-label">{username}</div>}
               {editDisabled && <div className="header-mobile-label">只讀</div>}
+              {onManageSessions && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageSessions();
+                    closeMobileMenu();
+                  }}
+                >
+                  Session 管理
+                </button>
+              )}
               <button
                 type="button"
                 className="header-action-item"
@@ -352,6 +368,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   新增帳號
+                </button>
+              )}
+              {isAdmin && onManageUsers && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageUsers();
+                    closeMobileMenu();
+                  }}
+                >
+                  帳號管理
                 </button>
               )}
               <button
@@ -536,7 +564,18 @@ export const Header: React.FC<HeaderProps> = ({
         <ul className="header-user header-menu">
           {username && (
             <li className="header-menu-item">
-              <span>{username}</span>
+              {onManageSessions ? (
+                <button
+                  onClick={onManageSessions}
+                  className="header-profile-btn"
+                  aria-label="Session 管理"
+                  title="Session 管理"
+                >
+                  {username}
+                </button>
+              ) : (
+                <span>{username}</span>
+              )}
             </li>
           )}
           {editDisabled && (
@@ -548,6 +587,13 @@ export const Header: React.FC<HeaderProps> = ({
             <li className="header-menu-item">
               <button onClick={onCreateUser} className="btn-secondary btn-icon" aria-label="新增帳號">
                 <span className="btn-label">新增帳號</span>
+              </button>
+            </li>
+          )}
+          {isAdmin && onManageUsers && (
+            <li className="header-menu-item">
+              <button onClick={onManageUsers} className="btn-secondary btn-icon" aria-label="帳號管理">
+                <span className="btn-label">帳號管理</span>
               </button>
             </li>
           )}

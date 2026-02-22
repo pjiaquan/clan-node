@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL,
+    user_agent TEXT,
+    ip_address TEXT,
+    last_seen_at TEXT,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
