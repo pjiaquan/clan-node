@@ -1,5 +1,9 @@
 import type { AuthSession, AuthUser, GraphData, ManagedUser, Person, Relationship } from './types';
 
+export type CreateRelationshipResponse = Relationship & {
+  created_relationship_ids?: number[];
+};
+
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const API_BASE = import.meta.env.VITE_API_BASE
   || (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev');
@@ -96,7 +100,7 @@ export const api = {
     metadata?: any,
     type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     skipAutoLink = false
-  ): Promise<Relationship> => {
+  ): Promise<CreateRelationshipResponse> => {
     const res = await fetchWithAuth(`${API_BASE}/api/relationships`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -108,6 +112,10 @@ export const api = {
         skipAutoLink,
       }),
     });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
     return res.json();
   },
 

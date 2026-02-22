@@ -34,6 +34,10 @@ type UndoEntry =
     previousCenterId?: string;
   }
   | {
+    type: 'create_relationships';
+    relationshipIds: number[];
+  }
+  | {
     type: 'align';
     positions: Record<string, { x: number; y: number }>;
   }
@@ -695,6 +699,22 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     return false;
   }, [isReadOnly, showToast]);
 
+  const createRelationshipWithUndo = useCallback(async (
+    from: string,
+    to: string,
+    sourceHandle?: string | null,
+    targetHandle?: string | null,
+    type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
+    metadataOverride?: any
+  ) => {
+    const createdIds = await createRelationship(from, to, sourceHandle, targetHandle, type, metadataOverride);
+    if (!createdIds.length) return;
+    setUndoStack((prev) => [
+      { type: 'create_relationships', relationshipIds: createdIds } as const,
+      ...prev,
+    ].slice(0, 10));
+  }, [createRelationship]);
+
   const syncAllPositions = useCallback(async () => {
     if (!ensureEditable()) return;
     if (!graphData) return;
@@ -911,7 +931,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
       const relationshipType = isHorizontal
         ? (sameSurname ? 'sibling' : (gendersDifferent ? 'spouse' : 'sibling'))
         : getDefaultRelationshipType(connection.source, connection.target, undefined, { allowSpouse: false });
-      createRelationship(
+      void createRelationshipWithUndo(
         connection.source,
         connection.target,
         sourceHandle,
@@ -919,7 +939,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         relationshipType
       );
     }
-  }, [createRelationship, graphData, getDefaultRelationshipType]);
+  }, [createRelationshipWithUndo, graphData, getDefaultRelationshipType]);
 
   const onConnectStart = useCallback(() => {
     if (isCoarsePointer) {
@@ -1539,11 +1559,23 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     || dimNodeIds.size > 0
     || dimExcludedNodeIds.size > 0
   );
+  const hasCollapsedNodes = Boolean(
+    collapsedMaternalRoots.size > 0
+    || collapsedPaternalRoots.size > 0
+    || collapsedChildRoots.size > 0
+    || collapsedSiblingRoots.size > 0
+  );
   const clearAllDimming = useCallback(() => {
     setDimFocusId(null);
     setDimNonRelativesId(null);
     setDimNodeIds(new Set());
     setDimExcludedNodeIds(new Set());
+  }, []);
+  const expandAllCollapsed = useCallback(() => {
+    setCollapsedMaternalRoots(new Set());
+    setCollapsedPaternalRoots(new Set());
+    setCollapsedChildRoots(new Set());
+    setCollapsedSiblingRoots(new Set());
   }, []);
   const ctrlHoverFocusId = isCtrlPressed ? hoveredNodeId : null;
   const { connectedNodeIds: ctrlHoverConnectedNodeIds, connectedEdgeIds: ctrlHoverConnectedEdgeIds } = useMemo(() => {
@@ -2080,10 +2112,10 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
 
     if (linkMode) {
       const relationshipType = getDefaultRelationshipType(linkMode.from, nodeId);
-      createRelationship(linkMode.from, nodeId, undefined, undefined, relationshipType);
+      void createRelationshipWithUndo(linkMode.from, nodeId, undefined, undefined, relationshipType);
       setLinkMode(null);
     }
-  }, [linkMode, createRelationship, getDefaultRelationshipType, setNodes, selectedNode]);
+  }, [linkMode, createRelationshipWithUndo, getDefaultRelationshipType, setNodes, selectedNode]);
 
   const selectedNodeIds = useMemo(
     () => nodes.filter(node => node.selected).map(node => node.id),
@@ -2164,79 +2196,100 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     if (!entry) return;
 
     try {
-      if (entry.type === 'align' || entry.type === 'move') {
-        const nextPositions = entry.positions;
-        const updates = Object.entries(nextPositions).map(([id, position]) => {
-          nodePositionMap.current[id] = position;
-          return updatePersonPosition(id, position, { force: true });
-        });
-        setNodes((prev) => prev.map((node) => {
-          const position = nextPositions[node.id];
-          if (!position) return node;
-          return { ...node, position };
-        }));
-        try {
-          localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
-        } catch (error) {
-          console.warn('Failed to persist node positions:', error);
-        }
-        await Promise.all(updates);
-        const focusId = entry.type === 'move'
-          ? (entry.draggedId || Object.keys(nextPositions)[0])
-          : Object.keys(nextPositions)[0];
-        if (focusId) {
+      switch (entry.type) {
+        case 'align':
+        case 'move': {
+          const nextPositions = entry.positions;
+          const updates = Object.entries(nextPositions).map(([id, position]) => {
+            nodePositionMap.current[id] = position;
+            return updatePersonPosition(id, position, { force: true });
+          });
+          setNodes((prev) => prev.map((node) => {
+            const position = nextPositions[node.id];
+            if (!position) return node;
+            return { ...node, position };
+          }));
           try {
-            const focusPosition = nextPositions[focusId];
-            localStorage.setItem('clan.centerId', focusId);
-            localStorage.setItem('clan.pendingCenterId', focusId);
-            if (focusPosition) {
-              const bounds = flowWrapperRef.current?.getBoundingClientRect();
-              const width = bounds?.width || window.innerWidth;
-              const height = bounds?.height || window.innerHeight;
-              const zoom = 1;
-              const viewport = {
-                x: width / 2 - focusPosition.x * zoom,
-                y: height / 2 - focusPosition.y * zoom,
-                zoom
-              };
-              localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
-            }
-            localStorage.removeItem('clan.pendingFocus');
-            localStorage.removeItem('clan.pendingFocusPosition');
+            localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
           } catch (error) {
-            console.warn('Failed to persist pending focus after undo:', error);
+            console.warn('Failed to persist node positions:', error);
           }
+          await Promise.all(updates);
+          const focusId = entry.type === 'move'
+            ? (entry.draggedId || Object.keys(nextPositions)[0])
+            : Object.keys(nextPositions)[0];
+          if (focusId) {
+            try {
+              const focusPosition = nextPositions[focusId];
+              localStorage.setItem('clan.centerId', focusId);
+              localStorage.setItem('clan.pendingCenterId', focusId);
+              if (focusPosition) {
+                const bounds = flowWrapperRef.current?.getBoundingClientRect();
+                const width = bounds?.width || window.innerWidth;
+                const height = bounds?.height || window.innerHeight;
+                const zoom = 1;
+                const viewport = {
+                  x: width / 2 - focusPosition.x * zoom,
+                  y: height / 2 - focusPosition.y * zoom,
+                  zoom
+                };
+                localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+              }
+              localStorage.removeItem('clan.pendingFocus');
+              localStorage.removeItem('clan.pendingFocusPosition');
+            } catch (error) {
+              console.warn('Failed to persist pending focus after undo:', error);
+            }
+          }
+          break;
         }
-      } else {
-        await api.createPerson(
-          entry.person.name,
-          entry.person.english_name ?? undefined,
-          entry.person.gender,
-          entry.person.dob ?? undefined,
-          entry.person.dod ?? undefined,
-          entry.person.tob ?? undefined,
-          entry.person.tod ?? undefined,
-          entry.person.metadata ?? undefined,
-          entry.person.id,
-          entry.person.avatar_url ?? undefined
-        );
-        for (const rel of entry.relationships) {
-          await api.createRelationship(
-            rel.from_person_id,
-            rel.to_person_id,
-            rel.metadata ?? undefined,
-            rel.type as 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law',
-            true
+        case 'create_relationships': {
+          const uniqueIds = Array.from(new Set(entry.relationshipIds));
+          for (const relationshipId of uniqueIds) {
+            try {
+              await api.deleteRelationship(String(relationshipId));
+            } catch (error) {
+              if (error instanceof Error && error.message.includes('HTTP 404')) {
+                continue;
+              }
+              throw error;
+            }
+          }
+          setSelectedEdge(null);
+          break;
+        }
+        case 'delete': {
+          await api.createPerson(
+            entry.person.name,
+            entry.person.english_name ?? undefined,
+            entry.person.gender,
+            entry.person.dob ?? undefined,
+            entry.person.dod ?? undefined,
+            entry.person.tob ?? undefined,
+            entry.person.tod ?? undefined,
+            entry.person.metadata ?? undefined,
+            entry.person.id,
+            entry.person.avatar_url ?? undefined
           );
-        }
-        if (entry.previousCenterId) {
-          setCenterId(entry.previousCenterId);
+          for (const rel of entry.relationships) {
+            await api.createRelationship(
+              rel.from_person_id,
+              rel.to_person_id,
+              rel.metadata ?? undefined,
+              rel.type as 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law',
+              true
+            );
+          }
+          if (entry.previousCenterId) {
+            setCenterId(entry.previousCenterId);
+          }
+          break;
         }
       }
       setUndoStack(prev => prev.slice(1));
       fetchGraph();
     } catch (error) {
-      console.error('Failed to undo delete:', error);
+      console.error(`Failed to undo ${entry.type}:`, error);
     }
   }, [ensureEditable, undoStack, fetchGraph, setCenterId, setNodes, updatePersonPosition]);
 
@@ -2446,6 +2499,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         syncingPositions={syncingPositions}
         onClearAllDim={clearAllDimming}
         hasActiveDimming={hasActiveDimming}
+        onExpandAllCollapsed={expandAllCollapsed}
+        hasCollapsedNodes={hasCollapsedNodes}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
         linkMode={linkMode}
@@ -2750,7 +2805,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
             const person = await createPerson(name, englishName, gender, dob, dod, tob, tod);
             if (selectedNode) {
               const relationshipType = getDefaultRelationshipType(selectedNode, person.id, { toGender: person.gender });
-              await createRelationship(selectedNode, person.id, undefined, undefined, relationshipType);
+              await createRelationshipWithUndo(selectedNode, person.id, undefined, undefined, relationshipType);
             }
             setShowAddModal(false);
           }}

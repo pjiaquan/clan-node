@@ -185,14 +185,18 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     targetHandle?: string | null,
     type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     metadataOverride?: any
-  ) => {
+  ): Promise<number[]> => {
     try {
       const metadata = metadataOverride ?? ((sourceHandle || targetHandle) ? { sourceHandle, targetHandle } : undefined);
-      await api.createRelationship(from, to, metadata, type);
-      refreshEdges();
-      refreshNodes();
+      const created = await api.createRelationship(from, to, metadata, type);
+      await Promise.all([refreshEdges(), refreshNodes()]);
+      const rawIds = Array.isArray(created.created_relationship_ids) && created.created_relationship_ids.length
+        ? created.created_relationship_ids
+        : (typeof created.id === 'number' ? [created.id] : []);
+      return Array.from(new Set(rawIds.filter((id) => Number.isFinite(id))));
     } catch (error) {
       console.error('Failed to create relationship:', error);
+      return [];
     }
   }, [refreshEdges, refreshNodes]);
 

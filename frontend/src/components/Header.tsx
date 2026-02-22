@@ -7,6 +7,8 @@ interface HeaderProps {
   syncingPositions?: boolean;
   onClearAllDim: () => void;
   hasActiveDimming: boolean;
+  onExpandAllCollapsed: () => void;
+  hasCollapsedNodes: boolean;
   selectedNode: string | null;
   selectedEdge: string | null;
   linkMode: { from: string } | null;
@@ -35,6 +37,8 @@ export const Header: React.FC<HeaderProps> = ({
   syncingPositions,
   onClearAllDim,
   hasActiveDimming,
+  onExpandAllCollapsed,
+  hasCollapsedNodes,
   selectedNode,
   selectedEdge,
   linkMode,
@@ -234,6 +238,17 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 className="header-action-item"
                 onClick={() => {
+                  onExpandAllCollapsed();
+                  closeMobileMenu();
+                }}
+                disabled={!hasCollapsedNodes}
+              >
+                展開全部折疊
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
                   onUndo();
                   closeMobileMenu();
                 }}
@@ -421,6 +436,15 @@ export const Header: React.FC<HeaderProps> = ({
           title="取消全部淡化 (Shift+D)"
         >
           <span className="btn-label">取消淡化</span>
+        </button>
+        <button
+          onClick={onExpandAllCollapsed}
+          className="btn-secondary btn-icon"
+          disabled={!hasCollapsedNodes}
+          aria-label="展開全部折疊"
+          title="展開全部折疊"
+        >
+          <span className="btn-label">展開全部</span>
         </button>
         <button onClick={onFocusMe} className="btn-secondary btn-icon focus-me-btn" aria-label="我的位置">
           <span className="btn-icon">
