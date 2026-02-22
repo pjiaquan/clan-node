@@ -9,6 +9,7 @@ interface AddPersonModalProps {
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
   const [showDod, setShowDod] = useState(false);
   const [dob, setDob] = useState('');
+  const [dobUnknown, setDobUnknown] = useState(false);
   const [tob, setTob] = useState('');
   const [tod, setTod] = useState('');
   const clickCountRef = React.useRef(0);
@@ -38,7 +39,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
             formData.get('name') as string,
             (formData.get('english_name') as string) || undefined,
             formData.get('gender') as 'M' | 'F' | 'O',
-            dob || undefined,
+            dobUnknown ? undefined : dob || undefined,
             formData.get('dod') as string || undefined,
             normalizeTraditionalHour(formData.get('tob') as string || ''),
             normalizeTraditionalHour(formData.get('tod') as string || '')
@@ -64,7 +65,29 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
             <label onClick={handleDobLabelClick} style={{ cursor: 'pointer', userSelect: 'none' }}>
               出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
             </label>
-            <input type="date" name="dob" value={dob} onChange={(e) => setDob(e.target.value)} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <input
+                type="date"
+                name="dob"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+                disabled={dobUnknown}
+              />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={dobUnknown}
+                  onChange={(e) => {
+                    const nextUnknown = e.target.checked;
+                    setDobUnknown(nextUnknown);
+                    if (nextUnknown) {
+                      setDob('');
+                    }
+                  }}
+                />
+                未知
+              </label>
+            </div>
           </div>
           <div className="form-group">
             <label>

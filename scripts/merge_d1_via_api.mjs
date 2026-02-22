@@ -4,6 +4,9 @@ const LOCAL_USER = process.env.LOCAL_USER || '';
 const LOCAL_PASS = process.env.LOCAL_PASS || '';
 const REMOTE_USER = process.env.REMOTE_USER || '';
 const REMOTE_PASS = process.env.REMOTE_PASS || '';
+const ORIGIN_OVERRIDE = process.env.ORIGIN || '';
+const ORIGIN_LOCAL = process.env.ORIGIN_LOCAL || '';
+const ORIGIN_REMOTE = process.env.ORIGIN_REMOTE || '';
 
 if (!LOCAL_USER || !LOCAL_PASS || !REMOTE_USER || !REMOTE_PASS) {
   console.error('Missing credentials. Set LOCAL_USER, LOCAL_PASS, REMOTE_USER, REMOTE_PASS.');
@@ -15,10 +18,22 @@ const parseSetCookie = (setCookieHeaders = []) => {
   return cookies.join('; ');
 };
 
+const resolveOrigin = (baseUrl) => {
+  if (baseUrl === LOCAL_API_BASE && ORIGIN_LOCAL) return ORIGIN_LOCAL;
+  if (baseUrl === REMOTE_API_BASE && ORIGIN_REMOTE) return ORIGIN_REMOTE;
+  if (ORIGIN_OVERRIDE) return ORIGIN_OVERRIDE;
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return '';
+  }
+};
+
 const login = async (baseUrl, username, password) => {
+  const origin = resolveOrigin(baseUrl);
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
@@ -41,9 +56,10 @@ const apiGet = async (baseUrl, cookie, path) => {
 };
 
 const apiPost = async (baseUrl, cookie, path, payload, { allowConflict = false } = {}) => {
+  const origin = resolveOrigin(baseUrl);
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    headers: { 'Content-Type': 'application/json', Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify(payload),
   });
   if (allowConflict && res.status === 409) {
@@ -57,9 +73,10 @@ const apiPost = async (baseUrl, cookie, path, payload, { allowConflict = false }
 };
 
 const apiPut = async (baseUrl, cookie, path, payload) => {
+  const origin = resolveOrigin(baseUrl);
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    headers: { 'Content-Type': 'application/json', Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

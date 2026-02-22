@@ -93,6 +93,8 @@ rm -f "$DATA_PATH"
 echo "Syncing avatars from local to remote..."
 LOCAL_API_BASE="${LOCAL_API_BASE:-http://localhost:8787}" \
 REMOTE_API_BASE="${REMOTE_API_BASE:-https://clan-node-production.pjiaquan.workers.dev}" \
+ORIGIN_LOCAL="${ORIGIN_LOCAL:-http://localhost:5173}" \
+ORIGIN_REMOTE="${ORIGIN_REMOTE:-https://clan-frontend.pages.dev}" \
 SYNC_DIRECTION="local-to-remote" \
 npm run avatars:sync
 

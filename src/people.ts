@@ -1,7 +1,8 @@
-import type { Context, Hono } from 'hono';
+import type { Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
+import { queueRemoteFormData, queueRemoteJson } from './dual_write';
 
 async function updateSiblingOrdering(db: D1Database, personId: string) {
   const person = await db.prepare(
@@ -35,6 +36,14 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
 }
 
 export function registerPeopleRoutes(app: Hono<AppBindings>) {
+  const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+  const ALLOWED_AVATAR_TYPES: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif'
+  };
+
   const loadCustomFields = async (db: Env['DB']) => {
     const { results } = await db.prepare(
       'SELECT person_id, label, value FROM person_custom_fields'
@@ -53,35 +62,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       'SELECT label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
     ).bind(personId).all();
     return results.map((row: any) => ({ label: row.label, value: row.value }));
-  };
-
-  const resolveAvatarPhoto = async (c: Context<AppBindings>, avatarUrl?: string | null) => {
-    if (!avatarUrl) return undefined;
-    const url = new URL(avatarUrl, c.req.url);
-    const path = url.pathname;
-    if (path.startsWith('/api/avatars/')) {
-      const key = path.replace('/api/avatars/', '');
-      const object = await c.env.AVATARS.get(key);
-      if (!object) return undefined;
-      const data = await object.arrayBuffer();
-      return {
-        data,
-        contentType: object.httpMetadata?.contentType || 'application/octet-stream',
-        filename: key
-      };
-    }
-    const isDev = (c.env.ENVIRONMENT || 'development') === 'development';
-    if (!isDev) return undefined;
-    const response = await fetch(url.toString());
-    if (!response.ok) return undefined;
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    const data = await response.arrayBuffer();
-    const filename = path.split('/').pop() || 'avatar';
-    return {
-      data,
-      contentType,
-      filename
-    };
   };
 
   const extractCustomFields = (body: any, metadata: any) => {
@@ -189,7 +169,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }))
       : [];
     const avatarLink = avatar_url ? new URL(avatar_url, c.req.url).toString() : undefined;
-    const avatarPhoto = await resolveAvatarPhoto(c, avatar_url);
     notifyUpdate(c, 'people:create', {
       id,
       name,
@@ -203,7 +182,25 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       metadata_keys: metadataKeys,
       custom_fields_count: customFieldsCount,
       custom_fields: customFieldsSummary
-    }, avatarPhoto ? { photoData: avatarPhoto } : (avatarLink ? { photoUrl: avatarLink } : undefined));
+    }, avatarLink ? { photoUrl: avatarLink } : undefined);
+
+    const mirrorPayload: Record<string, unknown> = {
+      id,
+      name,
+      english_name: english_name || null,
+      gender: gender || 'O',
+      dob: dob || null,
+      dod: dod || null,
+      tob: tob || null,
+      tod: tod || null,
+      avatar_url: avatar_url || null,
+      metadata: metadata || null
+    };
+    if (customFields) {
+      mirrorPayload.custom_fields = customFields;
+    }
+    queueRemoteJson(c, 'POST', '/api/people', mirrorPayload);
+
     return c.json({
       ...person,
       metadata: {
@@ -355,7 +352,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (tob !== undefined) updateDetails.tob = tob;
     if (tod !== undefined) updateDetails.tod = tod;
     let avatarLink: string | undefined;
-    let avatarPhoto: Awaited<ReturnType<typeof resolveAvatarPhoto>> | undefined;
     if (avatar_url !== undefined) {
       const prevAvatar = existingAny.avatar_url ?? null;
       updateDetails.avatar_url = {
@@ -364,7 +360,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       };
       if (avatar_url) {
         avatarLink = new URL(avatar_url, c.req.url).toString();
-        avatarPhoto = await resolveAvatarPhoto(c, avatar_url);
       }
     }
     if (metadata !== undefined && typeof metadata === 'object') {
@@ -382,7 +377,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         updateDetails.custom_fields_count = formattedNext.length;
       }
     }
-    notifyUpdate(c, 'people:update', updateDetails, avatarPhoto ? { photoData: avatarPhoto } : (avatarLink ? { photoUrl: avatarLink } : undefined));
+    notifyUpdate(c, 'people:update', updateDetails, avatarLink ? { photoUrl: avatarLink } : undefined);
+    queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
     return c.json({
       ...person,
       metadata: {
@@ -409,14 +405,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       if (!(file instanceof File)) {
         return c.json({ error: 'file is required' }, 400);
       }
+      if (file.size > MAX_AVATAR_BYTES) {
+        return c.json({ error: 'file is too large' }, 413);
+      }
 
-      const allowedTypes: Record<string, string> = {
-        'image/jpeg': 'jpg',
-        'image/png': 'png',
-        'image/webp': 'webp',
-        'image/gif': 'gif'
-      };
-      const ext = allowedTypes[file.type];
+      if (!file.type || !file.type.startsWith('image/')) {
+        return c.json({ error: 'unsupported file type' }, 400);
+      }
+
+      const ext = ALLOWED_AVATAR_TYPES[file.type];
       if (!ext) {
         return c.json({ error: 'unsupported file type' }, 400);
       }
@@ -437,19 +434,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
       ).bind(avatarUrl, new Date().toISOString(), id).run();
 
-    const avatarLink = new URL(avatarUrl, c.req.url).toString();
-    const maxPhotoSize = 9 * 1024 * 1024;
-    const avatarPhoto = file.size <= maxPhotoSize
-      ? {
-        data: await file.arrayBuffer(),
-        contentType: file.type || 'application/octet-stream',
-        filename: key
-      }
-      : undefined;
+      const avatarLink = new URL(avatarUrl, c.req.url).toString();
       notifyUpdate(c, 'people:avatar', {
         id,
         avatar_url: avatarUrl
-      }, avatarPhoto ? { photoData: avatarPhoto } : { photoUrl: avatarLink });
+      }, { photoUrl: avatarLink });
+      const avatarBuffer = await file.arrayBuffer();
+      const mirrorForm = new FormData();
+      mirrorForm.set('file', new Blob([avatarBuffer], { type: file.type || 'application/octet-stream' }), file.name || 'avatar');
+      queueRemoteFormData(c, `/api/people/${id}/avatar`, mirrorForm);
       return c.json({ avatar_url: avatarUrl });
     } catch (error) {
       console.error('Avatar upload failed:', error);
@@ -497,6 +490,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     if (result.success && (result.meta.changes ?? 0) > 0) {
       notifyUpdate(c, 'people:delete', { id });
+      queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);
       return c.json({ success: true, id });
     }
     return c.json({ error: 'Person not found' }, 404);

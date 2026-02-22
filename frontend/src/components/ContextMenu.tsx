@@ -16,6 +16,7 @@ interface ContextMenuProps {
   onDeleteSiblingRelations: (id: string) => void;
   onDeleteChildRelations: (id: string) => void;
   onCopyTitle: (title: string) => void;
+  onToggleDimSingle: (id: string) => void;
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
   onToggleCollapseMaternal: (id: string) => void;
@@ -28,6 +29,7 @@ interface ContextMenuProps {
   onAlignVertical: () => void;
   dimRelativesActive: boolean;
   dimNonRelativesActive: boolean;
+  dimSingleActive: boolean;
   maternalCollapsed: boolean;
   paternalCollapsed: boolean;
   childrenCollapsed: boolean;
@@ -50,6 +52,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onDeleteSiblingRelations,
   onDeleteChildRelations,
   onCopyTitle,
+  onToggleDimSingle,
   onToggleDimRelatives,
   onToggleDimNonRelatives,
   onToggleCollapseMaternal,
@@ -62,6 +65,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onAlignVertical,
   dimRelativesActive,
   dimNonRelativesActive,
+  dimSingleActive,
   maternalCollapsed,
   paternalCollapsed,
   childrenCollapsed,
@@ -264,6 +268,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       </button>
       {dimOpen && (
         <>
+          <button
+            onClick={() => {
+              onToggleDimSingle(id);
+              onClose();
+            }}
+            style={submenuItemStyle}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            {dimSingleActive ? '取消單一淡化' : '淡化此節點'}
+          </button>
           <button 
             onClick={() => {
               onToggleDimRelatives(id);

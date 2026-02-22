@@ -16,7 +16,23 @@ const parseMetadata = (value: any) => {
 export function useClanGraph(options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
   const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [centerId, setCenterIdState] = useState<string>('');
+  const resolveInitialCenterId = () => {
+    try {
+      const pendingFocusRaw = localStorage.getItem('clan.pendingFocus');
+      if (pendingFocusRaw) {
+        const parsed = JSON.parse(pendingFocusRaw) as { id?: string };
+        if (parsed?.id) return parsed.id;
+      }
+      const pendingCenter = localStorage.getItem('clan.pendingCenterId');
+      if (pendingCenter) return pendingCenter;
+      const storedCenter = localStorage.getItem('clan.centerId');
+      if (storedCenter) return storedCenter;
+    } catch {
+      // Ignore localStorage errors and fall back to default initialization.
+    }
+    return '';
+  };
+  const [centerId, setCenterIdState] = useState<string>(() => resolveInitialCenterId());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const centerStorageKey = 'clan.centerId';
@@ -77,6 +93,23 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     const initCenter = async () => {
       try {
         setLoading(true);
+        const pendingFocusRaw = localStorage.getItem('clan.pendingFocus');
+        if (pendingFocusRaw) {
+          try {
+            const parsed = JSON.parse(pendingFocusRaw) as { id?: string };
+            if (parsed?.id) {
+              if (!cancelled) setCenterIdState(parsed.id);
+              return;
+            }
+          } catch {
+            // Ignore parse errors and fall back to stored center.
+          }
+        }
+        const pendingCenter = localStorage.getItem('clan.pendingCenterId');
+        if (pendingCenter) {
+          if (!cancelled) setCenterIdState(pendingCenter);
+          return;
+        }
         const storedCenter = localStorage.getItem(centerStorageKey);
         if (storedCenter) {
           if (!cancelled) setCenterIdState(storedCenter);
@@ -119,12 +152,16 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     }
   }, [fetchGraph]);
 
-  const updatePersonPosition = useCallback(async (id: string, position: { x: number; y: number }) => {
+  const updatePersonPosition = useCallback(async (
+    id: string,
+    position: { x: number; y: number },
+    options?: { force?: boolean }
+  ) => {
     if (!graphData) return;
     const person = graphData.nodes.find(p => p.id === id);
     if (!person) return;
     const currentPosition = person.metadata?.position;
-    if (currentPosition
+    if (!options?.force && currentPosition
       && currentPosition.x === position.x
       && currentPosition.y === position.y) {
       return;

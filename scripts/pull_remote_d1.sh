@@ -13,6 +13,7 @@ wrangler d1 export "$DB_NAME" --remote --output="$EXPORT_PATH"
 
 echo "Dropping local tables..."
 wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS relationships;"
+wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS person_custom_fields;"
 wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS sessions;"
 wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS users;"
 wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS people;"

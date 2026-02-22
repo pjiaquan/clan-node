@@ -23,7 +23,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1>Clan Node</h1>
+        <h1>Family Tree</h1>
         <p>請先登入以查看家族譜圖</p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">

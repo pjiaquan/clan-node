@@ -1,30 +1,8 @@
 import type { AuthUser, GraphData, Person, Relationship } from './types';
 
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const API_BASE = import.meta.env.VITE_API_BASE
-  || `${window.location.protocol}//${window.location.hostname}:8787`;
-
-const SESSION_TOKEN_KEY = 'clan.sessionToken';
-
-const getSessionToken = () => {
-  try {
-    return localStorage.getItem(SESSION_TOKEN_KEY);
-  } catch (error) {
-    console.warn('Failed to read session token:', error);
-    return null;
-  }
-};
-
-const setSessionToken = (token: string | null) => {
-  try {
-    if (token) {
-      localStorage.setItem(SESSION_TOKEN_KEY, token);
-    } else {
-      localStorage.removeItem(SESSION_TOKEN_KEY);
-    }
-  } catch (error) {
-    console.warn('Failed to persist session token:', error);
-  }
-};
+  || (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev');
 
 const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;
@@ -32,25 +10,21 @@ const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   return `${API_BASE}${avatarUrl}`;
 };
 
-const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => {
-  const headers = new Headers(init.headers || {});
-  if (!headers.has('Authorization')) {
-    const token = getSessionToken();
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-  }
-  return fetch(input, { credentials: 'include', ...init, headers });
-};
+const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => (
+  fetch(input, { credentials: 'include', ...init })
+);
 
 export const api = {
   resolveAvatarUrl,
-  fetchAvatarBlobUrl: async (avatarUrl: string): Promise<string> => {
+  fetchAvatarBlobUrl: async (avatarUrl: string): Promise<string | null> => {
     const resolved = resolveAvatarUrl(avatarUrl);
     if (!resolved) {
       throw new Error('Invalid avatar URL');
     }
     const res = await fetchWithAuth(resolved);
+    if (res.status === 404) {
+      return null;
+    }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
@@ -159,19 +133,15 @@ export const api = {
     });
   },
 
-  authMe: async (): Promise<{ user: AuthUser; session_id?: string }> => {
+  authMe: async (): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/me`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    const data = await res.json();
-    if (data?.session_id) {
-      setSessionToken(data.session_id);
-    }
-    return data;
+    return res.json();
   },
 
-  login: async (username: string, password: string): Promise<{ user: AuthUser; session_id?: string }> => {
+  login: async (username: string, password: string): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,16 +150,11 @@ export const api = {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
-    const data = await res.json();
-    if (data?.session_id) {
-      setSessionToken(data.session_id);
-    }
-    return data;
+    return res.json();
   },
 
   logout: async (): Promise<void> => {
     await fetchWithAuth(`${API_BASE}/api/auth/logout`, { method: 'POST' });
-    setSessionToken(null);
   },
 
   createUser: async (username: string, password: string, role: 'admin' | 'readonly'): Promise<AuthUser> => {

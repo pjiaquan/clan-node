@@ -5,6 +5,8 @@ interface HeaderProps {
   onFocusMe: () => void;
   onSyncPositions: () => void;
   syncingPositions?: boolean;
+  onClearAllDim: () => void;
+  hasActiveDimming: boolean;
   selectedNode: string | null;
   selectedEdge: string | null;
   linkMode: { from: string } | null;
@@ -29,6 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   onFocusMe,
   onSyncPositions,
   syncingPositions,
+  onClearAllDim,
+  hasActiveDimming,
   selectedNode,
   selectedEdge,
   linkMode,
@@ -171,19 +175,6 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </form>
-        <button
-          onClick={onFocusMe}
-          className="btn-secondary btn-icon mobile-visible"
-          aria-label="我的位置"
-          type="button"
-        >
-          <span className="btn-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </span>
-        </button>
         <div className="header-mobile-menu mobile-visible" ref={mobileMenuRef}>
           <button
             type="button"
@@ -211,6 +202,17 @@ export const Header: React.FC<HeaderProps> = ({
                 disabled={editDisabled || syncingPositions}
               >
                 {syncingPositions ? '同步中...' : '同步位置'}
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onClearAllDim();
+                  closeMobileMenu();
+                }}
+                disabled={!hasActiveDimming}
+              >
+                取消全部淡化
               </button>
               <button
                 type="button"
@@ -383,7 +385,16 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <span className="btn-label">{syncingPositions ? '同步中...' : '同步位置'}</span>
         </button>
-        <button onClick={onFocusMe} className="btn-secondary btn-icon" aria-label="我的位置">
+        <button
+          onClick={onClearAllDim}
+          className="btn-secondary btn-icon"
+          disabled={!hasActiveDimming}
+          aria-label="取消全部淡化"
+          title="取消全部淡化 (Shift+D)"
+        >
+          <span className="btn-label">取消淡化</span>
+        </button>
+        <button onClick={onFocusMe} className="btn-secondary btn-icon focus-me-btn" aria-label="我的位置">
           <span className="btn-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -533,21 +544,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="readonly-badge">只讀</span>
             </li>
           )}
-          <li className="header-menu-item">
-            <button
-              className="btn-secondary btn-icon header-find-me"
-              type="button"
-              onClick={onFocusMe}
-              aria-label="我的位置"
-            >
-              <span className="btn-icon">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
-                  <path d="M12 2v4M12 18v4M2 12h4M18 12h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
-            </button>
-          </li>
           {isAdmin && onCreateUser && (
             <li className="header-menu-item">
               <button onClick={onCreateUser} className="btn-secondary btn-icon" aria-label="新增帳號">

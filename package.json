@@ -4,7 +4,7 @@
   "description": "Family tree genealogy system with graph-based kinship calculations",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --ip 0.0.0.0",
     "deploy": "wrangler deploy",
     "deploy:build": "VITE_API_BASE=https://clan-node-production.pjiaquan.workers.dev npm --prefix frontend run build && wrangler deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master",
     "d1:create": "wrangler d1 create clan-db",
@@ -16,6 +16,7 @@
     "d1:push": "bash scripts/push_local_d1.sh",
     "d1:pull": "bash scripts/pull_remote_d1.sh",
     "avatars:sync": "node scripts/sync_avatars.mjs",
+    "avatars:audit": "node scripts/audit_avatars.mjs",
     "siblings:fix": "node scripts/fix_siblings.mjs",
     "d1:merge": "node scripts/merge_d1_via_api.mjs",
     "type-check": "tsc --noEmit"
@@ -24,7 +25,12 @@
     "type": "git",
     "url": "git+https://github.com/pjiaquan/clan-node.git"
   },
-  "keywords": ["genealogy", "family-tree", "graph", "kinship"],
+  "keywords": [
+    "genealogy",
+    "family-tree",
+    "graph",
+    "kinship"
+  ],
   "author": "",
   "license": "MIT",
   "type": "module",
@@ -34,6 +40,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241227.0",
     "typescript": "^5.7.3",
-    "wrangler": "^4.9.0"
+    "wrangler": "^4.67.0"
   }
 }

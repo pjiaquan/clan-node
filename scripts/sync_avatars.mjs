@@ -5,6 +5,10 @@ const LOCAL_PASS = process.env.LOCAL_PASS || '';
 const REMOTE_USER = process.env.REMOTE_USER || '';
 const REMOTE_PASS = process.env.REMOTE_PASS || '';
 const FETCH_TIMEOUT_MS = Number.parseInt(process.env.FETCH_TIMEOUT_MS || '20000', 10);
+const ORIGIN_OVERRIDE = process.env.ORIGIN || '';
+const ORIGIN_LOCAL = process.env.ORIGIN_LOCAL || '';
+const ORIGIN_REMOTE = process.env.ORIGIN_REMOTE || '';
+const FAIL_ON_MISSING_SOURCE_AVATAR = process.env.FAIL_ON_MISSING_SOURCE_AVATAR === '1';
 
 if (!LOCAL_USER || !LOCAL_PASS || !REMOTE_USER || !REMOTE_PASS) {
   console.error('Missing credentials. Set LOCAL_USER, LOCAL_PASS, REMOTE_USER, REMOTE_PASS.');
@@ -26,10 +30,22 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
   }
 };
 
+const resolveOrigin = (baseUrl) => {
+  if (baseUrl === LOCAL_API_BASE && ORIGIN_LOCAL) return ORIGIN_LOCAL;
+  if (baseUrl === REMOTE_API_BASE && ORIGIN_REMOTE) return ORIGIN_REMOTE;
+  if (ORIGIN_OVERRIDE) return ORIGIN_OVERRIDE;
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return '';
+  }
+};
+
 const login = async (baseUrl, username, password) => {
+  const origin = resolveOrigin(baseUrl);
   const res = await fetchWithTimeout(`${baseUrl}/api/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
@@ -40,19 +56,48 @@ const login = async (baseUrl, username, password) => {
 };
 
 const fetchPeople = async (baseUrl, cookie) => {
+  const origin = resolveOrigin(baseUrl);
   const res = await fetchWithTimeout(`${baseUrl}/api/people`, {
-    headers: { Cookie: cookie },
+    headers: { Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
   });
   if (!res.ok) {
-    throw new Error(`Failed to fetch people ${res.status} ${res.statusText}`);
+    const text = await res.text().catch(() => '');
+    throw new Error(`Failed to fetch people ${res.status} ${res.statusText}: ${text}`);
   }
   return res.json();
+};
+
+const isSameOrigin = (left, right) => {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
 };
 
 const resolveAvatarUrl = (baseUrl, avatarUrl) => {
   if (!avatarUrl) return null;
   if (/^https?:\/\//i.test(avatarUrl)) return avatarUrl;
   return `${baseUrl}${avatarUrl}`;
+};
+
+const fetchAvatar = async (sourceUrl, baseUrl, cookie) => {
+  const headers = {};
+  if (cookie && isSameOrigin(sourceUrl, baseUrl)) {
+    headers.Cookie = cookie;
+  }
+  return fetchWithTimeout(sourceUrl, {
+    headers,
+    redirect: 'follow',
+  });
+};
+
+const checkAvatarExists = async (baseUrl, cookie, avatarUrl) => {
+  const targetUrl = resolveAvatarUrl(baseUrl, avatarUrl);
+  if (!targetUrl) return false;
+  const res = await fetchAvatar(targetUrl, baseUrl, cookie);
+  if (res.status === 404) return false;
+  return res.ok;
 };
 
 const resolveContentType = (contentType, filename) => {
@@ -68,12 +113,13 @@ const resolveContentType = (contentType, filename) => {
 };
 
 const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, filename) => {
+  const origin = resolveOrigin(baseUrl);
   const formData = new FormData();
   const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
   formData.append('file', blob, filename || 'avatar.png');
   const res = await fetchWithTimeout(`${baseUrl}/api/people/${personId}/avatar`, {
     method: 'POST',
-    headers: { Cookie: cookie },
+    headers: { Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: formData,
   });
   if (!res.ok) {
@@ -92,18 +138,43 @@ const run = async () => {
   const fromCookie = await login(fromBase, fromLocal ? LOCAL_USER : REMOTE_USER, fromLocal ? LOCAL_PASS : REMOTE_PASS);
   const toCookie = await login(toBase, fromLocal ? REMOTE_USER : LOCAL_USER, fromLocal ? REMOTE_PASS : LOCAL_PASS);
 
-  const people = await fetchPeople(fromBase, fromCookie);
+  let people;
+  try {
+    people = await fetchPeople(fromBase, fromCookie);
+  } catch (error) {
+    if (!fromLocal) {
+      console.warn(`Failed to fetch people from remote (${fromBase}). Falling back to local list.`);
+      people = await fetchPeople(LOCAL_API_BASE, toCookie);
+    } else {
+      throw error;
+    }
+  }
   const withAvatar = people.filter((person) => person.avatar_url);
 
   console.log(`Found ${withAvatar.length} avatars to sync (${direction}).`);
   const failures = [];
+  const missingSource = [];
+  let alreadyPresent = 0;
 
   for (const person of withAvatar) {
     const sourceUrl = resolveAvatarUrl(fromBase, person.avatar_url);
     if (!sourceUrl) continue;
-    const res = await fetchWithTimeout(sourceUrl, { headers: { Cookie: fromCookie } });
+    const res = await fetchAvatar(sourceUrl, fromBase, fromCookie);
     if (!res.ok) {
-      console.warn(`Skip ${person.id}: failed to fetch avatar (${res.status})`);
+      let keepExisting = false;
+      if (res.status === 404 && fromLocal) {
+        keepExisting = await checkAvatarExists(toBase, toCookie, person.avatar_url);
+      }
+
+      if (keepExisting) {
+        alreadyPresent += 1;
+        console.log(`Keep existing avatar for ${person.id} (${person.name || ''})`);
+        continue;
+      }
+
+      const reason = `failed to fetch source avatar (${res.status})`;
+      missingSource.push({ id: person.id, name: person.name || '', reason });
+      console.warn(`Skip ${person.id}: ${reason}`);
       continue;
     }
     const buffer = await res.arrayBuffer();
@@ -127,6 +198,23 @@ const run = async () => {
     }
     if (lastError) {
       failures.push({ id: person.id, name: person.name || '', error: lastError.message });
+    }
+  }
+
+  if (alreadyPresent > 0) {
+    console.log(`Reused ${alreadyPresent} avatars already present on destination.`);
+  }
+
+  if (missingSource.length > 0) {
+    console.warn(`Missing source avatars: ${missingSource.length}`);
+    missingSource.slice(0, 10).forEach((entry) => {
+      console.warn(`- ${entry.id} ${entry.name}: ${entry.reason}`);
+    });
+    if (missingSource.length > 10) {
+      console.warn(`...and ${missingSource.length - 10} more.`);
+    }
+    if (FAIL_ON_MISSING_SOURCE_AVATAR) {
+      process.exit(1);
     }
   }
 

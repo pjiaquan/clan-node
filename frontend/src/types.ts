@@ -3,10 +3,10 @@ export interface Person {
   name: string;
   english_name?: string | null;
   gender: 'M' | 'F' | 'O';
-  dob?: string;
-  dod?: string;
-  tob?: string;
-  tod?: string;
+  dob?: string | null;
+  dod?: string | null;
+  tob?: string | null;
+  tod?: string | null;
   avatar_url?: string | null;
   title?: string;
   formal_title?: string;

@@ -6,6 +6,11 @@ export type Env = {
   ENVIRONMENT?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  DUAL_WRITE_REMOTE?: string;
+  DUAL_WRITE_REMOTE_BASE?: string;
+  DUAL_WRITE_REMOTE_ORIGIN?: string;
+  DUAL_WRITE_REMOTE_USER?: string;
+  DUAL_WRITE_REMOTE_PASS?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';

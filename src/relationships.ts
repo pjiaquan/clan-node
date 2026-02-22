@@ -117,29 +117,67 @@ async function linkParentToSiblingChildren(db: D1Database, parentId: string, chi
   }
 }
 
+async function getChildIds(db: D1Database, parentId: string) {
+  const { results } = await db.prepare(
+    "SELECT to_person_id FROM relationships WHERE type = 'parent_child' AND from_person_id = ?"
+  ).bind(parentId).all();
+  return results
+    .map((row) => (row as any).to_person_id as string)
+    .filter(Boolean);
+}
+
 async function linkSpouseToChild(db: D1Database, parentId: string, childId: string, now: string) {
-  const spouseRel = await db.prepare(
+  const { results } = await db.prepare(
     "SELECT from_person_id, to_person_id FROM relationships WHERE type = 'spouse' AND (from_person_id = ? OR to_person_id = ?)"
-  ).bind(parentId, parentId).first();
+  ).bind(parentId, parentId).all();
 
-  if (!spouseRel) return null;
+  const spouseIds = new Set<string>();
+  for (const rel of results) {
+    const spouseId = (rel as any).from_person_id === parentId
+      ? (rel as any).to_person_id
+      : (rel as any).from_person_id;
+    if (spouseId && spouseId !== parentId) {
+      spouseIds.add(spouseId as string);
+    }
+  }
 
-  const spouseId = (spouseRel as any).from_person_id === parentId
-    ? (spouseRel as any).to_person_id
-    : (spouseRel as any).from_person_id;
+  if (!spouseIds.size) return [] as string[];
 
-  const existingParentChild = await db.prepare(
-    "SELECT id FROM relationships WHERE type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
-  ).bind(spouseId, childId).first();
+  const linked: string[] = [];
+  for (const spouseId of spouseIds) {
+    const existingParentChild = await db.prepare(
+      "SELECT id FROM relationships WHERE type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
+    ).bind(spouseId, childId).first();
 
-  if (existingParentChild) return null;
+    if (!existingParentChild) {
+      const metadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
+      await db.prepare(
+        "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'parent_child', ?, ?)"
+      ).bind(spouseId, childId, metadata, now).run();
+    }
 
-  const metadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
-  await db.prepare(
-    "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'parent_child', ?, ?)"
-  ).bind(spouseId, childId, metadata, now).run();
+    await linkParentToSiblingChildren(db, spouseId, childId, now);
+    linked.push(spouseId);
+  }
 
-  return spouseId as string;
+  return linked;
+}
+
+async function linkSpousePairExistingChildren(db: D1Database, personA: string, personB: string, now: string) {
+  const [aChildren, bChildren] = await Promise.all([
+    getChildIds(db, personA),
+    getChildIds(db, personB)
+  ]);
+
+  for (const childId of aChildren) {
+    await ensureParentChildLink(db, personB, childId, now);
+    await linkParentToSiblingChildren(db, personB, childId, now);
+  }
+
+  for (const childId of bChildren) {
+    await ensureParentChildLink(db, personA, childId, now);
+    await linkParentToSiblingChildren(db, personA, childId, now);
+  }
 }
 
 export function registerRelationshipRoutes(app: Hono<AppBindings>) {
@@ -282,6 +320,10 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       await linkSiblingNetworks(c.env.DB, from_person_id, to_person_id, now);
     }
 
+    if (type === 'spouse' && !shouldSkipAutoLink) {
+      await linkSpousePairExistingChildren(c.env.DB, fromId, toId, now);
+    }
+
     return c.json({
       id: result.meta.last_row_id,
       from_person_id: fromId,
@@ -380,6 +422,10 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
         'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
       ).bind(link.fromId, link.toId, link.metadata, id).run();
       await linkSiblingNetworks(c.env.DB, nextFrom, nextTo, now);
+    }
+
+    if (nextType === 'spouse' && !shouldSkipAutoLink) {
+      await linkSpousePairExistingChildren(c.env.DB, nextFrom, nextTo, now);
     }
 
     const updated = await c.env.DB.prepare(

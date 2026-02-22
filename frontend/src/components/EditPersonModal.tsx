@@ -20,11 +20,27 @@ const normalizeCustomFields = (fields: any): CustomField[] => {
   }));
 };
 
+const shiftDateYear = (value: string, delta: number): string => {
+  if (!value) return value;
+  const [yearRaw, monthRaw, dayRaw] = value.split('-').map((entry) => Number(entry));
+  if (!Number.isInteger(yearRaw) || !Number.isInteger(monthRaw) || !Number.isInteger(dayRaw)) {
+    return value;
+  }
+  if (monthRaw < 1 || monthRaw > 12 || dayRaw < 1 || dayRaw > 31) {
+    return value;
+  }
+  const nextYear = Math.max(1, Math.min(9999, yearRaw + delta));
+  const maxDay = new Date(nextYear, monthRaw, 0).getDate();
+  const nextDay = Math.min(dayRaw, maxDay);
+  return `${String(nextYear).padStart(4, '0')}-${String(monthRaw).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`;
+};
+
 export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onUnsavedClose, onSubmit }) => {
   const [name, setName] = useState(person.name);
   const [englishName, setEnglishName] = useState(person.english_name || '');
   const [gender, setGender] = useState(person.gender);
   const [dob, setDob] = useState(person.dob || '');
+  const [dobUnknown, setDobUnknown] = useState(!person.dob);
   const [tob, setTob] = useState(normalizeTraditionalHour(person.tob || ''));
   const [dod, setDod] = useState(person.dod || '');
   const [tod, setTod] = useState(normalizeTraditionalHour(person.tod || ''));
@@ -48,6 +64,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setEnglishName(person.english_name || '');
     setGender(person.gender);
     setDob(person.dob || '');
+    setDobUnknown(!person.dob);
     setTob(normalizeTraditionalHour(person.tob || ''));
     setDod(person.dod || '');
     setTod(normalizeTraditionalHour(person.tod || ''));
@@ -71,6 +88,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
 
     api.fetchAvatarBlobUrl(person.avatar_url)
       .then((url) => {
+        if (!url) {
+          if (active) {
+            setAvatarPreview(null);
+          }
+          return;
+        }
         if (active) {
           setAvatarPreview((prev) => {
             if (prev && prev.startsWith('blob:')) {
@@ -215,10 +238,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       name,
       english_name: normalizedEnglish ? normalizedEnglish : null,
       gender,
-      dob: dob || undefined,
-      tob: tob || undefined,
-      dod: dod || undefined,
-      tod: tod || undefined
+      dob: dobUnknown ? null : (dob ? dob : null),
+      tob: tob ? tob : null,
+      dod: dod ? dod : null,
+      tod: tod ? tod : null
     };
 
     const normalizedCustomFields = customFields
@@ -267,6 +290,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     || englishName !== initialEnglish
     || gender !== person.gender
     || dob !== initialDob
+    || dobUnknown !== !person.dob
     || dod !== initialDod
     || tob !== initialTob
     || tod !== initialTod
@@ -324,6 +348,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const deathGanzhi = deathYear ? getGanzhiYear(deathYear) : '';
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
+  const adjustDobYear = (delta: number) => {
+    setDob((prev) => shiftDateYear(prev, delta));
+  };
   const calculateWesternAge = () => {
     if (!dob) return null;
     const birth = new Date(dob);
@@ -471,11 +498,48 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
             <label onClick={handleDobLabelClick} style={{ cursor: 'pointer', userSelect: 'none' }}>
               出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
             </label>
-            <input
-              type="date"
-              value={dob}
-              onChange={(e) => setDob(e.target.value)}
-            />
+            <div className="date-input-row">
+              <div className="date-input-main">
+                <input
+                  type="date"
+                  value={dob}
+                  onChange={(e) => setDob(e.target.value)}
+                  disabled={dobUnknown}
+                />
+                <button
+                  type="button"
+                  className="date-year-btn"
+                  onClick={() => adjustDobYear(-1)}
+                  disabled={dobUnknown || !dob}
+                  title="年份減一"
+                >
+                  -年
+                </button>
+                <button
+                  type="button"
+                  className="date-year-btn"
+                  onClick={() => adjustDobYear(1)}
+                  disabled={dobUnknown || !dob}
+                  title="年份加一"
+                >
+                  +年
+                </button>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={dobUnknown}
+                  onChange={(e) => {
+                    const nextUnknown = e.target.checked;
+                    setDobUnknown(nextUnknown);
+                    if (nextUnknown) {
+                      setDob('');
+                    }
+                  }}
+                />
+                未知
+              </label>
+            </div>
           </div>
           <div className="form-group">
             <label>

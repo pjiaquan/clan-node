@@ -18,6 +18,16 @@ function App() {
         if (cancelled) return;
         setIsAuthed(true);
         setAuthUser(data.user);
+        try {
+          const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
+          const storedCenter = localStorage.getItem('clan.centerId');
+          if (storedCenter && !hasFocused) {
+            localStorage.setItem('clan.pendingFocus', JSON.stringify({ id: storedCenter, zoom: 1 }));
+            sessionStorage.setItem('clan.focusedOnLogin', '1');
+          }
+        } catch (error) {
+          console.warn('Failed to persist pending focus:', error);
+        }
       } catch (err) {
         if (!cancelled) {
           setIsAuthed(false);
@@ -39,6 +49,16 @@ function App() {
       const data = await api.login(username, password);
       setIsAuthed(true);
       setAuthUser(data.user);
+      try {
+        const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
+        const storedCenter = localStorage.getItem('clan.centerId');
+        if (storedCenter && !hasFocused) {
+          localStorage.setItem('clan.pendingFocus', JSON.stringify({ id: storedCenter, zoom: 1 }));
+          sessionStorage.setItem('clan.focusedOnLogin', '1');
+        }
+      } catch (error) {
+        console.warn('Failed to persist pending focus:', error);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '登入失敗';
       setAuthError(message);

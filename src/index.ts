@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { AppBindings } from './types';
-import { registerAuthRoutes, requireAuth, requireWriteAccess } from './auth';
+import { registerAuthRoutes, requireAuth, requireCsrf, requireWriteAccess } from './auth';
 import { registerPeopleRoutes } from './people';
 import { registerRelationshipRoutes } from './relationships';
 import { registerGraphRoutes } from './graph';
@@ -31,6 +31,7 @@ app.get('/', (c) => {
 });
 
 app.use('/api/*', requireAuth);
+app.use('/api/*', requireCsrf);
 app.use('/api/*', requireWriteAccess);
 registerAuthRoutes(app);
 registerPeopleRoutes(app);

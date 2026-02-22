@@ -141,6 +141,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   padding: 1rem 1.5rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -374,7 +375,10 @@ button:disabled:hover {
 
 .flow-container {
   flex: 1;
+  min-height: 0;
   position: relative;
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .drag-guide-line {
@@ -432,30 +436,32 @@ button:disabled:hover {
 }
 
 .person-node.selected {
-  border-color: #2563eb;
+  border-color: var(--highlight-color, #2563eb);
   box-shadow:
-    0 0 0 3px rgba(37, 99, 235, 0.35),
-    0 0 0 8px rgba(37, 99, 235, 0.15),
-    0 10px 24px rgba(37, 99, 235, 0.18);
+    0 0 0 3px var(--highlight-color-35, rgba(37, 99, 235, 0.35)),
+    0 0 0 8px var(--highlight-color-15, rgba(37, 99, 235, 0.15)),
+    0 10px 24px var(--highlight-color-18, rgba(37, 99, 235, 0.18));
   transform: translateY(-2px);
 }
 
 .person-node.selected::after {
-  content: '✓';
+  content: '';
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border: 2px dashed var(--highlight-color, #2563eb);
+  border-radius: 14px;
+  pointer-events: none;
+}
+
+.person-node.floating {
+  z-index: 1000;
+  transform: scale(1.05);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 0 2px #2563eb;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease-out;
+  cursor: grabbing !important;
 }
 
 .person-node.search-flash {
@@ -471,12 +477,15 @@ button:disabled:hover {
   0% {
     transform: translateY(0);
   }
+
   40% {
     transform: translateY(-6px);
   }
+
   70% {
     transform: translateY(0);
   }
+
   100% {
     transform: translateY(0);
   }
@@ -507,10 +516,12 @@ button:disabled:hover {
     box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6), 0 0 0 6px rgba(245, 158, 11, 0.25);
     transform: translateY(0);
   }
+
   70% {
     box-shadow: 0 0 0 10px rgba(245, 158, 11, 0), 0 0 0 18px rgba(245, 158, 11, 0);
     transform: translateY(-1px);
   }
+
   100% {
     box-shadow: 0 0 0 0 rgba(245, 158, 11, 0), 0 0 0 0 rgba(245, 158, 11, 0);
     transform: translateY(0);
@@ -718,6 +729,44 @@ button:disabled:hover {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
 }
 
+.date-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.date-input-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.date-input-main input[type='date'] {
+  flex: 1;
+}
+
+.date-year-btn {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.date-year-btn:hover {
+  background: #f1f5f9;
+}
+
+.date-year-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .custom-fields {
   display: flex;
   flex-direction: column;
@@ -816,9 +865,12 @@ button:disabled:hover {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
   }
+
   50% {
     box-shadow: 0 4px 30px rgba(245, 158, 11, 0.6);
   }
@@ -871,7 +923,7 @@ button:disabled:hover {
     gap: 0.5rem;
   }
 
-  .controls > :not(.search-box):not(.mobile-visible) {
+  .controls> :not(.search-box):not(.mobile-visible):not(.focus-me-btn) {
     display: none;
   }
 

@@ -37,6 +37,8 @@ async function hashPassword(password: string, salt: string) {
   return toBase64(bits);
 }
 
+const normalizeRole = (value: unknown): UserRole => (value === 'admin' ? 'admin' : 'readonly');
+
 async function getSessionUser(db: D1Database, sessionId: string) {
   const now = new Date().toISOString();
   const row = await db.prepare(
@@ -51,7 +53,7 @@ async function getSessionUser(db: D1Database, sessionId: string) {
     sessionId: (row as any).session_id as string,
     userId: (row as any).user_id as string,
     username: (row as any).username as string,
-    role: ((row as any).role as UserRole | null) || 'admin'
+    role: normalizeRole((row as any).role)
   };
 }
 
@@ -64,11 +66,7 @@ const clearSessionCookie = (c: Context<AppBindings>) => {
 
 const getSessionIdFromRequest = (c: Context<AppBindings>) => {
   const cookieSession = getCookie(c, SESSION_COOKIE);
-  if (cookieSession) return cookieSession;
-  const authHeader = c.req.header('Authorization') || c.req.header('authorization');
-  if (!authHeader) return null;
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : null;
+  return cookieSession || null;
 };
 
 export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
@@ -114,6 +112,52 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
   const sessionUser = c.get('sessionUser');
   if (!sessionUser || sessionUser.role !== 'admin') {
     return c.json({ error: 'Read-only account' }, 403);
+  }
+
+  return next();
+};
+
+export const requireCsrf: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+
+  const normalize = (value: string) => value.replace(/\/+$/, '').toLowerCase();
+  const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map(entry => normalize(entry.trim()))
+    .filter(Boolean);
+  const originHeader = c.req.header('Origin') || c.req.header('origin');
+  const refererHeader = c.req.header('Referer') || c.req.header('referer');
+  const origin = originHeader
+    || (refererHeader ? (() => {
+      try {
+        return new URL(refererHeader).origin;
+      } catch {
+        return '';
+      }
+    })() : '');
+
+  if (!origin) {
+    console.warn('CSRF blocked: missing Origin/Referer', {
+      method,
+      path: c.req.path,
+      referer: refererHeader || null
+    });
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const normalizedOrigin = normalize(origin);
+  if (!allowedOrigins.includes(normalizedOrigin)) {
+    console.warn('CSRF blocked: disallowed origin', {
+      method,
+      path: c.req.path,
+      origin,
+      referer: refererHeader || null,
+      allowedOrigins
+    });
+    return c.json({ error: 'Forbidden' }, 403);
   }
 
   return next();
@@ -193,11 +237,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     });
 
     return c.json({
-      session_id: sessionId,
       user: {
         id: (user as any).id,
         username: (user as any).username,
-        role: ((user as any).role as UserRole | null) || 'admin'
+        role: normalizeRole((user as any).role)
       }
     });
   });
@@ -224,7 +267,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     return c.json({
-      session_id: sessionId,
       user: {
         id: sessionUser.userId,
         username: sessionUser.username,
