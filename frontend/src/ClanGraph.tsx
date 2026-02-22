@@ -52,6 +52,10 @@ const isEditableTarget = (target: EventTarget | null) => {
   const tagName = target.tagName.toLowerCase();
   return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
 };
+const CTRL_HOVER_DIM_NODE_OPACITY = 0.18;
+const CTRL_HOVER_DIM_EDGE_OPACITY = 0.12;
+const CTRL_HOVER_EDGE_WIDTH_BOOST = 2;
+const CTRL_HOVER_MIN_EDGE_WIDTH = 4;
 
 type ClanGraphProps = {
   username: string | null;
@@ -111,6 +115,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
   const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
   const [mobileNodeDragging, setMobileNodeDragging] = useState(false);
   const [mobileConnecting, setMobileConnecting] = useState(false);
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
@@ -160,6 +166,31 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     }
     media.addListener(apply);
     return () => media.removeListener(apply);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey) {
+        setIsCtrlPressed(true);
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey) {
+        setIsCtrlPressed(false);
+      }
+    };
+    const handleWindowBlur = () => {
+      setIsCtrlPressed(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
   }, []);
 
   useEffect(() => {
@@ -849,6 +880,12 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
       setLastMousePosition(flowPoint);
     }
   }, [reactFlowInstance, graphData, getSpouseId]);
+  const handleNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
+    setHoveredNodeId(node.id);
+  }, []);
+  const handleNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+  }, []);
 
   const onConnect = useCallback((connection: Connection) => {
     if (connection.source && connection.target) {
@@ -1508,6 +1545,27 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     setDimNodeIds(new Set());
     setDimExcludedNodeIds(new Set());
   }, []);
+  const ctrlHoverFocusId = isCtrlPressed ? hoveredNodeId : null;
+  const { connectedNodeIds: ctrlHoverConnectedNodeIds, connectedEdgeIds: ctrlHoverConnectedEdgeIds } = useMemo(() => {
+    const connectedNodeIds = new Set<string>();
+    const connectedEdgeIds = new Set<string>();
+    if (!graphData || !ctrlHoverFocusId) {
+      return { connectedNodeIds, connectedEdgeIds };
+    }
+    connectedNodeIds.add(ctrlHoverFocusId);
+    graphData.edges.forEach((edge) => {
+      if (collapsedNodeIds.has(edge.from_person_id) || collapsedNodeIds.has(edge.to_person_id)) {
+        return;
+      }
+      if (edge.from_person_id === ctrlHoverFocusId || edge.to_person_id === ctrlHoverFocusId) {
+        connectedEdgeIds.add(`e${edge.id}`);
+        connectedNodeIds.add(edge.from_person_id);
+        connectedNodeIds.add(edge.to_person_id);
+      }
+    });
+    return { connectedNodeIds, connectedEdgeIds };
+  }, [graphData, collapsedNodeIds, ctrlHoverFocusId]);
+  const isCtrlHoverActive = Boolean(ctrlHoverFocusId);
 
   const initialNodes: Node[] = useMemo(() => {
     if (!graphData) return [];
@@ -1522,6 +1580,11 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
       const title = person.title || '';
       const formalTitle = person.formal_title || '';
       const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
+      const baseOpacity = dimIds.has(person.id) ? 0.35 : 1;
+      const isConnectedToHoverNode = ctrlHoverConnectedNodeIds.has(person.id);
+      const opacity = isCtrlHoverActive && !isConnectedToHoverNode
+        ? Math.min(baseOpacity, CTRL_HOVER_DIM_NODE_OPACITY)
+        : baseOpacity;
 
       const storedPosition = nodePositionMap.current[person.id];
       const position = storedPosition || person.metadata?.position || (
@@ -1547,7 +1610,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
           isCenter: person.id === centerId,
           flashCenter: person.id === centerFlashId,
           flashSearch: person.id === searchFlashId,
-          focusHover: person.id === focusHoverId,
+          focusHover: person.id === focusHoverId || (isCtrlHoverActive && person.id === ctrlHoverFocusId),
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
           onNodeDoubleTap: (clientX: number, clientY: number) => {
             openContextMenuAt(person.id, clientX, clientY);
@@ -1598,11 +1661,11 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         style: {
           background: 'transparent',
           border: 'none',
-          opacity: dimIds.has(person.id) ? 0.35 : 1,
+          opacity,
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -1613,6 +1676,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         const edgeId = `e${edge.id}`;
         const isSelected = selectedEdge === edgeId;
         const isDimmed = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
+        const isConnectedToHoverNode = ctrlHoverConnectedEdgeIds.has(edgeId);
 
         const getEdgeStyle = (type: string, selected: boolean) => {
           if (selected) return { stroke: '#ef4444', strokeWidth: 4 };
@@ -1644,12 +1708,29 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
           type: edge.type === 'spouse' || edge.type === 'ex_spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
           animated: edge.type === 'spouse' || edge.type === 'sibling',
           markerEnd: { type: MarkerType.ArrowClosed },
-          style: { ...getEdgeStyle(edge.type, isSelected), opacity: isSelected ? 1 : (isDimmed ? 0.35 : 1) },
+          style: (() => {
+            const baseStyle = getEdgeStyle(edge.type, isSelected);
+            const baseOpacity = isSelected ? 1 : (isDimmed ? 0.35 : 1);
+            if (!isCtrlHoverActive) {
+              return { ...baseStyle, opacity: baseOpacity };
+            }
+            if (!isConnectedToHoverNode) {
+              return { ...baseStyle, opacity: Math.min(baseOpacity, CTRL_HOVER_DIM_EDGE_OPACITY) };
+            }
+            const currentWidth = typeof baseStyle.strokeWidth === 'number'
+              ? baseStyle.strokeWidth
+              : 2;
+            return {
+              ...baseStyle,
+              strokeWidth: Math.max(currentWidth + CTRL_HOVER_EDGE_WIDTH_BOOST, CTRL_HOVER_MIN_EDGE_WIDTH),
+              opacity: 1,
+            };
+          })(),
           label: getLabel(edge.type),
-          zIndex: isSelected ? 1000 : 0,
+          zIndex: isSelected ? 1000 : (isConnectedToHoverNode ? 800 : 0),
         };
       });
-  }, [graphData, collapsedNodeIds, selectedEdge, dimIds]);
+  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, ctrlHoverConnectedEdgeIds, isCtrlHoverActive]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -2431,6 +2512,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
           onNodeMouseMove={isLocked ? undefined : (event) => {
             onPaneMouseMove(event);
           }}
+          onNodeMouseEnter={handleNodeMouseEnter}
+          onNodeMouseLeave={handleNodeMouseLeave}
           onNodeClick={isLocked ? undefined : (event, node) => {
             handleNodeClick(event, node.id);
             setContextMenu(null);
