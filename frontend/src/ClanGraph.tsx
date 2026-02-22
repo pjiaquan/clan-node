@@ -28,19 +28,20 @@ const nodeTypes = {
 
 type UndoEntry =
   | {
-      type: 'delete';
-      person: Person;
-      relationships: Relationship[];
-      previousCenterId?: string;
-    }
+    type: 'delete';
+    person: Person;
+    relationships: Relationship[];
+    previousCenterId?: string;
+  }
   | {
-      type: 'align';
-      positions: Record<string, { x: number; y: number }>;
-    }
+    type: 'align';
+    positions: Record<string, { x: number; y: number }>;
+  }
   | {
-      type: 'move';
-      positions: Record<string, { x: number; y: number }>;
-    };
+    type: 'move';
+    positions: Record<string, { x: number; y: number }>;
+    draggedId?: string;
+  };
 
 type Gender = Person['gender'];
 
@@ -95,9 +96,12 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const [lockLoaded, setLockLoaded] = useState(false);
   const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<{ id: string; zoom: number } | null>(null);
+  const [pendingFocusPosition, setPendingFocusPosition] = useState<{ x: number; y: number; zoom: number } | null>(null);
   const [dragGuideY, setDragGuideY] = useState<number | null>(null);
   const [dimFocusId, setDimFocusId] = useState<string | null>(null);
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
+  const [dimNodeIds, setDimNodeIds] = useState<Set<string>>(new Set());
+  const [dimExcludedNodeIds, setDimExcludedNodeIds] = useState<Set<string>>(new Set());
   const [collapsedMaternalRoots, setCollapsedMaternalRoots] = useState<Set<string>>(new Set());
   const [collapsedPaternalRoots, setCollapsedPaternalRoots] = useState<Set<string>>(new Set());
   const [collapsedChildRoots, setCollapsedChildRoots] = useState<Set<string>>(new Set());
@@ -105,11 +109,15 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const [centerFlashId, setCenterFlashId] = useState<string | null>(null);
   const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
   const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
+  const [mobileNodeDragging, setMobileNodeDragging] = useState(false);
+  const [mobileConnecting, setMobileConnecting] = useState(false);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [syncingPositions, setSyncingPositions] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const pendingFocusRetryRef = useRef<number | null>(null);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
   const baseLockStorageKey = 'clan.flowLocked';
   const lockStorageKey = useMemo(() => (
@@ -121,7 +129,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(getInitialNodePositions());
   const nodesRef = useRef<Node[]>([]);
   const setNodesRef = useRef<React.Dispatch<React.SetStateAction<Node[]>> | null>(null);
-  const dragSnapRef = useRef<{ id: string; y: number } | null>(null);
+  const dragSnapRef = useRef<{ id: string; sourceId: string; y: number } | null>(null);
   const dragSnapXRef = useRef<{ id: string; x: number } | null>(null);
   const spouseSnapRef = useRef<{ id: string; spouseId: string; x: number; y: number } | null>(null);
   const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
@@ -136,6 +144,21 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const toastTimer = useRef<number | null>(null);
   const expandRelayoutTimer = useRef<number | null>(null);
   const canUndo = undoStack.length > 0;
+  const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
+  const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia('(pointer: coarse)');
+    const apply = () => setIsCoarsePointer(media.matches);
+    apply();
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', apply);
+      return () => media.removeEventListener('change', apply);
+    }
+    media.addListener(apply);
+    return () => media.removeListener(apply);
+  }, []);
 
   useEffect(() => {
     avatarBlobMap.current = avatarBlobs;
@@ -439,12 +462,22 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     try {
       const storedFocus = localStorage.getItem('clan.dimFocusId');
       const storedNonRelatives = localStorage.getItem('clan.dimNonRelativesId');
+      const storedDimNodes = localStorage.getItem('clan.dimNodeIds');
+      const storedDimExcludedNodes = localStorage.getItem('clan.dimExcludedNodeIds');
       const storedMaternal = localStorage.getItem('clan.collapsedMaternalRoots');
       const storedPaternal = localStorage.getItem('clan.collapsedPaternalRoots');
       const storedChildren = localStorage.getItem('clan.collapsedChildRoots');
       const storedSiblings = localStorage.getItem('clan.collapsedSiblingRoots');
       if (storedFocus) setDimFocusId(storedFocus);
       if (storedNonRelatives) setDimNonRelativesId(storedNonRelatives);
+      if (storedDimNodes) {
+        const ids = storedDimNodes.split(',').map((id) => id.trim()).filter(Boolean);
+        setDimNodeIds(new Set(ids));
+      }
+      if (storedDimExcludedNodes) {
+        const ids = storedDimExcludedNodes.split(',').map((id) => id.trim()).filter(Boolean);
+        setDimExcludedNodeIds(new Set(ids));
+      }
       if (storedMaternal) {
         const ids = storedMaternal.split(',').map((id) => id.trim()).filter(Boolean);
         setCollapsedMaternalRoots(new Set(ids));
@@ -479,6 +512,14 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         localStorage.removeItem('clan.dimNonRelativesId');
       }
       localStorage.setItem(
+        'clan.dimNodeIds',
+        Array.from(dimNodeIds.values()).join(',')
+      );
+      localStorage.setItem(
+        'clan.dimExcludedNodeIds',
+        Array.from(dimExcludedNodeIds.values()).join(',')
+      );
+      localStorage.setItem(
         'clan.collapsedMaternalRoots',
         Array.from(collapsedMaternalRoots.values()).join(',')
       );
@@ -497,7 +538,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     } catch (error) {
       console.warn('Failed to persist dim state:', error);
     }
-  }, [dimFocusId, dimNonRelativesId, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
+  }, [dimFocusId, dimNonRelativesId, dimNodeIds, dimExcludedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
 
   useEffect(() => () => {
     if (expandSelectTimer.current) {
@@ -507,6 +548,35 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       window.clearInterval(lastEditedFocusTimer.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!graphData) return;
+    const validIds = new Set(graphData.nodes.map((node) => node.id));
+    setDimNodeIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setDimExcludedNodeIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [graphData]);
 
   const isInLawParentConnection = useCallback((fromId: string, toId: string) => {
     if (!graphData) return false;
@@ -661,6 +731,10 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       avatarFetches.current.add(key);
       try {
         const blobUrl = await api.fetchAvatarBlobUrl(key);
+        if (!blobUrl) {
+          avatarFailures.current.add(key);
+          return;
+        }
         setAvatarBlobs((prev) => ({ ...prev, [key]: blobUrl }));
       } catch (error) {
         avatarFailures.current.add(key);
@@ -726,6 +800,9 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
+      if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+        return;
+      }
       const openUp = event.clientY > window.innerHeight * 0.6;
       setContextMenu({
         id: node.id,
@@ -805,8 +882,38 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     }
   }, [createRelationship, graphData, getDefaultRelationshipType]);
 
-  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
-    const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+  const onConnectStart = useCallback(() => {
+    if (isCoarsePointer) {
+      setMobileConnecting(true);
+    }
+  }, [isCoarsePointer]);
+
+  const onConnectEnd = useCallback(() => {
+    if (isCoarsePointer) {
+      setMobileConnecting(false);
+    }
+  }, [isCoarsePointer]);
+
+  const getDragSelectionIds = useCallback((draggedId: string, draggingNodes?: Node[]) => {
+    const draggingIds = draggingNodes?.map((item) => item.id) ?? [];
+    if (draggingIds.length > 1 && draggingIds.includes(draggedId)) {
+      return draggingIds;
+    }
+    const currentSelectedIds = nodesRef.current
+      .filter((item) => item.selected)
+      .map((item) => item.id);
+    if (currentSelectedIds.length > 1 && currentSelectedIds.includes(draggedId)) {
+      return currentSelectedIds;
+    }
+    if (selectedNodeIdsRef.current.length > 1 && selectedNodeIdsRef.current.includes(draggedId)) {
+      return selectedNodeIdsRef.current;
+    }
+    return [draggedId];
+  }, []);
+
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
+    setMobileNodeDragging(false);
+    const selectedIds = getDragSelectionIds(node.id, draggingNodes);
     const startPositions = dragStartPositions.current;
     nodesRef.current.forEach((item) => {
       if (!selectedIds.includes(item.id)) return;
@@ -869,25 +976,28 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         return current ? current.x !== position.x || current.y !== position.y : false;
       });
       if (moved) {
-        setUndoStack(prev => [{ type: 'move', positions: startPositions } as const, ...prev].slice(0, 10));
+        setUndoStack(prev => [{ type: 'move', positions: startPositions, draggedId: node.id } as const, ...prev].slice(0, 10));
       }
     }
     dragStartPositions.current = null;
-  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition]);
+  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds]);
 
-  const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
+  const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (!reactFlowInstance) return;
     const viewport = (reactFlowInstance as ReactFlowInstance & { toObject?: () => { viewport?: { x: number; y: number; zoom: number } } })
       .toObject?.().viewport;
     if (!viewport) return;
 
-    const threshold = 30;
-    const releaseThreshold = 40;
+    const ySnapThreshold = isCoarsePointer ? 30 : 26;
+    const yReleaseThreshold = isCoarsePointer ? 40 : 34;
+    const xSnapThreshold = isCoarsePointer ? 22 : 12;
+    const xReleaseThreshold = isCoarsePointer ? 30 : 18;
     const guideThresholdY = 2000;
-    const spouseSnapThreshold = 40;
-    const spouseReleaseThreshold = 60;
+    const spouseSnapThreshold = isCoarsePointer ? 34 : 20;
+    const spouseReleaseThreshold = isCoarsePointer ? 48 : 28;
     const spouseGap = 0;
     let nearestYGuide: number | null = null;
+    let nearestYGuideSourceId: string | null = null;
     let nearestYGuideDistance = Number.POSITIVE_INFINITY;
     let nearestX: number | null = null;
     let nearestXDistance = Number.POSITIVE_INFINITY;
@@ -900,15 +1010,34 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       spouseWidth: number;
       spouseHeight: number;
     } | null = null;
+    const selectedIds = getDragSelectionIds(node.id, draggingNodes);
+    const selectedSet = new Set(selectedIds);
+    const nodeMap = new Map(nodesRef.current.map((item) => [item.id, item]));
+    draggingNodes.forEach((item) => {
+      nodeMap.set(item.id, item);
+    });
+    const dragNode = nodeMap.get(node.id) ?? node;
+    const ySourceNodes = selectedIds.length > 1
+      ? selectedIds
+        .map((id) => nodeMap.get(id))
+        .filter((item): item is Node => Boolean(item))
+      : [dragNode];
+
+    ySourceNodes.forEach((sourceNode) => {
+      nodesRef.current.forEach((other) => {
+        if (selectedSet.has(other.id)) return;
+        const distanceY = Math.abs(other.position.y - sourceNode.position.y);
+        if (distanceY < nearestYGuideDistance) {
+          nearestYGuideDistance = distanceY;
+          nearestYGuide = other.position.y;
+          nearestYGuideSourceId = sourceNode.id;
+        }
+      });
+    });
 
     nodesRef.current.forEach((other) => {
-      if (other.id === node.id) return;
-      const distanceY = Math.abs(other.position.y - node.position.y);
+      if (other.id === node.id || selectedSet.has(other.id)) return;
       const distanceX = Math.abs(other.position.x - node.position.x);
-      if (distanceY < nearestYGuideDistance) {
-        nearestYGuideDistance = distanceY;
-        nearestYGuide = other.position.y;
-      }
       if (distanceX < nearestXDistance) {
         nearestXDistance = distanceX;
         nearestX = other.position.x;
@@ -917,27 +1046,27 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
 
     const existingSnap = dragSnapRef.current;
     if (existingSnap && existingSnap.id === node.id) {
-      const distanceFromSnap = Math.abs(node.position.y - existingSnap.y);
-      if (distanceFromSnap >= releaseThreshold) {
+      const snapSourceNode = nodeMap.get(existingSnap.sourceId) ?? dragNode;
+      const distanceFromSnap = Math.abs(snapSourceNode.position.y - existingSnap.y);
+      if (distanceFromSnap >= yReleaseThreshold) {
         dragSnapRef.current = null;
       }
     }
-    if (!dragSnapRef.current && nearestYGuide !== null && nearestYGuideDistance <= threshold) {
-      dragSnapRef.current = { id: node.id, y: nearestYGuide };
+    if (!dragSnapRef.current && nearestYGuide !== null && nearestYGuideSourceId && nearestYGuideDistance <= ySnapThreshold) {
+      dragSnapRef.current = { id: node.id, sourceId: nearestYGuideSourceId, y: nearestYGuide };
     }
 
     const existingSnapX = dragSnapXRef.current;
     if (existingSnapX && existingSnapX.id === node.id) {
       const distanceFromSnap = Math.abs(node.position.x - existingSnapX.x);
-      if (distanceFromSnap >= releaseThreshold) {
+      if (distanceFromSnap >= xReleaseThreshold) {
         dragSnapXRef.current = null;
       }
     }
-    if (!dragSnapXRef.current && nearestX !== null && nearestXDistance <= threshold) {
+    if (!dragSnapXRef.current && nearestX !== null && nearestXDistance <= xSnapThreshold) {
       dragSnapXRef.current = { id: node.id, x: nearestX };
     }
 
-    const selectedIds = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
     const isSingleDrag = selectedIds.length === 1 && selectedIds[0] === node.id;
     const spouseId = graphData && isSingleDrag ? getSpouseId(node.id) : undefined;
     const spouseNode = spouseId ? nodesRef.current.find((item) => item.id === spouseId) : undefined;
@@ -973,7 +1102,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       }
     }
 
-    const snapTarget = dragSnapRef.current?.id === node.id ? dragSnapRef.current.y : null;
+    const snapTarget = dragSnapRef.current?.id === node.id ? dragSnapRef.current : null;
     const snapTargetX = dragSnapXRef.current?.id === node.id ? dragSnapXRef.current.x : null;
     if (spouseSnapTarget && setNodesRef.current) {
       spouseSnapRef.current = { id: node.id, spouseId: spouseSnapTarget.spouseId, x: spouseSnapTarget.x, y: spouseSnapTarget.y };
@@ -1001,7 +1130,9 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     }
 
     if (!spouseSnapTarget && (snapTarget !== null || snapTargetX !== null) && setNodesRef.current) {
-      const deltaY = snapTarget !== null ? snapTarget - node.position.y : 0;
+      const snapSourceNode = snapTarget ? nodeMap.get(snapTarget.sourceId) : null;
+      const snapSourceY = snapSourceNode?.position.y ?? dragNode.position.y;
+      const deltaY = snapTarget !== null ? snapTarget.y - snapSourceY : 0;
       setNodesRef.current((prev) =>
         prev.map((item) => {
           const isSelected = selectedIds.includes(item.id);
@@ -1020,49 +1151,20 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       );
     }
 
-    const guideY = snapTarget ?? (nearestYGuide !== null && nearestYGuideDistance <= guideThresholdY ? nearestYGuide : null);
+    const guideY = snapTarget?.y ?? (nearestYGuide !== null && nearestYGuideDistance <= guideThresholdY ? nearestYGuide : null);
     if (guideY !== null) {
       const screenY = guideY * viewport.zoom + viewport.y;
       setDragGuideY(screenY);
     } else {
       setDragGuideY(null);
     }
-  }, [reactFlowInstance]);
+  }, [reactFlowInstance, isCoarsePointer, graphData, getSpouseId, getDragSelectionIds]);
 
   const handleEditPerson = useCallback((id: string) => {
     if (!ensureEditable()) return;
     setCopiedPerson(null);
     setEditingPersonId(id);
   }, [ensureEditable]);
-
-  const handleSearch = useCallback((query: string) => {
-    if (!graphData) return;
-    const trimmed = query.trim();
-    if (!trimmed) return;
-    const lower = trimmed.toLowerCase();
-    const match = graphData.nodes.find((person) =>
-      person.id === trimmed
-      || person.name === trimmed
-      || person.name.toLowerCase().includes(lower)
-      || (person.english_name?.toLowerCase().includes(lower) ?? false)
-    );
-    if (!match) {
-      showToast('找不到成員', 'warning');
-      return;
-    }
-    setSelectedEdge(null);
-    setSelectedNode(match.id);
-    setNodesRef.current?.((prev) => prev.map((node) => ({ ...node, selected: node.id === match.id })));
-    setPendingCenterId(match.id);
-    if (searchFlashTimer.current) {
-      window.clearTimeout(searchFlashTimer.current);
-    }
-    setSearchFlashId(null);
-    window.setTimeout(() => setSearchFlashId(match.id), 0);
-    searchFlashTimer.current = window.setTimeout(() => {
-      setSearchFlashId(null);
-    }, 1400);
-  }, [graphData]);
 
   const getFocusPosition = useCallback((id: string) => {
     if (!graphData) return null;
@@ -1084,6 +1186,47 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       zoom,
     };
   }, [getFocusPosition]);
+
+  const persistPendingViewport = useCallback((id: string, zoom = 1.0) => {
+    const viewport = getViewportForNode(id, zoom);
+    if (!viewport) return;
+    try {
+      localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+      localStorage.setItem('clan.pendingCenterId', id);
+    } catch (error) {
+      console.warn('Failed to persist pending viewport:', error);
+    }
+  }, [getViewportForNode]);
+
+  const handleSearch = useCallback((query: string) => {
+    if (!graphData) return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    const match = graphData.nodes.find((person) =>
+      person.id === trimmed
+      || person.name === trimmed
+      || person.name.toLowerCase().includes(lower)
+      || (person.english_name?.toLowerCase().includes(lower) ?? false)
+    );
+    if (!match) {
+      showToast('找不到成員', 'warning');
+      return;
+    }
+    setSelectedEdge(null);
+    setSelectedNode(match.id);
+    setNodesRef.current?.((prev) => prev.map((node) => ({ ...node, selected: node.id === match.id })));
+    persistPendingViewport(match.id, 1.0);
+    setPendingCenterId(match.id);
+    if (searchFlashTimer.current) {
+      window.clearTimeout(searchFlashTimer.current);
+    }
+    setSearchFlashId(null);
+    window.setTimeout(() => setSearchFlashId(match.id), 0);
+    searchFlashTimer.current = window.setTimeout(() => {
+      setSearchFlashId(null);
+    }, 1400);
+  }, [graphData, persistPendingViewport]);
 
   const focusNodeById = useCallback((id: string, zoom = 1.0) => {
     if (!reactFlowInstance) return false;
@@ -1115,6 +1258,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       || centerId;
     if (!meId) return;
     setCenterId(meId);
+    persistPendingViewport(meId, 1.0);
     setPendingFocus({ id: meId, zoom: 1.0 });
     focusNodeById(meId, 1.0);
     if (searchFlashTimer.current) {
@@ -1133,7 +1277,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       setFocusHoverId(null);
     }, 500);
     // Do not set pending center here to avoid overriding the zoom change.
-  }, [graphData, centerId, focusNodeById, setCenterId]);
+  }, [graphData, centerId, focusNodeById, setCenterId, persistPendingViewport]);
 
   const handleDeletePerson = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -1220,63 +1364,80 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   }, [ensureEditable, graphData, deleteRelationship]);
 
   const dimIds = useMemo(() => {
-    if (!graphData || (!dimFocusId && !dimNonRelativesId)) return new Set<string>();
-    const focusId = dimNonRelativesId ?? dimFocusId!;
-    const parentIds = new Set(
-      graphData.edges
-        .filter(edge => edge.type === 'parent_child' && edge.to_person_id === focusId)
-        .map(edge => edge.from_person_id)
-    );
-
-    const visited = new Set<string>();
-    const queue: string[] = [focusId];
-    while (queue.length) {
-      const currentId = queue.shift()!;
-      if (visited.has(currentId)) continue;
-      visited.add(currentId);
-
-      graphData.edges
-        .filter(edge => edge.type === 'sibling')
-        .forEach(edge => {
-          if (edge.from_person_id === currentId && !visited.has(edge.to_person_id)) {
-            queue.push(edge.to_person_id);
-          } else if (edge.to_person_id === currentId && !visited.has(edge.from_person_id)) {
-            queue.push(edge.from_person_id);
-          }
-        });
-
-      const currentParentIds = graphData.edges
-        .filter(edge => edge.type === 'parent_child' && edge.to_person_id === currentId)
-        .map(edge => edge.from_person_id);
-      currentParentIds.forEach(parentId => {
+    const dimSet = new Set<string>(dimNodeIds);
+    if (graphData && (dimFocusId || dimNonRelativesId)) {
+      const focusId = dimNonRelativesId ?? dimFocusId!;
+      const parentIds = new Set(
         graphData.edges
-          .filter(edge => edge.type === 'parent_child' && edge.from_person_id === parentId)
+          .filter(edge => edge.type === 'parent_child' && edge.to_person_id === focusId)
+          .map(edge => edge.from_person_id)
+      );
+
+      const visited = new Set<string>();
+      const queue: string[] = [focusId];
+      while (queue.length) {
+        const currentId = queue.shift()!;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+
+        graphData.edges
+          .filter(edge => edge.type === 'sibling')
           .forEach(edge => {
-            if (!visited.has(edge.to_person_id)) {
+            if (edge.from_person_id === currentId && !visited.has(edge.to_person_id)) {
               queue.push(edge.to_person_id);
+            } else if (edge.to_person_id === currentId && !visited.has(edge.from_person_id)) {
+              queue.push(edge.from_person_id);
             }
           });
-      });
+
+        const currentParentIds = graphData.edges
+          .filter(edge => edge.type === 'parent_child' && edge.to_person_id === currentId)
+          .map(edge => edge.from_person_id);
+        currentParentIds.forEach(parentId => {
+          graphData.edges
+            .filter(edge => edge.type === 'parent_child' && edge.from_person_id === parentId)
+            .forEach(edge => {
+              if (!visited.has(edge.to_person_id)) {
+                queue.push(edge.to_person_id);
+              }
+            });
+        });
+      }
+
+      visited.delete(focusId);
+      const siblingIds = visited;
+
+      const focusSet = new Set<string>([focusId, ...parentIds, ...siblingIds]);
+
+      if (dimNonRelativesId) {
+        const nonRelativeSet = new Set<string>(
+          graphData.nodes
+            .map(node => node.id)
+            .filter(id => !focusSet.has(id))
+        );
+        nonRelativeSet.forEach((id) => dimSet.add(id));
+      } else {
+        const relativeSet = new Set<string>([...parentIds, ...siblingIds]);
+        relativeSet.delete(focusId);
+        relativeSet.forEach((id) => dimSet.add(id));
+      }
     }
 
-    visited.delete(focusId);
-    const siblingIds = visited;
-
-    const focusSet = new Set<string>([focusId, ...parentIds, ...siblingIds]);
-
-    if (dimNonRelativesId) {
-      const dimSet = new Set<string>(
-        graphData.nodes
-          .map(node => node.id)
-          .filter(id => !focusSet.has(id))
-      );
-      return dimSet;
-    }
-
-    const dimSet = new Set<string>([...parentIds, ...siblingIds]);
-    dimSet.delete(focusId);
+    dimExcludedNodeIds.forEach((id) => dimSet.delete(id));
     return dimSet;
-  }, [graphData, dimFocusId, dimNonRelativesId]);
+  }, [graphData, dimFocusId, dimNonRelativesId, dimNodeIds, dimExcludedNodeIds]);
+  const hasActiveDimming = Boolean(
+    dimFocusId
+    || dimNonRelativesId
+    || dimNodeIds.size > 0
+    || dimExcludedNodeIds.size > 0
+  );
+  const clearAllDimming = useCallback(() => {
+    setDimFocusId(null);
+    setDimNonRelativesId(null);
+    setDimNodeIds(new Set());
+    setDimExcludedNodeIds(new Set());
+  }, []);
 
   const initialNodes: Node[] = useMemo(() => {
     if (!graphData) return [];
@@ -1297,9 +1458,9 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         person.id === graphData.center
           ? { x: centerX, y: centerY }
           : {
-              x: centerX + Math.cos((index * 45) * (Math.PI / 180)) * (150 + (index * 30)),
-              y: centerY + Math.sin((index * 45) * (Math.PI / 180)) * (150 + (index * 30))
-            }
+            x: centerX + Math.cos((index * 45) * (Math.PI / 180)) * (150 + (index * 30)),
+            y: centerY + Math.sin((index * 45) * (Math.PI / 180)) * (150 + (index * 30))
+          }
       );
 
       return {
@@ -1318,11 +1479,47 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           flashSearch: person.id === searchFlashId,
           focusHover: person.id === focusHoverId,
           onAvatarClick: avatarUrl ? () => handleAvatarClick(person, avatarUrl) : undefined,
-          onNodeLongPress: (clientX: number, clientY: number) => {
+          onNodeDoubleTap: (clientX: number, clientY: number) => {
             openContextMenuAt(person.id, clientX, clientY);
           },
-          allowNodeLongPress: isLocked || isReadOnly,
-          interactionLocked: isLocked || isReadOnly,
+          allowNodeDoubleTap: true,
+          interactionLocked: isReadOnly,
+          draggableMobile: !isReadOnly,
+          onMobileDragStart: (id: string) => {
+            setMobileNodeDragging(true);
+            // Optional: bring node to front, select it, etc.
+            if (setNodesRef.current) {
+              setNodesRef.current((prev) => prev.map((item) => ({ ...item, selected: item.id === id })));
+            }
+          },
+          onMobileDrag: (id: string, dx: number, dy: number) => {
+            if (!reactFlowInstance || isReadOnly) return;
+            const zoom = reactFlowInstance.getZoom ? reactFlowInstance.getZoom() : 1;
+            if (setNodesRef.current) {
+              setNodesRef.current((prev) =>
+                prev.map((item) => {
+                  if (item.id === id) {
+                    return {
+                      ...item,
+                      position: {
+                        x: item.position.x + dx / zoom,
+                        y: item.position.y + dy / zoom,
+                      },
+                    };
+                  }
+                  return item;
+                })
+              );
+            }
+          },
+          onMobileDragEnd: (id: string) => {
+            setMobileNodeDragging(false);
+            if (isReadOnly) return;
+            const node = nodesRef.current.find(n => n.id === id);
+            if (node) {
+              updatePersonPosition(id, node.position);
+            }
+          },
           hasCollapsedSide: collapsedMaternalRoots.has(person.id)
             || collapsedPaternalRoots.has(person.id)
             || collapsedChildRoots.has(person.id)
@@ -1335,7 +1532,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isLocked, isReadOnly]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -1343,45 +1540,45 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     return graphData.edges
       .filter((edge) => !collapsedNodeIds.has(edge.from_person_id) && !collapsedNodeIds.has(edge.to_person_id))
       .map((edge) => {
-      const edgeId = `e${edge.id}`;
-      const isSelected = selectedEdge === edgeId;
-      const isDimmed = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
+        const edgeId = `e${edge.id}`;
+        const isSelected = selectedEdge === edgeId;
+        const isDimmed = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
 
-      const getEdgeStyle = (type: string, selected: boolean) => {
-        if (selected) return { stroke: '#ef4444', strokeWidth: 4 };
-        switch (type) {
-          case 'spouse': return { stroke: '#ec4899', strokeWidth: 2 };
-          case 'ex_spouse': return { stroke: '#9ca3af', strokeWidth: 2, strokeDasharray: '6 4' };
-          case 'sibling': return { stroke: '#10b981', strokeWidth: 2 };
-          case 'in_law': return { stroke: '#f59e0b', strokeWidth: 2 };
-          default: return { stroke: '#6366f1', strokeWidth: 2 };
-        }
-      };
+        const getEdgeStyle = (type: string, selected: boolean) => {
+          if (selected) return { stroke: '#ef4444', strokeWidth: 4 };
+          switch (type) {
+            case 'spouse': return { stroke: '#ec4899', strokeWidth: 2 };
+            case 'ex_spouse': return { stroke: '#9ca3af', strokeWidth: 2, strokeDasharray: '6 4' };
+            case 'sibling': return { stroke: '#10b981', strokeWidth: 2, strokeDasharray: '6 4' };
+            case 'in_law': return { stroke: '#f59e0b', strokeWidth: 2 };
+            default: return { stroke: '#6366f1', strokeWidth: 2 };
+          }
+        };
 
-      const getLabel = (type: string) => {
-        switch (type) {
-          case 'spouse': return '夫妻';
-          case 'ex_spouse': return '前配偶';
-          case 'sibling': return '手足';
-          case 'in_law': return '姻親';
-          default: return '親子';
-        }
-      };
+        const getLabel = (type: string) => {
+          switch (type) {
+            case 'spouse': return '夫妻';
+            case 'ex_spouse': return '前配偶';
+            case 'sibling': return '手足';
+            case 'in_law': return '姻親';
+            default: return '親子';
+          }
+        };
 
         return {
-        id: edgeId,
-        source: edge.from_person_id,
-        target: edge.to_person_id,
-        sourceHandle: edge.metadata?.sourceHandle,
-        targetHandle: edge.metadata?.targetHandle,
-        type: edge.type === 'spouse' || edge.type === 'ex_spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
-        animated: edge.type === 'spouse',
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { ...getEdgeStyle(edge.type, isSelected), opacity: isSelected ? 1 : (isDimmed ? 0.35 : 1) },
-        label: getLabel(edge.type),
-        zIndex: isSelected ? 1000 : 0,
-      };
-    });
+          id: edgeId,
+          source: edge.from_person_id,
+          target: edge.to_person_id,
+          sourceHandle: edge.metadata?.sourceHandle,
+          targetHandle: edge.metadata?.targetHandle,
+          type: edge.type === 'spouse' || edge.type === 'ex_spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
+          animated: edge.type === 'spouse' || edge.type === 'sibling',
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { ...getEdgeStyle(edge.type, isSelected), opacity: isSelected ? 1 : (isDimmed ? 0.35 : 1) },
+          label: getLabel(edge.type),
+          zIndex: isSelected ? 1000 : 0,
+        };
+      });
   }, [graphData, collapsedNodeIds, selectedEdge, dimIds]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -1445,11 +1642,13 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
 
   useEffect(() => {
     if (!graphData) return;
+    const nextPositions = { ...nodePositionMap.current };
     graphData.nodes.forEach((person) => {
-      if (person.metadata?.position) {
-        nodePositionMap.current[person.id] = { ...person.metadata.position };
+      if (!nextPositions[person.id] && person.metadata?.position) {
+        nextPositions[person.id] = { ...person.metadata.position };
       }
     });
+    nodePositionMap.current = nextPositions;
     try {
       localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
     } catch (error) {
@@ -1464,6 +1663,11 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   useEffect(() => {
     if (!reactFlowInstance) return;
     try {
+      const hasPendingFocus = Boolean(localStorage.getItem('clan.pendingFocus') || localStorage.getItem('clan.pendingFocusPosition'));
+      if (hasPendingFocus) {
+        localStorage.removeItem('clan.pendingViewport');
+        return;
+      }
       const raw = localStorage.getItem('clan.pendingViewport');
       if (!raw) return;
       const viewport = JSON.parse(raw) as { x: number; y: number; zoom: number };
@@ -1476,6 +1680,38 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       localStorage.removeItem('clan.pendingViewport');
     }
   }, [reactFlowInstance]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('clan.pendingFocus');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { id?: string; zoom?: number };
+      if (parsed?.id) {
+        setPendingFocus({ id: parsed.id, zoom: typeof parsed.zoom === 'number' ? parsed.zoom : 1.0 });
+      }
+    } catch (error) {
+      console.warn('Failed to restore pending focus:', error);
+      localStorage.removeItem('clan.pendingFocus');
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('clan.pendingFocusPosition');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { x?: number; y?: number; zoom?: number };
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        setPendingFocusPosition({
+          x: parsed.x,
+          y: parsed.y,
+          zoom: typeof parsed.zoom === 'number' ? parsed.zoom : 1.0
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to restore pending focus position:', error);
+      localStorage.removeItem('clan.pendingFocusPosition');
+    }
+  }, []);
 
 
   useEffect(() => {
@@ -1491,7 +1727,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   }, []);
 
   useEffect(() => {
-    if (!pendingCenterId || !reactFlowInstance) return;
+    if (!pendingCenterId || !reactFlowInstance || pendingFocus || pendingFocusPosition) return;
     const position = nodesRef.current.find(node => node.id === pendingCenterId)?.position
       || nodePositionMap.current[pendingCenterId]
       || graphData?.nodes.find(node => node.id === pendingCenterId)?.metadata?.position;
@@ -1501,7 +1737,90 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         setPendingCenterId(null);
       });
     }
-  }, [pendingCenterId, reactFlowInstance, nodes, graphData]);
+  }, [pendingCenterId, pendingFocus, pendingFocusPosition, reactFlowInstance, nodes, graphData]);
+
+  useEffect(() => {
+    if (!pendingFocusPosition || !reactFlowInstance?.setCenter) return;
+    reactFlowInstance.setCenter(pendingFocusPosition.x, pendingFocusPosition.y, { zoom: pendingFocusPosition.zoom });
+    localStorage.removeItem('clan.pendingFocusPosition');
+    localStorage.removeItem('clan.pendingFocus');
+    setPendingFocus(null);
+    setPendingFocusPosition(null);
+  }, [pendingFocusPosition, reactFlowInstance]);
+
+  useEffect(() => {
+    if (!graphData || !reactFlowInstance?.setCenter) return;
+    if (pendingFocusRetryRef.current) return;
+    pendingFocusRetryRef.current = window.setInterval(() => {
+      const raw = localStorage.getItem('clan.pendingFocusPosition');
+      const focusRaw = localStorage.getItem('clan.pendingFocus');
+      if (!raw && !focusRaw) {
+        if (pendingFocusRetryRef.current) {
+          window.clearInterval(pendingFocusRetryRef.current);
+          pendingFocusRetryRef.current = null;
+        }
+        return;
+      }
+      let handled = false;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { x?: number; y?: number; zoom?: number };
+          if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+            const zoom = typeof parsed.zoom === 'number' ? parsed.zoom : 1.0;
+            const bounds = flowWrapperRef.current?.getBoundingClientRect();
+            const width = bounds?.width || window.innerWidth;
+            const height = bounds?.height || window.innerHeight;
+            const viewport = {
+              x: width / 2 - parsed.x * zoom,
+              y: height / 2 - parsed.y * zoom,
+              zoom
+            };
+            if (reactFlowInstance.setViewport) {
+              reactFlowInstance.setViewport(viewport);
+            } else {
+              reactFlowInstance.setCenter(parsed.x!, parsed.y!, { zoom });
+            }
+            requestAnimationFrame(() => {
+              if (reactFlowInstance.setViewport) {
+                reactFlowInstance.setViewport(viewport);
+              } else {
+                reactFlowInstance.setCenter(parsed.x!, parsed.y!, { zoom });
+              }
+            });
+            handled = true;
+          }
+        } catch {
+          // Ignore invalid pending focus position.
+        }
+      }
+      if (!handled && focusRaw) {
+        try {
+          const parsed = JSON.parse(focusRaw) as { id?: string; zoom?: number };
+          if (parsed?.id) {
+            handled = focusNodeById(parsed.id, typeof parsed.zoom === 'number' ? parsed.zoom : 1.0);
+          }
+        } catch {
+          // Ignore invalid pending focus.
+        }
+      }
+      if (handled) {
+        localStorage.removeItem('clan.pendingFocusPosition');
+        localStorage.removeItem('clan.pendingFocus');
+        setPendingFocus(null);
+        setPendingFocusPosition(null);
+        if (pendingFocusRetryRef.current) {
+          window.clearInterval(pendingFocusRetryRef.current);
+          pendingFocusRetryRef.current = null;
+        }
+      }
+    }, 120);
+    return () => {
+      if (pendingFocusRetryRef.current) {
+        window.clearInterval(pendingFocusRetryRef.current);
+        pendingFocusRetryRef.current = null;
+      }
+    };
+  }, [graphData, reactFlowInstance, focusNodeById]);
 
   useEffect(() => {
     if (!pendingFocus || !reactFlowInstance) return;
@@ -1513,8 +1832,9 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     } else if (reactFlowInstance.setCenter) {
       reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: pendingFocus.zoom });
     }
+    localStorage.removeItem('clan.pendingFocus');
     setPendingFocus(null);
-  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition]);
+  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition, nodes]);
 
   useEffect(() => {
     try {
@@ -1526,6 +1846,34 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
   }, []);
 
   useEffect(() => {
+    if (!pendingFocus || !reactFlowInstance) return;
+    let attempts = 0;
+    const tryApply = () => {
+      if (!pendingFocus || !reactFlowInstance) return;
+      const viewport = getViewportForNode(pendingFocus.id, pendingFocus.zoom);
+      const focusPosition = getFocusPosition(pendingFocus.id);
+      if (viewport && focusPosition) {
+        if (reactFlowInstance.setViewport) {
+          reactFlowInstance.setViewport(viewport);
+        } else if (reactFlowInstance.setCenter) {
+          reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: pendingFocus.zoom });
+        }
+        localStorage.removeItem('clan.pendingFocus');
+        setPendingFocus(null);
+        return;
+      }
+      if (attempts < 20) {
+        attempts += 1;
+        window.setTimeout(tryApply, 80);
+      }
+    };
+    tryApply();
+    return () => {
+      attempts = 999;
+    };
+  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition]);
+
+  useEffect(() => {
     if (!lastEditedId) return;
     if (!graphData || !reactFlowInstance) return;
     if (lastEditedFocusTimer.current) {
@@ -1534,7 +1882,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     let attempts = 0;
     lastEditedFocusTimer.current = window.setInterval(() => {
       attempts += 1;
-    const focused = focusNodeById(lastEditedId, 1.0);
+      const focused = focusNodeById(lastEditedId, 1.0);
       if (focused || attempts >= 40) {
         if (lastEditedFocusTimer.current) {
           window.clearInterval(lastEditedFocusTimer.current);
@@ -1591,8 +1939,11 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     [nodes]
   );
 
-  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
-    const ids = selectedNodeIdsRef.current.length > 1 ? selectedNodeIdsRef.current : [node.id];
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
+    if (isCoarsePointer) {
+      setMobileNodeDragging(true);
+    }
+    const ids = getDragSelectionIds(node.id, draggingNodes);
     const positions = nodesRef.current.reduce<Record<string, { x: number; y: number }>>((acc, item) => {
       if (ids.includes(item.id)) {
         acc[item.id] = { ...item.position };
@@ -1632,7 +1983,22 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     });
 
     dragStartPositions.current = positions;
-  }, [collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition]);
+  }, [collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, isCoarsePointer, getDragSelectionIds]);
+
+  const onSelectionDragStart = useCallback((event: React.MouseEvent, draggingNodes: Node[]) => {
+    if (!draggingNodes.length) return;
+    onNodeDragStart(event, draggingNodes[0], draggingNodes);
+  }, [onNodeDragStart]);
+
+  const onSelectionDrag = useCallback((event: React.MouseEvent, draggingNodes: Node[]) => {
+    if (!draggingNodes.length) return;
+    onNodeDrag(event, draggingNodes[0], draggingNodes);
+  }, [onNodeDrag]);
+
+  const onSelectionDragStop = useCallback((event: React.MouseEvent, draggingNodes: Node[]) => {
+    if (!draggingNodes.length) return;
+    onNodeDragStop(event, draggingNodes[0], draggingNodes);
+  }, [onNodeDragStop]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -1649,21 +2015,56 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
     try {
       if (entry.type === 'align' || entry.type === 'move') {
         const nextPositions = entry.positions;
+        const updates = Object.entries(nextPositions).map(([id, position]) => {
+          nodePositionMap.current[id] = position;
+          return updatePersonPosition(id, position, { force: true });
+        });
         setNodes((prev) => prev.map((node) => {
           const position = nextPositions[node.id];
           if (!position) return node;
-          updatePersonPosition(node.id, position);
           return { ...node, position };
         }));
+        try {
+          localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
+        } catch (error) {
+          console.warn('Failed to persist node positions:', error);
+        }
+        await Promise.all(updates);
+        const focusId = entry.type === 'move'
+          ? (entry.draggedId || Object.keys(nextPositions)[0])
+          : Object.keys(nextPositions)[0];
+        if (focusId) {
+          try {
+            const focusPosition = nextPositions[focusId];
+            localStorage.setItem('clan.centerId', focusId);
+            localStorage.setItem('clan.pendingCenterId', focusId);
+            if (focusPosition) {
+              const bounds = flowWrapperRef.current?.getBoundingClientRect();
+              const width = bounds?.width || window.innerWidth;
+              const height = bounds?.height || window.innerHeight;
+              const zoom = 1;
+              const viewport = {
+                x: width / 2 - focusPosition.x * zoom,
+                y: height / 2 - focusPosition.y * zoom,
+                zoom
+              };
+              localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+            }
+            localStorage.removeItem('clan.pendingFocus');
+            localStorage.removeItem('clan.pendingFocusPosition');
+          } catch (error) {
+            console.warn('Failed to persist pending focus after undo:', error);
+          }
+        }
       } else {
         await api.createPerson(
           entry.person.name,
           entry.person.english_name ?? undefined,
           entry.person.gender,
-          entry.person.dob,
-          entry.person.dod,
-          entry.person.tob,
-          entry.person.tod,
+          entry.person.dob ?? undefined,
+          entry.person.dod ?? undefined,
+          entry.person.tob ?? undefined,
+          entry.person.tod ?? undefined,
           entry.person.metadata ?? undefined,
           entry.person.id,
           entry.person.avatar_url ?? undefined
@@ -1707,10 +2108,10 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
       person.name,
       person.english_name || undefined,
       person.gender,
-      person.dob,
-      person.dod,
-      person.tob,
-      person.tod,
+      person.dob ?? undefined,
+      person.dod ?? undefined,
+      person.tob ?? undefined,
+      person.tod ?? undefined,
       newMetadata,
       undefined,
       person.avatar_url ?? undefined,
@@ -1840,10 +2241,18 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         input?.focus();
         input?.select();
       }
+
+      if (!e.ctrlKey && !e.metaKey && e.shiftKey && e.key.toLowerCase() === 'd' && !isEditableTarget(e.target)) {
+        e.preventDefault();
+        if (hasActiveDimming) {
+          clearAllDimming();
+          showToast('已取消全部淡化', 'success');
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationship, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast]);
+  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationship, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming]);
 
   if (loading) {
     return (
@@ -1882,6 +2291,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         onFocusMe={handleFocusMe}
         onSyncPositions={syncAllPositions}
         syncingPositions={syncingPositions}
+        onClearAllDim={clearAllDimming}
+        hasActiveDimming={hasActiveDimming}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
         linkMode={linkMode}
@@ -1900,6 +2311,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
         onSetCenter={() => {
           if (selectedNode) {
             setCenterId(selectedNode);
+            persistPendingViewport(selectedNode, 1.0);
             setSelectedNode(null);
           }
         }}
@@ -1932,10 +2344,15 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onConnect={isLocked || isReadOnly ? undefined : onConnect}
-          onNodeDragStart={isLocked || isReadOnly ? undefined : onNodeDragStart}
-          onNodeDrag={isLocked || isReadOnly ? undefined : onNodeDrag}
-          onNodeDragStop={isLocked || isReadOnly ? undefined : onNodeDragStop}
+          onConnect={allowNodeConnecting ? onConnect : undefined}
+          onConnectStart={allowNodeConnecting ? onConnectStart : undefined}
+          onConnectEnd={allowNodeConnecting ? onConnectEnd : undefined}
+          onNodeDragStart={allowNodeDragging ? onNodeDragStart : undefined}
+          onNodeDrag={allowNodeDragging ? onNodeDrag : undefined}
+          onNodeDragStop={allowNodeDragging ? onNodeDragStop : undefined}
+          onSelectionDragStart={allowNodeDragging ? onSelectionDragStart : undefined}
+          onSelectionDrag={allowNodeDragging ? onSelectionDrag : undefined}
+          onSelectionDragStop={allowNodeDragging ? onSelectionDragStop : undefined}
           noPanClassName="nopan"
           noDragClassName="nodrag"
           connectionRadius={40}
@@ -1947,9 +2364,18 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
             setContextMenu(null);
             setAvatarPreview(null);
           }}
-          onNodeDoubleClick={isReadOnly ? undefined : (_e, node) => {
-            setContextMenu(null);
+          onNodeDoubleClick={isReadOnly ? undefined : (event, node) => {
             setAvatarPreview(null);
+            if (isCoarsePointer) {
+              const viewport = reactFlowInstance?.getViewport?.() ?? { x: 0, y: 0, zoom: 1 };
+              const fallbackX = (node.position.x + (node.width ?? 120) / 2) * viewport.zoom + viewport.x;
+              const fallbackY = (node.position.y + (node.height ?? 120) / 2) * viewport.zoom + viewport.y;
+              const x = Number.isFinite(event.clientX) && event.clientX > 0 ? event.clientX : fallbackX;
+              const y = Number.isFinite(event.clientY) && event.clientY > 0 ? event.clientY : fallbackY;
+              openContextMenuAt(node.id, x, y);
+              return;
+            }
+            setContextMenu(null);
             handleEditPerson(node.id);
           }}
           onNodeContextMenu={onNodeContextMenu}
@@ -1959,10 +2385,11 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           fitView={fitViewEnabled}
           minZoom={0.3}
           maxZoom={2}
-          nodesDraggable={!isLocked && !isReadOnly}
-          nodesConnectable={!isLocked && !isReadOnly}
+          selectionKeyCode={isCoarsePointer ? null : ['Control', 'Meta']}
+          nodesDraggable={allowNodeDragging}
+          nodesConnectable={allowNodeConnecting}
           elementsSelectable
-          panOnDrag
+          panOnDrag={!mobileNodeDragging && !mobileConnecting}
           panOnScroll={false}
           zoomOnScroll
           zoomOnPinch
@@ -2018,6 +2445,36 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
             selectedCount={selectedNodeIds.length}
             onAlignHorizontal={() => alignSelectedNodes('horizontal')}
             onAlignVertical={() => alignSelectedNodes('vertical')}
+            onToggleDimSingle={(id) => {
+              const isDimmed = dimIds.has(id);
+              if (isDimmed) {
+                setDimNodeIds((prev) => {
+                  if (!prev.has(id)) return prev;
+                  const next = new Set(prev);
+                  next.delete(id);
+                  return next;
+                });
+                setDimExcludedNodeIds((prev) => {
+                  if (prev.has(id)) return prev;
+                  const next = new Set(prev);
+                  next.add(id);
+                  return next;
+                });
+                return;
+              }
+              setDimExcludedNodeIds((prev) => {
+                if (!prev.has(id)) return prev;
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+              });
+              setDimNodeIds((prev) => {
+                if (prev.has(id)) return prev;
+                const next = new Set(prev);
+                next.add(id);
+                return next;
+              });
+            }}
             onToggleDimRelatives={(id) => {
               setDimNonRelativesId(null);
               setDimFocusId(prev => (prev === id ? null : id));
@@ -2094,6 +2551,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
                 scheduleExpandedRelayout(expandedIds);
               }
             }}
+            dimSingleActive={dimIds.has(contextMenu.id)}
             dimRelativesActive={dimFocusId === contextMenu.id}
             dimNonRelativesActive={dimNonRelativesId === contextMenu.id}
             maternalCollapsed={collapsedMaternalRoots.has(contextMenu.id)}
@@ -2158,7 +2616,6 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
           onUnsavedClose={() => showToast('未儲存變更', 'warning')}
           onSubmit={async (id, updates, avatarFile, removeAvatar) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
-            const shouldRefreshAfterAvatar = Boolean(avatarFile || removeAvatar);
             const person = graphData.nodes.find(p => p.id === id);
             const existingMetadata = person?.metadata ?? {};
             let mergedMetadata = updates.metadata
@@ -2244,20 +2701,6 @@ export function ClanGraph({ username, readOnly, isAdmin, onLogout }: ClanGraphPr
             setPendingCenterId(id);
             localStorage.setItem('clan.pendingCenterId', id);
             focusNodeById(id, 1.0);
-            if (shouldRefreshAfterAvatar) {
-              try {
-                localStorage.setItem('clan.nodePositions', JSON.stringify(nodePositionMap.current));
-                localStorage.setItem('clan.pendingCenterId', id);
-                const viewport = (reactFlowInstance as ReactFlowInstance & { toObject?: () => { viewport?: { x: number; y: number; zoom: number } } })
-                  .toObject?.().viewport;
-                if (viewport) {
-                  localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
-                }
-              } catch (error) {
-                console.warn('Failed to persist node positions:', error);
-              }
-              window.setTimeout(() => window.location.reload(), 300);
-            }
           }}
         />
       )}
