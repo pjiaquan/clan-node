@@ -330,8 +330,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }))
     );
 
+    const personName = name !== undefined ? name : (existingAny.name ?? null);
     const updateDetails: Record<string, unknown> = {
       id,
+      person_name: personName,
       changed: changedFields
     };
     if (name !== undefined) {
@@ -392,7 +394,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   app.post('/api/people/:id/avatar', async (c) => {
     const id = c.req.param('id');
     const existing = await c.env.DB.prepare(
-      'SELECT avatar_url FROM people WHERE id = ?'
+      'SELECT name, avatar_url FROM people WHERE id = ?'
     ).bind(id).first();
 
     if (!existing) {
@@ -437,6 +439,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       const avatarLink = new URL(avatarUrl, c.req.url).toString();
       notifyUpdate(c, 'people:avatar', {
         id,
+        name: (existing as any).name ?? null,
         avatar_url: avatarUrl
       }, { photoUrl: avatarLink });
       const avatarBuffer = await file.arrayBuffer();
@@ -479,6 +482,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Delete a person
   app.delete('/api/people/:id', async (c) => {
     const id = c.req.param('id');
+    const existing = await c.env.DB.prepare(
+      'SELECT id, name, english_name FROM people WHERE id = ?'
+    ).bind(id).first();
+
+    if (!existing) {
+      return c.json({ error: 'Person not found' }, 404);
+    }
 
     await c.env.DB.prepare(
       'DELETE FROM person_custom_fields WHERE person_id = ?'
@@ -489,7 +499,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     ).bind(id).run();
 
     if (result.success && (result.meta.changes ?? 0) > 0) {
-      notifyUpdate(c, 'people:delete', { id });
+      notifyUpdate(c, 'people:delete', {
+        id,
+        name: (existing as any).name ?? null,
+        english_name: (existing as any).english_name ?? null
+      });
       queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);
       return c.json({ success: true, id });
     }

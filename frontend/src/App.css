@@ -1081,7 +1081,7 @@ button:disabled:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 3000;
 }
 
 .modal {
@@ -1104,8 +1104,8 @@ button:disabled:hover {
   background: white;
   border-radius: 16px;
   padding: 1.25rem;
-  max-width: 90vw;
-  max-height: 90vh;
+  max-width: 94vw;
+  max-height: 94vh;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
@@ -1114,10 +1114,10 @@ button:disabled:hover {
 }
 
 .avatar-modal img {
-  max-width: min(420px, 80vw);
-  max-height: 70vh;
+  max-width: min(560px, 92vw);
+  max-height: 82vh;
   border-radius: 16px;
-  object-fit: cover;
+  object-fit: contain;
   background: #f1f5f9;
 }
 
@@ -1125,6 +1125,63 @@ button:disabled:hover {
   font-size: 1rem;
   font-weight: 600;
   color: #1f2937;
+}
+
+.relationship-choice-modal {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 1rem;
+  width: min(92vw, 360px);
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.28);
+}
+
+.relationship-choice-modal h3 {
+  margin: 0 0 0.5rem;
+  color: #0f172a;
+}
+
+.relationship-choice-modal p {
+  margin: 0 0 0.9rem;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.relationship-choice-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.relationship-choice-btn {
+  background: #e2e8f0;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.relationship-choice-btn:hover {
+  background: #cbd5e1;
+}
+
+.relationship-choice-btn.is-suggested {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.relationship-choice-btn.is-suggested:hover {
+  background: #1d4ed8;
+}
+
+.relationship-choice-cancel {
+  width: 100%;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.relationship-choice-cancel:hover {
+  background: #e2e8f0;
 }
 
 .form-group {
@@ -1495,6 +1552,30 @@ button:disabled:hover {
 
   .controls .btn-label {
     display: none;
+  }
+
+  .modal-overlay {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .avatar-modal {
+    width: min(98vw, 560px);
+    max-height: 92dvh;
+    padding: 0.75rem;
+    border-radius: 12px;
+    gap: 0.5rem;
+  }
+
+  .avatar-modal img {
+    width: 100%;
+    max-width: 100%;
+    max-height: 84dvh;
+    border-radius: 10px;
+  }
+
+  .avatar-modal-name {
+    font-size: 0.9rem;
   }
 
   .person-node {

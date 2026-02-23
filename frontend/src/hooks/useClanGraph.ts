@@ -142,15 +142,21 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     try {
       try {
         localStorage.setItem('clan.lastEditedId', id);
+        localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: 1.0 }));
+        localStorage.setItem('clan.pendingCenterId', id);
       } catch (error) {
         console.warn('Failed to persist last edited id:', error);
       }
       await api.updatePerson(id, updates);
-      fetchGraph();
+      if (centerId === id) {
+        fetchGraph();
+      } else {
+        setCenterId(id);
+      }
     } catch (error) {
       console.error('Failed to update person:', error);
     }
-  }, [fetchGraph]);
+  }, [centerId, fetchGraph, setCenterId]);
 
   const updatePersonPosition = useCallback(async (
     id: string,

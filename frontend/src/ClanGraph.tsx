@@ -48,6 +48,14 @@ type UndoEntry =
   };
 
 type Gender = Person['gender'];
+type RelationshipChoiceType = 'parent_child' | 'spouse' | 'sibling';
+type PendingRelationshipChoice = {
+  from: string;
+  to: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  suggestedType: RelationshipChoiceType;
+};
 
 const getSurname = (name?: string | null) => name?.trim().charAt(0) ?? '';
 
@@ -120,7 +128,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
   const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
   const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [mobileNodeDragging, setMobileNodeDragging] = useState(false);
   const [mobileConnecting, setMobileConnecting] = useState(false);
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
@@ -129,6 +137,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
   const [syncingPositions, setSyncingPositions] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+  const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
   const pendingFocusRetryRef = useRef<number | null>(null);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
   const baseLockStorageKey = 'clan.flowLocked';
@@ -174,17 +183,17 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey) {
-        setIsCtrlPressed(true);
+      if (event.shiftKey) {
+        setIsShiftPressed(true);
       }
     };
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (!event.ctrlKey) {
-        setIsCtrlPressed(false);
+      if (!event.shiftKey) {
+        setIsShiftPressed(false);
       }
     };
     const handleWindowBlur = () => {
-      setIsCtrlPressed(false);
+      setIsShiftPressed(false);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -715,6 +724,132 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     ].slice(0, 10));
   }, [createRelationship]);
 
+  const normalizeRelationshipChoiceType = useCallback((type: string): RelationshipChoiceType => {
+    if (type === 'spouse') return 'spouse';
+    if (type === 'sibling') return 'sibling';
+    return 'parent_child';
+  }, []);
+
+  const requestRelationshipChoice = useCallback((choice: PendingRelationshipChoice) => {
+    setPendingRelationshipChoice(choice);
+  }, []);
+
+  const confirmRelationshipChoice = useCallback((type: RelationshipChoiceType) => {
+    if (!pendingRelationshipChoice) return;
+    const choice = pendingRelationshipChoice;
+    setPendingRelationshipChoice(null);
+    void createRelationshipWithUndo(
+      choice.from,
+      choice.to,
+      choice.sourceHandle,
+      choice.targetHandle,
+      type
+    );
+  }, [pendingRelationshipChoice, createRelationshipWithUndo]);
+
+  const hasDirectRelationship = useCallback((aId: string, bId: string, type?: string) => {
+    if (!graphData) return false;
+    return graphData.edges.some((edge) => {
+      const matchesPair = (
+        (edge.from_person_id === aId && edge.to_person_id === bId)
+        || (edge.from_person_id === bId && edge.to_person_id === aId)
+      );
+      if (!matchesPair) return false;
+      return type ? edge.type === type : true;
+    });
+  }, [graphData]);
+
+  const getAutoSpouseLinkCandidate = useCallback((draggedId: string, selectedIds: string[]) => {
+    if (!graphData) return null as { from: string; to: string } | null;
+    if (selectedIds.length !== 1 || selectedIds[0] !== draggedId) return null;
+
+    const draggedNode = nodesRef.current.find((item) => item.id === draggedId);
+    const draggedPerson = graphData.nodes.find((item) => item.id === draggedId);
+    if (!draggedNode || !draggedPerson) return null;
+    if (!draggedPerson.gender || draggedPerson.gender === 'O') return null;
+
+    const draggedWidth = draggedNode.width ?? 120;
+    const draggedHeight = draggedNode.height ?? 120;
+    const draggedArea = draggedWidth * draggedHeight;
+    const nearGapXThreshold = isCoarsePointer ? 16 : 10;
+    const nearCenterYThreshold = isCoarsePointer ? 16 : 10;
+    const minVerticalOverlapRatio = 0.45;
+    const minOverlapRatio = 0.32;
+    const candidates: Array<{ to: string; score: number }> = [];
+
+    for (const otherNode of nodesRef.current) {
+      if (otherNode.id === draggedId) continue;
+      const otherPerson = graphData.nodes.find((item) => item.id === otherNode.id);
+      if (!otherPerson || !otherPerson.gender || otherPerson.gender === 'O') continue;
+      if (otherPerson.gender === draggedPerson.gender) continue;
+
+      if (hasDirectRelationship(draggedId, otherNode.id, 'spouse')) continue;
+      if (hasDirectRelationship(draggedId, otherNode.id)) continue;
+
+      const otherWidth = otherNode.width ?? 120;
+      const otherHeight = otherNode.height ?? 120;
+      const otherArea = otherWidth * otherHeight;
+      const overlapWidth = Math.min(
+        draggedNode.position.x + draggedWidth,
+        otherNode.position.x + otherWidth
+      ) - Math.max(draggedNode.position.x, otherNode.position.x);
+      const overlapHeight = Math.min(
+        draggedNode.position.y + draggedHeight,
+        otherNode.position.y + otherHeight
+      ) - Math.max(draggedNode.position.y, otherNode.position.y);
+      const overlapArea = overlapWidth > 0 && overlapHeight > 0
+        ? overlapWidth * overlapHeight
+        : 0;
+      const overlapRatio = overlapArea > 0
+        ? overlapArea / Math.max(1, Math.min(draggedArea, otherArea))
+        : 0;
+
+      const gapX = Math.max(
+        0,
+        otherNode.position.x - (draggedNode.position.x + draggedWidth),
+        draggedNode.position.x - (otherNode.position.x + otherWidth)
+      );
+      const gapY = Math.max(
+        0,
+        otherNode.position.y - (draggedNode.position.y + draggedHeight),
+        draggedNode.position.y - (otherNode.position.y + otherHeight)
+      );
+      const centerYDragged = draggedNode.position.y + draggedHeight / 2;
+      const centerYOther = otherNode.position.y + otherHeight / 2;
+      const centerYDelta = Math.abs(centerYDragged - centerYOther);
+      const verticalOverlapRatio = overlapHeight > 0
+        ? overlapHeight / Math.max(1, Math.min(draggedHeight, otherHeight))
+        : 0;
+
+      const strongOverlap = overlapRatio >= minOverlapRatio;
+      const horizontalNear = (
+        gapX <= nearGapXThreshold
+        && gapY <= nearCenterYThreshold
+        && centerYDelta <= nearCenterYThreshold
+        && verticalOverlapRatio >= minVerticalOverlapRatio
+      );
+
+      if (!strongOverlap && !horizontalNear) continue;
+
+      const score = strongOverlap
+        ? (1000000 + overlapRatio * 10000 - centerYDelta)
+        : (1000 - gapX * 10 - centerYDelta);
+      candidates.push({ to: otherNode.id, score });
+    }
+
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length > 1) {
+      const scoreGap = candidates[0].score - candidates[1].score;
+      const ambiguousGap = candidates[0].score >= 100000 ? 800 : 10;
+      if (scoreGap <= ambiguousGap) {
+        return null;
+      }
+    }
+
+    return { from: draggedId, to: candidates[0].to };
+  }, [graphData, hasDirectRelationship, isCoarsePointer]);
+
   const syncAllPositions = useCallback(async () => {
     if (!ensureEditable()) return;
     if (!graphData) return;
@@ -931,15 +1066,15 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
       const relationshipType = isHorizontal
         ? (sameSurname ? 'sibling' : (gendersDifferent ? 'spouse' : 'sibling'))
         : getDefaultRelationshipType(connection.source, connection.target, undefined, { allowSpouse: false });
-      void createRelationshipWithUndo(
-        connection.source,
-        connection.target,
+      requestRelationshipChoice({
+        from: connection.source,
+        to: connection.target,
         sourceHandle,
         targetHandle,
-        relationshipType
-      );
+        suggestedType: normalizeRelationshipChoiceType(relationshipType)
+      });
     }
-  }, [createRelationshipWithUndo, graphData, getDefaultRelationshipType]);
+  }, [graphData, getDefaultRelationshipType, requestRelationshipChoice, normalizeRelationshipChoiceType]);
 
   const onConnectStart = useCallback(() => {
     if (isCoarsePointer) {
@@ -1106,8 +1241,24 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         setUndoStack(prev => [{ type: 'move', positions: startPositions, draggedId: node.id } as const, ...prev].slice(0, 10));
       }
     }
+    const dragStart = startPositions?.[node.id];
+    const dragEnd = nodesRef.current.find((item) => item.id === node.id)?.position;
+    const dragDistance = (dragStart && dragEnd)
+      ? Math.hypot(dragEnd.x - dragStart.x, dragEnd.y - dragStart.y)
+      : 0;
+    const minDragDistanceForAutoLink = isCoarsePointer ? 16 : 10;
+    const autoSpouseCandidate = dragDistance >= minDragDistanceForAutoLink
+      ? getAutoSpouseLinkCandidate(node.id, selectedIds)
+      : null;
+    if (autoSpouseCandidate) {
+      requestRelationshipChoice({
+        from: autoSpouseCandidate.from,
+        to: autoSpouseCandidate.to,
+        suggestedType: 'spouse'
+      });
+    }
     dragStartPositions.current = null;
-  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds, resolveOverlapAfterDrop]);
+  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds, getAutoSpouseLinkCandidate, resolveOverlapAfterDrop, requestRelationshipChoice, isCoarsePointer]);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (!reactFlowInstance) return;
@@ -1577,7 +1728,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     setCollapsedChildRoots(new Set());
     setCollapsedSiblingRoots(new Set());
   }, []);
-  const ctrlHoverFocusId = isCtrlPressed ? hoveredNodeId : null;
+  const ctrlHoverFocusId = isShiftPressed ? hoveredNodeId : null;
   const { connectedNodeIds: ctrlHoverConnectedNodeIds, connectedEdgeIds: ctrlHoverConnectedEdgeIds } = useMemo(() => {
     const connectedNodeIds = new Set<string>();
     const connectedEdgeIds = new Set<string>();
@@ -2110,12 +2261,16 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
     setSelectedNode((prev) => (prev === nodeId && !isMultiSelect ? null : nodeId));
     setSelectedEdge(null);
 
-    if (linkMode) {
+    if (linkMode && linkMode.from !== nodeId) {
       const relationshipType = getDefaultRelationshipType(linkMode.from, nodeId);
-      void createRelationshipWithUndo(linkMode.from, nodeId, undefined, undefined, relationshipType);
+      requestRelationshipChoice({
+        from: linkMode.from,
+        to: nodeId,
+        suggestedType: normalizeRelationshipChoiceType(relationshipType)
+      });
       setLinkMode(null);
     }
-  }, [linkMode, createRelationshipWithUndo, getDefaultRelationshipType, setNodes, selectedNode]);
+  }, [linkMode, getDefaultRelationshipType, setNodes, selectedNode, requestRelationshipChoice, normalizeRelationshipChoiceType]);
 
   const selectedNodeIds = useMemo(
     () => nodes.filter(node => node.selected).map(node => node.id),
@@ -2805,11 +2960,55 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
             const person = await createPerson(name, englishName, gender, dob, dod, tob, tod);
             if (selectedNode) {
               const relationshipType = getDefaultRelationshipType(selectedNode, person.id, { toGender: person.gender });
-              await createRelationshipWithUndo(selectedNode, person.id, undefined, undefined, relationshipType);
+              requestRelationshipChoice({
+                from: selectedNode,
+                to: person.id,
+                suggestedType: normalizeRelationshipChoiceType(relationshipType)
+              });
             }
             setShowAddModal(false);
           }}
         />
+      )}
+
+      {pendingRelationshipChoice && (
+        <div className="modal-overlay" onClick={() => setPendingRelationshipChoice(null)}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>請選擇關係類型</h3>
+            <p>
+              {
+                `${graphData?.nodes.find((node) => node.id === pendingRelationshipChoice.from)?.name || pendingRelationshipChoice.from}`
+              }
+              {'  ↔  '}
+              {
+                `${graphData?.nodes.find((node) => node.id === pendingRelationshipChoice.to)?.name || pendingRelationshipChoice.to}`
+              }
+            </p>
+            <div className="relationship-choice-actions">
+              <button
+                className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'sibling' ? 'is-suggested' : ''}`}
+                onClick={() => confirmRelationshipChoice('sibling')}
+              >
+                手足
+              </button>
+              <button
+                className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'parent_child' ? 'is-suggested' : ''}`}
+                onClick={() => confirmRelationshipChoice('parent_child')}
+              >
+                親子
+              </button>
+              <button
+                className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'spouse' ? 'is-suggested' : ''}`}
+                onClick={() => confirmRelationshipChoice('spouse')}
+              >
+                夫妻
+              </button>
+            </div>
+            <button className="relationship-choice-cancel" onClick={() => setPendingRelationshipChoice(null)}>
+              取消
+            </button>
+          </div>
+        </div>
       )}
 
       {canManageUsers && showCreateUserModal && (

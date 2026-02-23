@@ -100,6 +100,30 @@ async function getSiblingIds(db: D1Database, personId: string) {
   return [...ids];
 }
 
+async function getPersonNameMap(
+  db: D1Database,
+  personIds: Array<string | null | undefined>
+) {
+  const uniqueIds = [...new Set(
+    personIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+  )];
+  const map = new Map<string, string>();
+  if (!uniqueIds.length) return map;
+
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  const { results } = await db.prepare(
+    `SELECT id, name FROM people WHERE id IN (${placeholders})`
+  ).bind(...uniqueIds).all();
+
+  for (const row of results) {
+    const rowAny = row as any;
+    if (typeof rowAny.id === 'string') {
+      map.set(rowAny.id, typeof rowAny.name === 'string' ? rowAny.name : '');
+    }
+  }
+  return map;
+}
+
 async function ensureSiblingLink(
   db: D1Database,
   aId: string,
@@ -369,10 +393,13 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const metadataSummary = typeof finalMetadata === 'string'
       ? safeParse(finalMetadata)
       : finalMetadata;
+    const personNames = await getPersonNameMap(c.env.DB, [fromId, toId]);
     notifyUpdate(c, 'relationships:create', {
       id: result.meta.last_row_id ?? undefined,
       from_person_id: fromId,
       to_person_id: toId,
+      from_person_name: personNames.get(fromId) ?? null,
+      to_person_name: personNames.get(toId) ?? null,
       type,
       source_handle: metadataSummary?.sourceHandle,
       target_handle: metadataSummary?.targetHandle
@@ -522,12 +549,15 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const updated = await c.env.DB.prepare(
       'SELECT * FROM relationships WHERE id = ?'
     ).bind(id).first();
+    const personNames = await getPersonNameMap(c.env.DB, [nextFrom, nextTo]);
 
     const updateDetails: Record<string, unknown> = {
       id,
       changed: changedFields,
       from_person_id: nextFrom,
       to_person_id: nextTo,
+      from_person_name: personNames.get(nextFrom) ?? null,
+      to_person_name: personNames.get(nextTo) ?? null,
       type: nextType
     };
     if (metadata !== undefined && typeof metadata === 'object') {
@@ -543,6 +573,17 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     try {
       const id = c.req.param('id');
       console.log(`DELETE /api/relationships/${id} request received`);
+      const existing = await c.env.DB.prepare(
+        'SELECT id, from_person_id, to_person_id, type FROM relationships WHERE id = ?'
+      ).bind(id).first();
+      if (!existing) {
+        return c.json({ error: 'Relationship not found' }, 404);
+      }
+      const existingAny = existing as any;
+      const personNames = await getPersonNameMap(c.env.DB, [
+        existingAny.from_person_id as string,
+        existingAny.to_person_id as string
+      ]);
 
       const result = await c.env.DB.prepare(
         'DELETE FROM relationships WHERE id = ?'
@@ -551,7 +592,14 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       console.log('Delete result:', JSON.stringify(result));
 
       if (result.success && (result.meta.changes ?? 0) > 0) {
-        notifyUpdate(c, 'relationships:delete', { id });
+        notifyUpdate(c, 'relationships:delete', {
+          id,
+          from_person_id: existingAny.from_person_id as string,
+          to_person_id: existingAny.to_person_id as string,
+          from_person_name: personNames.get(existingAny.from_person_id as string) ?? null,
+          to_person_name: personNames.get(existingAny.to_person_id as string) ?? null,
+          type: existingAny.type as string
+        });
         return c.json({ success: true, id });
       }
       return c.json({ error: 'Relationship not found' }, 404);
