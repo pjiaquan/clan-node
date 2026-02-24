@@ -11,6 +11,8 @@
     "pages:dev": "wrangler pages dev -- npm run dev"
   },
   "dependencies": {
+    "opencc-js": "^1.0.5",
+    "pinyin-pro": "^3.28.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "reactflow": "^11.11.4"

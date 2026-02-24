@@ -21,6 +21,8 @@ import { Header } from './components/Header';
 import { EditPersonModal } from './components/EditPersonModal';
 import { CreateUserModal } from './components/CreateUserModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
+import type { GraphSettings } from './graphSettings';
+import { createExactNameMatcher, createNameMatcher } from './utils/nameSearch';
 import 'reactflow/dist/style.css';
 
 const nodeTypes = {
@@ -69,14 +71,25 @@ const CTRL_HOVER_DIM_NODE_OPACITY = 0.18;
 const CTRL_HOVER_DIM_EDGE_OPACITY = 0.12;
 const CTRL_HOVER_EDGE_WIDTH_BOOST = 2;
 const CTRL_HOVER_MIN_EDGE_WIDTH = 4;
+const COARSE_NEAR_GAP_BONUS = 6;
+const COARSE_NEAR_CENTER_Y_BONUS = 6;
+const COARSE_MIN_DRAG_DISTANCE_BONUS = 6;
+const COARSE_Y_SNAP_BONUS = 4;
+const COARSE_Y_RELEASE_BONUS = 6;
+const COARSE_X_SNAP_BONUS = 10;
+const COARSE_X_RELEASE_BONUS = 12;
+const COARSE_SPOUSE_SNAP_BONUS = 14;
+const COARSE_SPOUSE_RELEASE_BONUS = 20;
 
 type ClanGraphProps = {
   username: string | null;
   readOnly?: boolean;
   isAdmin?: boolean;
+  graphSettings: GraphSettings;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
   onManageSessions?: () => void;
+  onOpenSettings?: () => void;
   onLogout: () => void;
 };
 
@@ -84,9 +97,11 @@ export function ClanGraph({
   username,
   readOnly,
   isAdmin,
+  graphSettings,
   onManageUsers,
   onManageNotifications,
   onManageSessions,
+  onOpenSettings,
   onLogout
 }: ClanGraphProps) {
   const isReadOnly = Boolean(readOnly);
@@ -511,8 +526,8 @@ export function ClanGraph({
     let offsetX = 0;
     let offsetY = 0;
     if (overlaps(0, 0)) {
-      const stepX = 200;
-      const stepY = 140;
+      const stepX = graphSettings.expandShiftStepX;
+      const stepY = graphSettings.expandShiftStepY;
       for (let i = 1; i <= 10; i += 1) {
         const tryX = stepX * i;
         const tryY = stepY * i;
@@ -545,7 +560,7 @@ export function ClanGraph({
     } catch (error) {
       console.warn('Failed to persist node positions:', error);
     }
-  }, [isReadOnly, updatePersonPosition]);
+  }, [graphSettings.expandShiftStepX, graphSettings.expandShiftStepY, isReadOnly, updatePersonPosition]);
 
   const scheduleExpandedRelayout = useCallback((ids: Set<string>) => {
     if (!ids.size) return;
@@ -812,7 +827,11 @@ export function ClanGraph({
     });
   }, [graphData]);
 
-  const getAutoSpouseLinkCandidate = useCallback((draggedId: string, selectedIds: string[]) => {
+  const getAutoSpouseLinkCandidate = useCallback((
+    draggedId: string,
+    selectedIds: string[],
+    options?: { overlapOnly?: boolean }
+  ) => {
     if (!graphData) return null as { from: string; to: string } | null;
     if (selectedIds.length !== 1 || selectedIds[0] !== draggedId) return null;
 
@@ -824,11 +843,12 @@ export function ClanGraph({
     const draggedWidth = draggedNode.width ?? 120;
     const draggedHeight = draggedNode.height ?? 120;
     const draggedArea = draggedWidth * draggedHeight;
-    const nearGapXThreshold = isCoarsePointer ? 16 : 10;
-    const nearCenterYThreshold = isCoarsePointer ? 16 : 10;
-    const minVerticalOverlapRatio = 0.45;
-    const minOverlapRatio = 0.32;
+    const nearGapXThreshold = graphSettings.nearGapXThreshold + (isCoarsePointer ? COARSE_NEAR_GAP_BONUS : 0);
+    const nearCenterYThreshold = graphSettings.nearCenterYThreshold + (isCoarsePointer ? COARSE_NEAR_CENTER_Y_BONUS : 0);
+    const minVerticalOverlapRatio = graphSettings.autoSpouseMinVerticalOverlapRatio;
+    const minOverlapRatio = graphSettings.autoSpouseMinOverlapRatio;
     const candidates: Array<{ to: string; score: number }> = [];
+    const overlapOnly = Boolean(options?.overlapOnly);
 
     for (const otherNode of nodesRef.current) {
       if (otherNode.id === draggedId) continue;
@@ -875,7 +895,7 @@ export function ClanGraph({
         : 0;
 
       const strongOverlap = overlapRatio >= minOverlapRatio;
-      const horizontalNear = (
+      const horizontalNear = !overlapOnly && (
         gapX <= nearGapXThreshold
         && gapY <= nearCenterYThreshold
         && centerYDelta <= nearCenterYThreshold
@@ -901,7 +921,7 @@ export function ClanGraph({
     }
 
     return { from: draggedId, to: candidates[0].to };
-  }, [graphData, hasDirectRelationship, isCoarsePointer]);
+  }, [graphData, graphSettings, hasDirectRelationship, isCoarsePointer]);
 
   const syncAllPositions = useCallback(async () => {
     if (!ensureEditable()) return;
@@ -1158,14 +1178,19 @@ export function ClanGraph({
     return [draggedId];
   }, []);
 
-  const resolveOverlapAfterDrop = useCallback((selectedIds: string[], draggedId: string) => {
+  const resolveOverlapAfterDrop = useCallback((
+    selectedIds: string[],
+    draggedId: string,
+    options?: { ignoredNodeIds?: string[] }
+  ) => {
     const draggedNode = nodesRef.current.find((item) => item.id === draggedId);
     if (!draggedNode) return;
 
     const selectedSet = new Set(selectedIds);
+    const ignoredSet = new Set(options?.ignoredNodeIds ?? []);
     const draggedWidth = draggedNode.width ?? 120;
     const draggedHeight = draggedNode.height ?? 120;
-    const repelGap = 24;
+    const repelGap = graphSettings.repelGap;
     let nextX = draggedNode.position.x;
     let nextY = draggedNode.position.y;
 
@@ -1175,6 +1200,7 @@ export function ClanGraph({
 
       for (const other of nodesRef.current) {
         if (selectedSet.has(other.id)) continue;
+        if (ignoredSet.has(other.id)) continue;
         const otherWidth = other.width ?? 120;
         const otherHeight = other.height ?? 120;
         const overlapWidth = Math.min(nextX + draggedWidth, other.position.x + otherWidth) - Math.max(nextX, other.position.x);
@@ -1223,13 +1249,25 @@ export function ClanGraph({
 
     nodesRef.current = shiftedNodes;
     setNodesRef.current?.(shiftedNodes);
-  }, []);
+  }, [graphSettings.repelGap]);
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     setMobileNodeDragging(false);
     const selectedIds = getDragSelectionIds(node.id, draggingNodes);
     const startPositions = dragStartPositions.current;
-    resolveOverlapAfterDrop(selectedIds, node.id);
+    const overlapSpouseCandidate = getAutoSpouseLinkCandidate(node.id, selectedIds, { overlapOnly: true });
+    if (overlapSpouseCandidate) {
+      void createRelationshipWithUndo(
+        overlapSpouseCandidate.from,
+        overlapSpouseCandidate.to,
+        undefined,
+        undefined,
+        'spouse'
+      );
+    }
+    resolveOverlapAfterDrop(selectedIds, node.id, {
+      ignoredNodeIds: overlapSpouseCandidate ? [overlapSpouseCandidate.to] : undefined,
+    });
     nodesRef.current.forEach((item) => {
       if (!selectedIds.includes(item.id)) return;
       const start = startPositions?.[item.id];
@@ -1299,19 +1337,21 @@ export function ClanGraph({
     const dragDistance = (dragStart && dragEnd)
       ? Math.hypot(dragEnd.x - dragStart.x, dragEnd.y - dragStart.y)
       : 0;
-    const minDragDistanceForAutoLink = isCoarsePointer ? 16 : 10;
-    const autoSpouseCandidate = dragDistance >= minDragDistanceForAutoLink
-      ? getAutoSpouseLinkCandidate(node.id, selectedIds)
-      : null;
-    if (autoSpouseCandidate) {
-      requestRelationshipChoice({
-        from: autoSpouseCandidate.from,
-        to: autoSpouseCandidate.to,
-        suggestedType: 'spouse'
-      });
+    if (!overlapSpouseCandidate) {
+      const minDragDistanceForAutoLink = graphSettings.minDragDistanceForAutoLink + (isCoarsePointer ? COARSE_MIN_DRAG_DISTANCE_BONUS : 0);
+      const autoSpouseCandidate = dragDistance >= minDragDistanceForAutoLink
+        ? getAutoSpouseLinkCandidate(node.id, selectedIds)
+        : null;
+      if (autoSpouseCandidate) {
+        requestRelationshipChoice({
+          from: autoSpouseCandidate.from,
+          to: autoSpouseCandidate.to,
+          suggestedType: 'spouse'
+        });
+      }
     }
     dragStartPositions.current = null;
-  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds, getAutoSpouseLinkCandidate, resolveOverlapAfterDrop, requestRelationshipChoice, isCoarsePointer]);
+  }, [updatePersonPosition, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide, getStoredPosition, getDragSelectionIds, getAutoSpouseLinkCandidate, resolveOverlapAfterDrop, createRelationshipWithUndo, requestRelationshipChoice, isCoarsePointer, graphSettings.minDragDistanceForAutoLink]);
 
   const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (!reactFlowInstance) return;
@@ -1319,14 +1359,14 @@ export function ClanGraph({
       .toObject?.().viewport;
     if (!viewport) return;
 
-    const ySnapThreshold = isCoarsePointer ? 30 : 26;
-    const yReleaseThreshold = isCoarsePointer ? 40 : 34;
-    const xSnapThreshold = isCoarsePointer ? 22 : 12;
-    const xReleaseThreshold = isCoarsePointer ? 30 : 18;
+    const ySnapThreshold = graphSettings.ySnapThreshold + (isCoarsePointer ? COARSE_Y_SNAP_BONUS : 0);
+    const yReleaseThreshold = graphSettings.yReleaseThreshold + (isCoarsePointer ? COARSE_Y_RELEASE_BONUS : 0);
+    const xSnapThreshold = graphSettings.xSnapThreshold + (isCoarsePointer ? COARSE_X_SNAP_BONUS : 0);
+    const xReleaseThreshold = graphSettings.xReleaseThreshold + (isCoarsePointer ? COARSE_X_RELEASE_BONUS : 0);
     const guideThresholdY = 2000;
-    const spouseSnapThreshold = isCoarsePointer ? 34 : 20;
-    const spouseReleaseThreshold = isCoarsePointer ? 48 : 28;
-    const spouseGap = 0;
+    const spouseSnapThreshold = graphSettings.spouseSnapThreshold + (isCoarsePointer ? COARSE_SPOUSE_SNAP_BONUS : 0);
+    const spouseReleaseThreshold = graphSettings.spouseReleaseThreshold + (isCoarsePointer ? COARSE_SPOUSE_RELEASE_BONUS : 0);
+    const spouseGap = graphSettings.spouseGap;
     let nearestYGuide: number | null = null;
     let nearestYGuideSourceId: string | null = null;
     let nearestYGuideDistance = Number.POSITIVE_INFINITY;
@@ -1489,7 +1529,7 @@ export function ClanGraph({
     } else {
       setDragGuideY(null);
     }
-  }, [reactFlowInstance, isCoarsePointer, graphData, getSpouseId, getDragSelectionIds]);
+  }, [reactFlowInstance, isCoarsePointer, graphData, getSpouseId, getDragSelectionIds, graphSettings]);
 
   const handleEditPerson = useCallback((id: string) => {
     if (!ensureEditable()) return;
@@ -1533,12 +1573,14 @@ export function ClanGraph({
     if (!graphData) return;
     const trimmed = query.trim();
     if (!trimmed) return;
-    const lower = trimmed.toLowerCase();
+    const exactMatch = createExactNameMatcher(trimmed);
+    const fuzzyMatch = createNameMatcher(trimmed);
     const match = graphData.nodes.find((person) =>
       person.id === trimmed
-      || person.name === trimmed
-      || person.name.toLowerCase().includes(lower)
-      || (person.english_name?.toLowerCase().includes(lower) ?? false)
+      || exactMatch(person.name)
+      || exactMatch(person.english_name)
+      || fuzzyMatch(person.name)
+      || fuzzyMatch(person.english_name)
     );
     if (!match) {
       showToast('找不到成員', 'warning');
@@ -1582,16 +1624,24 @@ export function ClanGraph({
     return true;
   }, [getViewportForNode, getFocusPosition, reactFlowInstance]);
 
-  const handleFocusMe = useCallback(() => {
+  const focusMe = useCallback((options?: { highlight?: boolean; syncCenter?: boolean }) => {
+    const highlight = options?.highlight ?? true;
+    const syncCenter = options?.syncCenter ?? true;
     if (!graphData) return;
     const meId = graphData.center
       || graphData.nodes.find((person) => person.title === '我')?.id
       || centerId;
     if (!meId) return;
-    setCenterId(meId);
-    persistPendingViewport(meId, 1.0);
-    setPendingFocus({ id: meId, zoom: 1.0 });
+
+    if (syncCenter) {
+      setCenterId(meId);
+      persistPendingViewport(meId, 1.0);
+      setPendingFocus({ id: meId, zoom: 1.0 });
+    }
     focusNodeById(meId, 1.0);
+    if (!highlight) {
+      return;
+    }
     if (searchFlashTimer.current) {
       window.clearTimeout(searchFlashTimer.current);
     }
@@ -1609,6 +1659,15 @@ export function ClanGraph({
     }, 500);
     // Do not set pending center here to avoid overriding the zoom change.
   }, [graphData, centerId, focusNodeById, setCenterId, persistPendingViewport]);
+
+  const handleFocusMe = useCallback(() => {
+    focusMe({ highlight: true, syncCenter: true });
+  }, [focusMe]);
+
+  useEffect(() => {
+    if (!graphData || !reactFlowInstance) return;
+    focusMe({ highlight: false, syncCenter: false });
+  }, [graphData, reactFlowInstance, focusMe]);
 
   const handleDeletePerson = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -1808,6 +1867,8 @@ export function ClanGraph({
 
     const centerX = 500;
     const centerY = 300;
+    const initialOrbitBaseRadius = graphSettings.initialOrbitBaseRadius;
+    const initialOrbitStepRadius = graphSettings.initialOrbitStepRadius;
 
     const visibleNodes = graphData.nodes.filter((person) => !collapsedNodeIds.has(person.id));
 
@@ -1823,12 +1884,13 @@ export function ClanGraph({
         : baseOpacity;
 
       const storedPosition = nodePositionMap.current[person.id];
-      const position = storedPosition || person.metadata?.position || (
+      // Prefer server metadata so positions updated on other devices can be reflected after refresh.
+      const position = person.metadata?.position || storedPosition || (
         person.id === graphData.center
           ? { x: centerX, y: centerY }
           : {
-            x: centerX + Math.cos((index * 45) * (Math.PI / 180)) * (150 + (index * 30)),
-            y: centerY + Math.sin((index * 45) * (Math.PI / 180)) * (150 + (index * 30))
+            x: centerX + Math.cos((index * 45) * (Math.PI / 180)) * (initialOrbitBaseRadius + (index * initialOrbitStepRadius)),
+            y: centerY + Math.sin((index * 45) * (Math.PI / 180)) * (initialOrbitBaseRadius + (index * initialOrbitStepRadius))
           }
       );
 
@@ -1901,7 +1963,7 @@ export function ClanGraph({
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -2031,7 +2093,7 @@ export function ClanGraph({
     if (!graphData) return;
     const nextPositions = { ...nodePositionMap.current };
     graphData.nodes.forEach((person) => {
-      if (!nextPositions[person.id] && person.metadata?.position) {
+      if (person.metadata?.position) {
         nextPositions[person.id] = { ...person.metadata.position };
       }
     });
@@ -2699,6 +2761,7 @@ export function ClanGraph({
         onManageNotifications={canManageUsers ? onManageNotifications : undefined}
         pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
+        onOpenSettings={onOpenSettings}
         onCreateUser={() => setShowCreateUserModal(true)}
         onAddMember={() => {
           if (!ensureEditable()) return;
@@ -2730,6 +2793,7 @@ export function ClanGraph({
           if (selectedNode) {
             setCenterId(selectedNode);
             persistPendingViewport(selectedNode, 1.0);
+            focusNodeById(selectedNode, 1.0);
             setSelectedNode(null);
           }
         }}

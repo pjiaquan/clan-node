@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createNameMatcher, preloadNameSearchConverters } from '../utils/nameSearch';
 
 interface HeaderProps {
   onAddMember: () => void;
@@ -25,6 +26,7 @@ interface HeaderProps {
   onManageNotifications?: () => void;
   pendingNotificationCount?: number;
   onManageSessions?: () => void;
+  onOpenSettings?: () => void;
   onCreateUser?: () => void;
   username?: string | null;
   onLogout: () => void;
@@ -57,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   onManageNotifications,
   pendingNotificationCount,
   onManageSessions,
+  onOpenSettings,
   onCreateUser,
   username,
   onLogout,
@@ -92,13 +95,12 @@ export const Header: React.FC<HeaderProps> = ({
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   const mobileOptions = useMemo(() => {
-    const query = searchText.trim().toLowerCase();
+    const query = searchText.trim();
     if (!query) return [];
+    const matchesQuery = createNameMatcher(query);
     return searchOptions
       .filter((option) => {
-        const name = option.name.toLowerCase();
-        const english = option.english_name?.toLowerCase() ?? '';
-        return name.includes(query) || english.includes(query);
+        return matchesQuery(option.name) || matchesQuery(option.english_name);
       })
       .slice(0, 8);
   }, [searchText, searchOptions]);
@@ -161,6 +163,9 @@ export const Header: React.FC<HeaderProps> = ({
             value={searchText}
             id="clan-search-input"
             onChange={handleSearchChange}
+            onFocus={() => {
+              void preloadNameSearchConverters();
+            }}
           />
           <button className="btn-secondary btn-icon" type="submit" aria-label="搜尋">
             <span className="btn-icon">
@@ -220,6 +225,18 @@ export const Header: React.FC<HeaderProps> = ({
                   Session 管理
                 </button>
               )}
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onOpenSettings();
+                    closeMobileMenu();
+                  }}
+                >
+                  图形设置
+                </button>
+              )}
               <button
                 type="button"
                 className="header-action-item"
@@ -274,6 +291,16 @@ export const Header: React.FC<HeaderProps> = ({
                 disabled={editDisabled}
               >
                 新增成員
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onFocusMe();
+                  closeMobileMenu();
+                }}
+              >
+                我的位置
               </button>
               {selectedNode && (
                 <>
@@ -623,6 +650,13 @@ export const Header: React.FC<HeaderProps> = ({
               ) : (
                 <span>{username}</span>
               )}
+            </li>
+          )}
+          {onOpenSettings && (
+            <li className="header-menu-item">
+              <button onClick={onOpenSettings} className="btn-secondary btn-icon" aria-label="图形设置">
+                <span className="btn-label">图形设置</span>
+              </button>
             </li>
           )}
           {editDisabled && (
