@@ -44,7 +44,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [tob, setTob] = useState(normalizeTraditionalHour(person.tob || ''));
   const [dod, setDod] = useState(person.dod || '');
   const [tod, setTod] = useState(normalizeTraditionalHour(person.tod || ''));
-  const [showDod, setShowDod] = useState(!!person.dod);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
@@ -57,7 +56,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const cropperRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const skipClickRef = useRef(false);
-  const clickCountRef = React.useRef(0);
 
   useEffect(() => {
     setName(person.name);
@@ -68,7 +66,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setTob(normalizeTraditionalHour(person.tob || ''));
     setDod(person.dod || '');
     setTod(normalizeTraditionalHour(person.tod || ''));
-    setShowDod(!!person.dod);
     setAvatarFile(null);
     setAvatarPreview(null);
     setRemoveAvatar(false);
@@ -76,7 +73,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setZoom(1);
     setOffset({ x: 0, y: 0 });
     setCustomFields(normalizeCustomFields(person.metadata?.customFields));
-    clickCountRef.current = 0;
   }, [person]);
 
   useEffect(() => {
@@ -184,14 +180,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [clampOffset]);
-
-  const handleDobLabelClick = () => {
-    if (showDod) return;
-    clickCountRef.current += 1;
-    if (clickCountRef.current >= 5) {
-      setShowDod(true);
-    }
-  };
 
   const createCroppedAvatar = async () => {
     if (!avatarFile || !avatarImage) return null;
@@ -495,7 +483,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
             </select>
           </div>
           <div className="form-group">
-            <label onClick={handleDobLabelClick} style={{ cursor: 'pointer', userSelect: 'none' }}>
+            <label>
               出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
             </label>
             <div className="date-input-row">
@@ -554,33 +542,29 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
               ))}
             </select>
           </div>
-          {showDod && (
-            <>
-              <div className="form-group">
-                <label>
-                  歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
-                </label>
-                <input
-                  type="date"
-                  value={dod}
-                  onChange={(e) => setDod(e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label>
-                  歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
-                </label>
-                <select value={tod} onChange={(e) => setTod(e.target.value)}>
-                  <option value="">--</option>
-                  {TRADITIONAL_HOURS.map((hour) => (
-                    <option key={hour.name} value={hour.name}>
-                      {hour.name} ({hour.range})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
+          <div className="form-group">
+            <label>
+              歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
+            </label>
+            <input
+              type="date"
+              value={dod}
+              onChange={(e) => setDod(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label>
+              歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
+            </label>
+            <select value={tod} onChange={(e) => setTod(e.target.value)}>
+              <option value="">--</option>
+              {TRADITIONAL_HOURS.map((hour) => (
+                <option key={hour.name} value={hour.name}>
+                  {hour.name} ({hour.range})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="form-group">
             <label>自訂欄位</label>

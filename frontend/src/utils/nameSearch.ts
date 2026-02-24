@@ -9,7 +9,6 @@ type PinyinFn = (input: string, options: {
   traditional: true;
 }) => string[];
 
-let toTraditional: ConverterFn | null = null;
 let toSimplified: ConverterFn | null = null;
 let toPinyinArray: PinyinFn | null = null;
 let convertersReady = false;
@@ -60,7 +59,6 @@ export const getSearchVariants = (input: string) => {
 
   const variants = Array.from(new Set([
     normalized,
-    convertersReady && toTraditional ? normalizeText(toTraditional(normalized)) : '',
     convertersReady && toSimplified ? normalizeText(toSimplified(normalized)) : '',
     ...(convertersReady ? getPinyinVariants(normalized) : []),
   ])).filter(Boolean);
@@ -72,11 +70,9 @@ export const preloadNameSearchConverters = () => {
   if (convertersReady) return Promise.resolve();
   if (converterLoadPromise) return converterLoadPromise;
   converterLoadPromise = Promise.all([
-    import('opencc-js/cn2t'),
     import('opencc-js/t2cn'),
     import('pinyin-pro'),
-  ]).then(([cn2t, t2cn, pinyinPro]) => {
-    toTraditional = cn2t.Converter({ from: 'cn', to: 'tw' });
+  ]).then(([t2cn, pinyinPro]) => {
     toSimplified = t2cn.Converter({ from: 'tw', to: 'cn' });
     toPinyinArray = ((input, options) => {
       const converted = pinyinPro.pinyin(input, options);

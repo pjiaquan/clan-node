@@ -2684,20 +2684,21 @@ export function ClanGraph({
           ? { x: lastMousePosition.x, y: lastMousePosition.y }
           : { x: fallbackPos.x + 40, y: fallbackPos.y + 40 };
         const newMetadata = {
+          ...(copiedPerson.metadata ?? {}),
           position
         };
 
         await createPerson(
           copiedPerson.name,
-          undefined,
+          copiedPerson.english_name ?? undefined,
           copiedPerson.gender,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
+          copiedPerson.dob ?? undefined,
+          copiedPerson.dod ?? undefined,
+          copiedPerson.tob ?? undefined,
+          copiedPerson.tod ?? undefined,
           newMetadata,
           undefined,
-          undefined,
+          copiedPerson.avatar_url ?? undefined,
           { skipFetch: true }
         );
       }
