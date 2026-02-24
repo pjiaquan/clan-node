@@ -65,3 +65,31 @@ export interface AuthSession {
   device_label: string;
   current: boolean;
 }
+
+export type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
+export type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  target_person_id: string | null;
+  target_person_name: string | null;
+  message: string;
+  status: NotificationStatus;
+  created_by_user_id: string;
+  created_by_username: string;
+  resolved_by_user_id: string | null;
+  resolved_by_username: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationStats {
+  total: number;
+  pending: number;
+  in_progress: number;
+  resolved: number;
+  rejected: number;
+  unresolved: number;
+}

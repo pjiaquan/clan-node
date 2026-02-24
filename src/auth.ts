@@ -181,6 +181,7 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
     || path.startsWith('/api/auth/setup')
     || path.startsWith('/api/auth/logout')
     || path.startsWith('/api/auth/sessions')
+    || (path.startsWith('/api/notifications') && method === 'POST')
   ) {
     return next();
   }

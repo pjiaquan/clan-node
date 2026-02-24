@@ -20,6 +20,7 @@ import { AddPersonModal } from './components/AddPersonModal';
 import { Header } from './components/Header';
 import { EditPersonModal } from './components/EditPersonModal';
 import { CreateUserModal } from './components/CreateUserModal';
+import { ReportIssueModal } from './components/ReportIssueModal';
 import 'reactflow/dist/style.css';
 
 const nodeTypes = {
@@ -74,11 +75,20 @@ type ClanGraphProps = {
   readOnly?: boolean;
   isAdmin?: boolean;
   onManageUsers?: () => void;
+  onManageNotifications?: () => void;
   onManageSessions?: () => void;
   onLogout: () => void;
 };
 
-export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManageSessions, onLogout }: ClanGraphProps) {
+export function ClanGraph({
+  username,
+  readOnly,
+  isAdmin,
+  onManageUsers,
+  onManageNotifications,
+  onManageSessions,
+  onLogout
+}: ClanGraphProps) {
   const isReadOnly = Boolean(readOnly);
   const canManageUsers = Boolean(isAdmin);
   const {
@@ -138,6 +148,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
+  const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
+  const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
   const pendingFocusRetryRef = useRef<number | null>(null);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
   const baseLockStorageKey = 'clan.flowLocked';
@@ -167,6 +179,47 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
   const canUndo = undoStack.length > 0;
   const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
   const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
+  const reportIssuePerson = useMemo(() => (
+    reportIssuePersonId
+      ? graphData?.nodes.find((person) => person.id === reportIssuePersonId) ?? null
+      : null
+  ), [graphData, reportIssuePersonId]);
+
+  useEffect(() => {
+    if (!canManageUsers) {
+      setPendingNotificationCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    const loadStats = async () => {
+      try {
+        const stats = await api.fetchNotificationStats();
+        if (!cancelled) {
+          setPendingNotificationCount(stats.unresolved);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to fetch notification stats:', error);
+        }
+      }
+    };
+
+    void loadStats();
+    const timer = window.setInterval(() => {
+      void loadStats();
+    }, 10000);
+    const handleFocus = () => {
+      void loadStats();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [canManageUsers]);
 
   useEffect(() => {
     if (!window.matchMedia) return;
@@ -2643,6 +2696,8 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
         readOnly={isReadOnly}
         isAdmin={canManageUsers}
         onManageUsers={canManageUsers ? onManageUsers : undefined}
+        onManageNotifications={canManageUsers ? onManageNotifications : undefined}
+        pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
         onCreateUser={() => setShowCreateUserModal(true)}
         onAddMember={() => {
@@ -2779,6 +2834,9 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
               setLinkMode({ from: id });
             }}
             onEdit={handleEditPerson}
+            onReportIssue={(id) => {
+              setReportIssuePersonId(id);
+            }}
             onDelete={handleDeletePerson}
             onDeleteRelations={handleDeleteRelations}
             onDeleteSiblingRelations={handleDeleteSiblingRelations}
@@ -2938,7 +2996,7 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
       )}
 
       {avatarPreview && (
-        <div className="modal-overlay" onClick={() => setAvatarPreview(null)}>
+        <div className="modal-overlay avatar-overlay" onClick={() => setAvatarPreview(null)}>
           <div className="avatar-modal" onClick={(event) => event.stopPropagation()}>
             <img src={avatarPreview.url} alt={`${avatarPreview.name} avatar`} />
             <div className="avatar-modal-name">{avatarPreview.name}</div>
@@ -2951,6 +3009,22 @@ export function ClanGraph({ username, readOnly, isAdmin, onManageUsers, onManage
           點擊另一個節點以建立關係
           <button onClick={() => setLinkMode(null)}>取消</button>
         </div>
+      )}
+
+      {reportIssuePerson && (
+        <ReportIssueModal
+          personName={reportIssuePerson.name}
+          onClose={() => setReportIssuePersonId(null)}
+          onSubmit={async ({ type, message }) => {
+            await api.createNotification({
+              type,
+              message,
+              target_person_id: reportIssuePerson.id,
+              target_person_name: reportIssuePerson.name
+            });
+            showToast('已送出問題提報', 'success');
+          }}
+        />
       )}
 
       {!isReadOnly && showAddModal && (

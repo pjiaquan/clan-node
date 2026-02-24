@@ -11,6 +11,7 @@ interface ContextMenuProps {
   onSetCenter: (id: string) => void;
   onStartLink: (id: string) => void;
   onEdit: (id: string) => void;
+  onReportIssue: (id: string) => void;
   onDelete: (id: string) => void;
   onDeleteRelations: (id: string) => void;
   onDeleteSiblingRelations: (id: string) => void;
@@ -47,6 +48,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onSetCenter, 
   onStartLink, 
   onEdit,
+  onReportIssue,
   onDelete,
   onDeleteRelations,
   onDeleteSiblingRelations,
@@ -112,6 +114,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           編輯成員...
         </button>
       )}
+      <button
+        onClick={() => {
+          onReportIssue(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        提出問題...
+      </button>
       <button 
         onClick={() => {
           onSetCenter(id);

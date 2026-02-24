@@ -5,13 +5,15 @@ import { LoginPage } from './components/LoginPage';
 import { ClanGraph } from './ClanGraph';
 import { UserManagementPage } from './components/UserManagementPage';
 import { SessionManagementPage } from './components/SessionManagementPage';
+import { NotificationManagementPage } from './components/NotificationManagementPage';
 import './App.css';
 
-type AppView = 'graph' | 'users' | 'sessions';
+type AppView = 'graph' | 'users' | 'sessions' | 'notifications';
 
 const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/users') return 'users';
   if (window.location.hash === '#/sessions') return 'sessions';
+  if (window.location.hash === '#/notifications') return 'notifications';
   return 'graph';
 };
 
@@ -27,6 +29,8 @@ function App() {
       ? '#/users'
       : next === 'sessions'
         ? '#/sessions'
+        : next === 'notifications'
+          ? '#/notifications'
         : '#/graph';
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
@@ -119,7 +123,7 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    if (view === 'users' && authUser?.role !== 'admin') {
+    if ((view === 'users' || view === 'notifications') && authUser?.role !== 'admin') {
       navigateTo('graph');
     }
   }, [view, authUser, isAuthed, navigateTo]);
@@ -192,12 +196,23 @@ function App() {
     );
   }
 
+  if (view === 'notifications' && authUser.role === 'admin') {
+    return (
+      <NotificationManagementPage
+        currentUser={authUser}
+        onBack={() => navigateTo('graph')}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <ClanGraph
       username={authUser.username || null}
       readOnly={authUser.role === 'readonly'}
       isAdmin={authUser.role === 'admin'}
       onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+      onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
       onManageSessions={() => navigateTo('sessions')}
       onLogout={handleLogout}
     />

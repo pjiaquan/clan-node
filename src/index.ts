@@ -5,6 +5,7 @@ import { registerAuthRoutes, requireAuth, requireCsrf, requireWriteAccess } from
 import { registerPeopleRoutes } from './people';
 import { registerRelationshipRoutes } from './relationships';
 import { registerGraphRoutes } from './graph';
+import { registerNotificationRoutes } from './notifications';
 
 const app = new Hono<AppBindings>();
 
@@ -14,7 +15,7 @@ app.use('*', cors({
     const normalize = (value: string) => value.replace(/\/+$/, '').toLowerCase();
     const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')
       .split(',')
-      .map(entry => normalize(entry.trim()))
+      .map((entry: string) => normalize(entry.trim()))
       .filter(Boolean);
     if (!origin) return allowedOrigins[0] || '';
     const normalizedOrigin = normalize(origin);
@@ -37,5 +38,6 @@ registerAuthRoutes(app);
 registerPeopleRoutes(app);
 registerRelationshipRoutes(app);
 registerGraphRoutes(app);
+registerNotificationRoutes(app);
 
 export default app;

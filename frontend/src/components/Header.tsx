@@ -22,6 +22,8 @@ interface HeaderProps {
   readOnly?: boolean;
   isAdmin?: boolean;
   onManageUsers?: () => void;
+  onManageNotifications?: () => void;
+  pendingNotificationCount?: number;
   onManageSessions?: () => void;
   onCreateUser?: () => void;
   username?: string | null;
@@ -52,6 +54,8 @@ export const Header: React.FC<HeaderProps> = ({
   readOnly,
   isAdmin,
   onManageUsers,
+  onManageNotifications,
+  pendingNotificationCount,
   onManageSessions,
   onCreateUser,
   username,
@@ -80,6 +84,10 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const hasSelection = Boolean(selectedNode || selectedEdge);
+  const hasPendingNotifications = Boolean(pendingNotificationCount && pendingNotificationCount > 0);
+  const pendingLabel = pendingNotificationCount && pendingNotificationCount > 99
+    ? '99+'
+    : String(pendingNotificationCount || 0);
   const closeActionMenu = () => setActionMenuOpen(false);
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
@@ -397,6 +405,21 @@ export const Header: React.FC<HeaderProps> = ({
                   帳號管理
                 </button>
               )}
+              {isAdmin && onManageNotifications && (
+                <button
+                  type="button"
+                  className="header-action-item header-action-item-with-badge"
+                  onClick={() => {
+                    onManageNotifications();
+                    closeMobileMenu();
+                  }}
+                >
+                  <span>通知管理</span>
+                  {hasPendingNotifications && (
+                    <span className="header-notice-badge">{pendingLabel}</span>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 className="header-action-item"
@@ -618,6 +641,16 @@ export const Header: React.FC<HeaderProps> = ({
             <li className="header-menu-item">
               <button onClick={onManageUsers} className="btn-secondary btn-icon" aria-label="帳號管理">
                 <span className="btn-label">帳號管理</span>
+              </button>
+            </li>
+          )}
+          {isAdmin && onManageNotifications && (
+            <li className="header-menu-item">
+              <button onClick={onManageNotifications} className="btn-secondary btn-icon header-notice-btn" aria-label="通知管理">
+                <span className="btn-label">通知管理</span>
+                {hasPendingNotifications && (
+                  <span className="header-notice-badge">{pendingLabel}</span>
+                )}
               </button>
             </li>
           )}
