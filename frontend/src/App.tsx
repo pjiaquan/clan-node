@@ -6,14 +6,24 @@ import { ClanGraph } from './ClanGraph';
 import { UserManagementPage } from './components/UserManagementPage';
 import { SessionManagementPage } from './components/SessionManagementPage';
 import { NotificationManagementPage } from './components/NotificationManagementPage';
+import { AuditLogPage } from './components/AuditLogPage';
+import { GraphSettingsPage } from './components/GraphSettingsPage';
+import {
+  DEFAULT_GRAPH_SETTINGS,
+  loadGraphSettings,
+  saveGraphSettings,
+  type GraphSettings,
+} from './graphSettings';
 import './App.css';
 
-type AppView = 'graph' | 'users' | 'sessions' | 'notifications';
+type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'settings';
 
 const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/users') return 'users';
   if (window.location.hash === '#/sessions') return 'sessions';
   if (window.location.hash === '#/notifications') return 'notifications';
+  if (window.location.hash === '#/audit-logs') return 'auditLogs';
+  if (window.location.hash === '#/settings') return 'settings';
   return 'graph';
 };
 
@@ -23,6 +33,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<AppView>(() => getViewFromHash());
+  const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
 
   const navigateTo = useCallback((next: AppView) => {
     const nextHash = next === 'users'
@@ -31,6 +42,10 @@ function App() {
         ? '#/sessions'
         : next === 'notifications'
           ? '#/notifications'
+          : next === 'auditLogs'
+            ? '#/audit-logs'
+          : next === 'settings'
+            ? '#/settings'
         : '#/graph';
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
@@ -121,9 +136,15 @@ function App() {
     navigateTo('graph');
   }, [navigateTo]);
 
+  const handleSaveGraphSettings = useCallback((nextSettings: GraphSettings) => {
+    const saved = saveGraphSettings(nextSettings, authUser?.username ?? null);
+    setGraphSettings(saved);
+    navigateTo('graph');
+  }, [authUser, navigateTo]);
+
   useEffect(() => {
     if (!isAuthed) return;
-    if ((view === 'users' || view === 'notifications') && authUser?.role !== 'admin') {
+    if ((view === 'users' || view === 'notifications' || view === 'auditLogs') && authUser?.role !== 'admin') {
       navigateTo('graph');
     }
   }, [view, authUser, isAuthed, navigateTo]);
@@ -150,6 +171,11 @@ function App() {
       window.clearInterval(timer);
     };
   }, [isAuthed, navigateTo]);
+
+  useEffect(() => {
+    if (!isAuthed || !authUser) return;
+    setGraphSettings(loadGraphSettings(authUser.username || null));
+  }, [isAuthed, authUser?.username]);
 
   if (!authChecked) {
     return (
@@ -206,14 +232,39 @@ function App() {
     );
   }
 
+  if (view === 'auditLogs' && authUser.role === 'admin') {
+    return (
+      <AuditLogPage
+        currentUser={authUser}
+        onBack={() => navigateTo('graph')}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (view === 'settings') {
+    return (
+      <GraphSettingsPage
+        currentUser={authUser}
+        settings={graphSettings}
+        onSave={handleSaveGraphSettings}
+        onBack={() => navigateTo('graph')}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <ClanGraph
       username={authUser.username || null}
       readOnly={authUser.role === 'readonly'}
       isAdmin={authUser.role === 'admin'}
+      graphSettings={graphSettings}
       onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
       onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
+      onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
       onManageSessions={() => navigateTo('sessions')}
+      onOpenSettings={() => navigateTo('settings')}
       onLogout={handleLogout}
     />
   );

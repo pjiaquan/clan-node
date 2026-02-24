@@ -24,6 +24,7 @@ interface HeaderProps {
   isAdmin?: boolean;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
+  onManageAuditLogs?: () => void;
   pendingNotificationCount?: number;
   onManageSessions?: () => void;
   onOpenSettings?: () => void;
@@ -57,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   isAdmin,
   onManageUsers,
   onManageNotifications,
+  onManageAuditLogs,
   pendingNotificationCount,
   onManageSessions,
   onOpenSettings,
@@ -447,6 +449,18 @@ export const Header: React.FC<HeaderProps> = ({
                   )}
                 </button>
               )}
+              {isAdmin && onManageAuditLogs && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageAuditLogs();
+                    closeMobileMenu();
+                  }}
+                >
+                  修改記錄
+                </button>
+              )}
               <button
                 type="button"
                 className="header-action-item"
@@ -685,6 +699,13 @@ export const Header: React.FC<HeaderProps> = ({
                 {hasPendingNotifications && (
                   <span className="header-notice-badge">{pendingLabel}</span>
                 )}
+              </button>
+            </li>
+          )}
+          {isAdmin && onManageAuditLogs && (
+            <li className="header-menu-item">
+              <button onClick={onManageAuditLogs} className="btn-secondary btn-icon" aria-label="修改記錄">
+                <span className="btn-label">修改記錄</span>
               </button>
             </li>
           )}

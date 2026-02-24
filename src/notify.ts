@@ -21,7 +21,7 @@ const truncate = (value: string, limit = 200) => (
   value.length > limit ? `${value.slice(0, limit - 3)}...` : value
 );
 
-const formatValue = (value: unknown) => {
+const formatValue = (value: unknown): string => {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
   if (typeof value === 'string') return truncate(value.replace(/\s+/g, ' ').trim(), 240);

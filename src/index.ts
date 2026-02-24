@@ -6,6 +6,7 @@ import { registerPeopleRoutes } from './people';
 import { registerRelationshipRoutes } from './relationships';
 import { registerGraphRoutes } from './graph';
 import { registerNotificationRoutes } from './notifications';
+import { registerAuditRoutes } from './audit';
 
 const app = new Hono<AppBindings>();
 
@@ -39,5 +40,6 @@ registerPeopleRoutes(app);
 registerRelationshipRoutes(app);
 registerGraphRoutes(app);
 registerNotificationRoutes(app);
+registerAuditRoutes(app);
 
 export default app;

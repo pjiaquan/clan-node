@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import type { AppBindings, Env } from './types';
+import type { AppBindings, Person, Relationship } from './types';
 import { safeParse } from './utils';
 import { calculateKinship } from './kinship';
 
@@ -50,6 +50,15 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           customFields: customFieldMap.get((person as any).id) || []
         }
       }));
+      const kinshipPeople: Person[] = people.map((person: any) => ({
+        id: String(person.id),
+        name: String(person.name),
+        english_name: person.english_name ?? null,
+        gender: String(person.gender),
+        dob: person.dob ?? undefined,
+        title: person.title,
+        formal_title: person.formal_title
+      }));
 
       // Get all relationships
       console.log('Fetching all relationships...');
@@ -58,9 +67,15 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       ).all();
       console.log(`Fetched ${relationshipsRaw.length} relationships`);
 
-      const relationships = relationshipsRaw.map(rel => ({
+      const relationships = relationshipsRaw.map((rel: any) => ({
         ...rel,
         metadata: safeParse(rel.metadata as string)
+      }));
+      const kinshipRelationships: Relationship[] = relationships.map((rel: any) => ({
+        id: Number(rel.id),
+        from_person_id: String(rel.from_person_id),
+        to_person_id: String(rel.to_person_id),
+        type: String(rel.type)
       }));
 
       // Calculate kinship titles for each person relative to center
@@ -70,7 +85,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           if (person.id === centerId) {
         return { ...person, title: '我', formal_title: '我' };
           }
-          const { title, formalTitle } = calculateKinship(centerId, person.id, relationships, people, center as any);
+          const { title, formalTitle } = calculateKinship(centerId, person.id, kinshipRelationships, kinshipPeople, center as any);
           return { ...person, title, formal_title: formalTitle };
         } catch (err) {
           console.error(`Error calculating title for person ${person.id}:`, err);

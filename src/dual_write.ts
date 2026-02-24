@@ -17,6 +17,14 @@ const parseSetCookie = (setCookieHeaders: (string | null)[] = []) => {
   return cookies.join('; ');
 };
 
+const getSetCookieHeaders = (headers: Headers): (string | null)[] => {
+  const candidate = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof candidate.getSetCookie === 'function') {
+    return candidate.getSetCookie();
+  }
+  return [headers.get('set-cookie')];
+};
+
 const getRemoteConfig = (env: Env): RemoteConfig | null => {
   const enabled = String(env.DUAL_WRITE_REMOTE || '').toLowerCase();
   if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') return null;
@@ -41,9 +49,7 @@ const login = async (config: RemoteConfig) => {
     const text = await res.text().catch(() => '');
     throw new Error(`Dual-write login failed ${res.status} ${res.statusText}: ${text}`);
   }
-  const setCookie = res.headers.getSetCookie
-    ? res.headers.getSetCookie()
-    : [res.headers.get('set-cookie')];
+  const setCookie = getSetCookieHeaders(res.headers);
   cachedCookie = parseSetCookie(setCookie);
   return cachedCookie;
 };

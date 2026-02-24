@@ -1,6 +1,7 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { notifyUpdate } from './notify';
+import { recordAuditLog } from './audit';
 
 type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
 type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
@@ -123,6 +124,18 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       created_by_user_id: sessionUser.userId,
       created_by_username: sessionUser.username
     });
+    await recordAuditLog(c, {
+      action: 'create',
+      resourceType: 'notifications',
+      resourceId: id,
+      summary: `新增通知 ${type}`,
+      details: {
+        type,
+        target_person_id: targetPersonId,
+        target_person_name: targetPersonName || null,
+        created_by_username: sessionUser.username
+      }
+    });
 
     return c.json(mapRow(created), 201);
   });
@@ -154,9 +167,37 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
-    const { results } = await c.env.DB.prepare(
-      'SELECT status, COUNT(*) as count FROM notifications GROUP BY status'
-    ).all();
+    const table = await c.env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'notifications'"
+    ).first();
+    if (!table) {
+      return c.json({
+        total: 0,
+        pending: 0,
+        in_progress: 0,
+        resolved: 0,
+        rejected: 0,
+        unresolved: 0
+      });
+    }
+
+    let results: any[] = [];
+    try {
+      const query = await c.env.DB.prepare(
+        'SELECT status, COUNT(*) as count FROM notifications GROUP BY status'
+      ).all();
+      results = query.results;
+    } catch (error) {
+      console.warn('Failed to load notification stats:', error);
+      return c.json({
+        total: 0,
+        pending: 0,
+        in_progress: 0,
+        resolved: 0,
+        rejected: 0,
+        unresolved: 0
+      });
+    }
 
     const counts: Record<NotificationStatus, number> = {
       pending: 0,
@@ -223,6 +264,16 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       status: nextStatus,
       handled_by: sessionUser.username
     });
+    await recordAuditLog(c, {
+      action: 'status_change',
+      resourceType: 'notifications',
+      resourceId: id,
+      summary: `更新通知狀態為 ${nextStatus}`,
+      details: {
+        status: nextStatus,
+        handled_by: sessionUser.username
+      }
+    });
     return c.json(mapRow(updated));
   });
 
@@ -246,6 +297,17 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       target_person_id: (existing as any).target_person_id,
       target_person_name: (existing as any).target_person_name,
       deleted_by: sessionUser.username
+    });
+    await recordAuditLog(c, {
+      action: 'delete',
+      resourceType: 'notifications',
+      resourceId: id,
+      summary: `刪除通知 ${(existing as any).type}`,
+      details: {
+        type: (existing as any).type,
+        target_person_id: (existing as any).target_person_id,
+        target_person_name: (existing as any).target_person_name
+      }
     });
 
     return c.json({ ok: true });

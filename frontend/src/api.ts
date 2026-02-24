@@ -1,4 +1,5 @@
 import type {
+  AuditLogItem,
   AuthSession,
   AuthUser,
   GraphData,
@@ -316,6 +317,16 @@ export const api = {
 
   fetchNotificationStats: async (): Promise<NotificationStats> => {
     const res = await fetchWithAuth(`${API_BASE}/api/notifications/stats`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  fetchAuditLogs: async (limit = 200): Promise<AuditLogItem[]> => {
+    const finalLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 200;
+    const res = await fetchWithAuth(`${API_BASE}/api/audit-logs?limit=${finalLimit}`);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`HTTP ${res.status}: ${text}`);

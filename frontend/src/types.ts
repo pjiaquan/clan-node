@@ -93,3 +93,16 @@ export interface NotificationStats {
   rejected: number;
   unresolved: number;
 }
+
+export interface AuditLogItem {
+  id: number;
+  actor_user_id: string | null;
+  actor_username: string | null;
+  actor_role: UserRole | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  summary: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}

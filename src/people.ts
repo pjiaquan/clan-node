@@ -3,6 +3,22 @@ import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 import { queueRemoteFormData, queueRemoteJson } from './dual_write';
+import { recordAuditLog } from './audit';
+
+type UploadFile = Blob & {
+  name?: string;
+  size: number;
+  type: string;
+  stream: () => ReadableStream;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
+const isUploadFile = (value: unknown): value is UploadFile => (
+  Boolean(value)
+  && typeof value !== 'string'
+  && typeof (value as Blob).arrayBuffer === 'function'
+  && typeof (value as Blob).stream === 'function'
+);
 
 async function updateSiblingOrdering(db: D1Database, personId: string) {
   const person = await db.prepare(
@@ -183,6 +199,24 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       custom_fields_count: customFieldsCount,
       custom_fields: customFieldsSummary
     }, avatarLink ? { photoUrl: avatarLink } : undefined);
+    await recordAuditLog(c, {
+      action: 'create',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `新增人物 ${name}`,
+      details: {
+        name,
+        english_name: english_name || null,
+        gender: gender || 'O',
+        dob: dob || null,
+        dod: dod || null,
+        tob: tob || null,
+        tod: tod || null,
+        avatar_url: avatar_url || null,
+        metadata_keys: metadataKeys,
+        custom_fields_count: customFieldsCount
+      }
+    });
 
     const mirrorPayload: Record<string, unknown> = {
       id,
@@ -380,6 +414,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     }
     notifyUpdate(c, 'people:update', updateDetails, avatarLink ? { photoUrl: avatarLink } : undefined);
+    await recordAuditLog(c, {
+      action: 'update',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `更新人物 ${String(personName || id)}`,
+      details: {
+        changed_fields: changedFields,
+        name: personName,
+        custom_fields_updated: customFields !== null
+      }
+    });
     queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
     return c.json({
       ...person,
@@ -404,7 +449,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     try {
       const formData = await c.req.formData();
       const file = formData.get('file');
-      if (!(file instanceof File)) {
+      if (!isUploadFile(file)) {
         return c.json({ error: 'file is required' }, 400);
       }
       if (file.size > MAX_AVATAR_BYTES) {
@@ -442,6 +487,16 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         name: (existing as any).name ?? null,
         avatar_url: avatarUrl
       }, { photoUrl: avatarLink });
+      await recordAuditLog(c, {
+        action: 'update_avatar',
+        resourceType: 'people',
+        resourceId: id,
+        summary: `更新人物頭像 ${(existing as any).name ?? id}`,
+        details: {
+          previous_avatar_url: prevUrl,
+          avatar_url: avatarUrl
+        }
+      });
       const avatarBuffer = await file.arrayBuffer();
       const mirrorForm = new FormData();
       mirrorForm.set('file', new Blob([avatarBuffer], { type: file.type || 'application/octet-stream' }), file.name || 'avatar');
@@ -503,6 +558,16 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         id,
         name: (existing as any).name ?? null,
         english_name: (existing as any).english_name ?? null
+      });
+      await recordAuditLog(c, {
+        action: 'delete',
+        resourceType: 'people',
+        resourceId: id,
+        summary: `刪除人物 ${(existing as any).name ?? id}`,
+        details: {
+          name: (existing as any).name ?? null,
+          english_name: (existing as any).english_name ?? null
+        }
       });
       queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);
       return c.json({ success: true, id });

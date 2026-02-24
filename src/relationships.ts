@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
+import { recordAuditLog } from './audit';
 
 type SiblingHandlePreference = {
   sourceHandle?: string;
@@ -435,6 +436,21 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       await linkSpousePairExistingChildren(c.env.DB, fromId, toId, now, createdRelationshipIds);
     }
 
+    await recordAuditLog(c, {
+      action: 'create',
+      resourceType: 'relationships',
+      resourceId: result.meta.last_row_id ?? null,
+      summary: `新增關係 ${personNames.get(fromId) || fromId} -> ${personNames.get(toId) || toId}`,
+      details: {
+        from_person_id: fromId,
+        to_person_id: toId,
+        from_person_name: personNames.get(fromId) ?? null,
+        to_person_name: personNames.get(toId) ?? null,
+        type,
+        created_relationship_ids: createdRelationshipIds
+      }
+    });
+
     return c.json({
       id: result.meta.last_row_id,
       from_person_id: fromId,
@@ -565,6 +581,20 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       updateDetails.target_handle = (metadata as any)?.targetHandle;
     }
     notifyUpdate(c, 'relationships:update', updateDetails);
+    await recordAuditLog(c, {
+      action: 'update',
+      resourceType: 'relationships',
+      resourceId: id,
+      summary: `更新關係 ${personNames.get(nextFrom) || nextFrom} -> ${personNames.get(nextTo) || nextTo}`,
+      details: {
+        changed_fields: changedFields,
+        from_person_id: nextFrom,
+        to_person_id: nextTo,
+        from_person_name: personNames.get(nextFrom) ?? null,
+        to_person_name: personNames.get(nextTo) ?? null,
+        type: nextType
+      }
+    });
     return c.json(updated);
   });
 
@@ -599,6 +629,19 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           from_person_name: personNames.get(existingAny.from_person_id as string) ?? null,
           to_person_name: personNames.get(existingAny.to_person_id as string) ?? null,
           type: existingAny.type as string
+        });
+        await recordAuditLog(c, {
+          action: 'delete',
+          resourceType: 'relationships',
+          resourceId: id,
+          summary: `刪除關係 ${personNames.get(existingAny.from_person_id as string) || existingAny.from_person_id} -> ${personNames.get(existingAny.to_person_id as string) || existingAny.to_person_id}`,
+          details: {
+            from_person_id: existingAny.from_person_id as string,
+            to_person_id: existingAny.to_person_id as string,
+            from_person_name: personNames.get(existingAny.from_person_id as string) ?? null,
+            to_person_name: personNames.get(existingAny.to_person_id as string) ?? null,
+            type: existingAny.type as string
+          }
         });
         return c.json({ success: true, id });
       }

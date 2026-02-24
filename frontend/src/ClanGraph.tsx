@@ -88,6 +88,7 @@ type ClanGraphProps = {
   graphSettings: GraphSettings;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
+  onManageAuditLogs?: () => void;
   onManageSessions?: () => void;
   onOpenSettings?: () => void;
   onLogout: () => void;
@@ -100,6 +101,7 @@ export function ClanGraph({
   graphSettings,
   onManageUsers,
   onManageNotifications,
+  onManageAuditLogs,
   onManageSessions,
   onOpenSettings,
   onLogout
@@ -2759,6 +2761,7 @@ export function ClanGraph({
         isAdmin={canManageUsers}
         onManageUsers={canManageUsers ? onManageUsers : undefined}
         onManageNotifications={canManageUsers ? onManageNotifications : undefined}
+        onManageAuditLogs={canManageUsers ? onManageAuditLogs : undefined}
         pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
         onOpenSettings={onOpenSettings}

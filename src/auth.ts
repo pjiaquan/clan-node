@@ -2,6 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
 import { notifyUpdate } from './notify';
+import { recordAuditLog } from './audit';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
@@ -272,6 +273,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       username,
       role: 'admin'
     });
+    await recordAuditLog(c, {
+      action: 'setup',
+      resourceType: 'users',
+      resourceId: id,
+      summary: `初始化管理員帳號 ${username}`,
+      details: {
+        username,
+        role: 'admin'
+      }
+    });
     return c.json({ id, username }, 201);
   });
 
@@ -431,6 +442,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (currentSessionId && currentSessionId === id) {
       clearSessionCookie(c);
     }
+    await recordAuditLog(c, {
+      action: 'revoke',
+      resourceType: 'sessions',
+      resourceId: id,
+      summary: `撤銷 session ${id}`,
+      details: {
+        session_id: id,
+        current: Boolean(currentSessionId && currentSessionId === id)
+      }
+    });
     return c.json({ ok: true, current: Boolean(currentSessionId && currentSessionId === id) });
   });
 
@@ -448,6 +469,14 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const result = await c.env.DB.prepare(
       'DELETE FROM sessions WHERE user_id = ? AND id != ?'
     ).bind(sessionUser.userId, currentSessionId).run();
+    await recordAuditLog(c, {
+      action: 'revoke_others',
+      resourceType: 'sessions',
+      summary: '撤銷其他登入 session',
+      details: {
+        deleted: Number(result.meta?.changes ?? 0)
+      }
+    });
     return c.json({ ok: true, deleted: Number(result.meta?.changes ?? 0) });
   });
 
@@ -484,6 +513,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       id,
       username,
       role: finalRole
+    });
+    await recordAuditLog(c, {
+      action: 'create',
+      resourceType: 'users',
+      resourceId: id,
+      summary: `新增帳號 ${username}`,
+      details: {
+        username,
+        role: finalRole
+      }
     });
     return c.json({ id, username, role: finalRole }, 201);
   });
@@ -574,6 +613,20 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       username: (updated as any).username,
       role: normalizeRole((updated as any).role)
     });
+    await recordAuditLog(c, {
+      action: 'update',
+      resourceType: 'users',
+      resourceId: id,
+      summary: `更新帳號 ${(updated as any).username}`,
+      details: {
+        username: (updated as any).username,
+        role: normalizeRole((updated as any).role),
+        changed_fields: [
+          ...(role ? ['role'] : []),
+          ...(password ? ['password'] : [])
+        ]
+      }
+    });
 
     return c.json({
       id: (updated as any).id as string,
@@ -618,6 +671,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       id,
       username: (existing as any).username as string,
       role: normalizeRole((existing as any).role)
+    });
+    await recordAuditLog(c, {
+      action: 'delete',
+      resourceType: 'users',
+      resourceId: id,
+      summary: `刪除帳號 ${(existing as any).username as string}`,
+      details: {
+        username: (existing as any).username as string,
+        role: normalizeRole((existing as any).role)
+      }
     });
     return c.json({ ok: true });
   });
