@@ -11,11 +11,37 @@
   color-scheme: light;
   color: #1e293b;
   background-color: #f8fafc;
+  --app-bg: #f8fafc;
+  --app-bg-elevated: #ffffff;
+  --app-text: #1e293b;
+  --app-muted: #64748b;
+  --app-border: #dbe3f0;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f8fafc;
+  --app-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  --theme-toggle-bg: rgba(255, 255, 255, 0.92);
+  --theme-toggle-color: #0f172a;
+  --theme-toggle-border: rgba(148, 163, 184, 0.35);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --app-bg: #0b1220;
+  --app-bg-elevated: #111827;
+  --app-text: #e2e8f0;
+  --app-muted: #94a3b8;
+  --app-border: #334155;
+  --app-surface: #111827;
+  --app-surface-soft: #1f2937;
+  --app-shadow: 0 16px 36px rgba(2, 6, 23, 0.55);
+  --theme-toggle-bg: rgba(15, 23, 42, 0.9);
+  --theme-toggle-color: #e2e8f0;
+  --theme-toggle-border: rgba(148, 163, 184, 0.45);
 }
 
 html, body, #root {
@@ -28,4 +54,7 @@ html, body, #root {
 
 body {
   font-family: inherit;
+  color: var(--app-text);
+  background: var(--app-bg);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }

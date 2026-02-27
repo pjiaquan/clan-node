@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getGanzhiYear, getModernTimeRange, getZodiacAnimal, normalizeTraditionalHour, TRADITIONAL_HOURS } from '../utils/chineseTime';
+import { clampDay, composePartialDate } from '../utils/partialDate';
 
 interface AddPersonModalProps {
   onClose: () => void;
@@ -7,16 +8,38 @@ interface AddPersonModalProps {
 }
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
-  const [dob, setDob] = useState('');
+  const [dobYear, setDobYear] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobDay, setDobDay] = useState('');
   const [dobUnknown, setDobUnknown] = useState(false);
+  const [dod, setDod] = useState('');
+  const [dodUnknown, setDodUnknown] = useState(false);
+  const [showDeathFields, setShowDeathFields] = useState(false);
+  const birthLabelClickCountRef = useRef(0);
   const [tob, setTob] = useState('');
   const [tod, setTod] = useState('');
 
+  const dob = composePartialDate({ year: dobYear, month: dobMonth, day: dobDay });
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
-  const birthYear = dob ? new Date(dob).getFullYear() : null;
+  const birthYearParsed = Number.parseInt(dobYear, 10);
+  const birthYear = Number.isFinite(birthYearParsed) && birthYearParsed >= 1 && birthYearParsed <= 9999
+    ? birthYearParsed
+    : null;
   const zodiac = birthYear ? getZodiacAnimal(birthYear) : '';
   const ganzhi = birthYear ? getGanzhiYear(birthYear) : '';
+  const monthNum = Number.parseInt(dobMonth, 10);
+  const maxDobDay = birthYear && Number.isFinite(monthNum) && monthNum >= 1 && monthNum <= 12
+    ? new Date(birthYear, monthNum, 0).getDate()
+    : 31;
+
+  useEffect(() => {
+    if (!dobDay) return;
+    const nextDay = clampDay(dobYear, dobMonth, dobDay);
+    if (nextDay !== dobDay) {
+      setDobDay(nextDay);
+    }
+  }, [dobDay, dobMonth, dobYear]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -30,9 +53,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
             (formData.get('english_name') as string) || undefined,
             formData.get('gender') as 'M' | 'F' | 'O',
             dobUnknown ? undefined : dob || undefined,
-            formData.get('dod') as string || undefined,
+            dodUnknown ? undefined : dod || undefined,
             normalizeTraditionalHour(formData.get('tob') as string || ''),
-            normalizeTraditionalHour(formData.get('tod') as string || '')
+            (dodUnknown || !dod) ? undefined : normalizeTraditionalHour(tod || '')
           );
         }}>
           <div className="form-group">
@@ -52,17 +75,72 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
             </select>
           </div>
           <div className="form-group">
-            <label>
+            <label
+              onClick={() => {
+                birthLabelClickCountRef.current += 1;
+                if (birthLabelClickCountRef.current > 5) {
+                  setShowDeathFields(true);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
               出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <input
-                type="date"
-                name="dob"
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-                disabled={dobUnknown}
-              />
+            <div className="date-input-row">
+              <div className="date-input-main">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="年"
+                  value={dobYear}
+                  onChange={(e) => {
+                    const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setDobYear(nextYear);
+                    if (!nextYear) {
+                      setDobMonth('');
+                      setDobDay('');
+                    }
+                  }}
+                  disabled={dobUnknown}
+                  style={{ maxWidth: '6.5rem' }}
+                />
+                <select
+                  value={dobMonth}
+                  onChange={(e) => {
+                    const nextMonth = e.target.value;
+                    setDobMonth(nextMonth);
+                    if (!nextMonth) {
+                      setDobDay('');
+                    }
+                  }}
+                  disabled={dobUnknown || !dobYear}
+                >
+                  <option value="">月(選填)</option>
+                  {Array.from({ length: 12 }, (_, idx) => {
+                    const value = String(idx + 1);
+                    return (
+                      <option key={value} value={value}>
+                        {value}月
+                      </option>
+                    );
+                  })}
+                </select>
+                <select
+                  value={dobDay}
+                  onChange={(e) => setDobDay(e.target.value)}
+                  disabled={dobUnknown || !dobYear || !dobMonth}
+                >
+                  <option value="">日(選填)</option>
+                  {Array.from({ length: maxDobDay }, (_, idx) => {
+                    const value = String(idx + 1);
+                    return (
+                      <option key={value} value={value}>
+                        {value}日
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
                 <input
                   type="checkbox"
@@ -71,13 +149,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
                     const nextUnknown = e.target.checked;
                     setDobUnknown(nextUnknown);
                     if (nextUnknown) {
-                      setDob('');
+                      setDobYear('');
+                      setDobMonth('');
+                      setDobDay('');
                     }
                   }}
                 />
                 未知
               </label>
             </div>
+            {!showDeathFields && (
+              <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: '#64748b' }}>
+                連點出生日期標籤 6 次可顯示歿日欄位
+              </div>
+            )}
           </div>
           <div className="form-group">
             <label>
@@ -92,23 +177,63 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
               ))}
             </select>
           </div>
-          <div className="form-group">
-            <label>歿日</label>
-            <input type="date" name="dod" />
-          </div>
-          <div className="form-group">
-            <label>
-              歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
-            </label>
-            <select name="tod" value={tod} onChange={(e) => setTod(e.target.value)}>
-              <option value="">--</option>
-              {TRADITIONAL_HOURS.map((hour) => (
-                <option key={hour.name} value={hour.name}>
-                  {hour.name} ({hour.range})
-                </option>
-              ))}
-            </select>
-          </div>
+          {showDeathFields && (
+            <>
+              <div className="form-group">
+                <label>歿日</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <input
+                    type="date"
+                    name="dod"
+                    value={dod}
+                    onChange={(e) => {
+                      const nextDod = e.target.value;
+                      setDod(nextDod);
+                      if (!nextDod) {
+                        setTod('');
+                      }
+                    }}
+                    disabled={dodUnknown}
+                  />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+                    <input
+                      type="checkbox"
+                      checked={dodUnknown}
+                      onChange={(e) => {
+                        const nextUnknown = e.target.checked;
+                        setDodUnknown(nextUnknown);
+                        if (nextUnknown) {
+                          setDod('');
+                          setTod('');
+                          setShowDeathFields(false);
+                          birthLabelClickCountRef.current = 0;
+                        }
+                      }}
+                    />
+                    未知
+                  </label>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>
+                  歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
+                </label>
+                <select
+                  name="tod"
+                  value={tod}
+                  onChange={(e) => setTod(e.target.value)}
+                  disabled={dodUnknown || !dod}
+                >
+                  <option value="">-</option>
+                  {TRADITIONAL_HOURS.map((hour) => (
+                    <option key={hour.name} value={hour.name}>
+                      {hour.name} ({hour.range})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           <div className="form-actions">
             <button type="button" onClick={onClose}>
               取消

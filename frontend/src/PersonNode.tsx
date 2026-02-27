@@ -6,8 +6,10 @@ const MOBILE_LONG_PRESS_CANCEL_DISTANCE = 30;
 
 const PersonNode = memo(({ data, selected }: NodeProps) => {
   const [isFloating, setIsFloating] = useState(false);
+  const [nameOverflow, setNameOverflow] = useState(false);
   const highlightHandles = new Set<string>(data.highlightHandles ?? []);
   const tapRef = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null);
+  const nameTextRef = useRef<HTMLSpanElement | null>(null);
   const touchLongPressRef = useRef<{
     touchId: number;
     startX: number;
@@ -60,6 +62,25 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
       touchLongPressRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const element = nameTextRef.current;
+    if (!element) return;
+
+    const checkOverflow = () => {
+      setNameOverflow(element.scrollWidth > element.clientWidth);
+    };
+
+    checkOverflow();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => checkOverflow());
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', checkOverflow);
+    return () => window.removeEventListener('resize', checkOverflow);
+  }, [data.name]);
 
   return (
     <>
@@ -255,7 +276,10 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
             data.initial
           )}
         </div>
-        <div className="node-name">{data.name}</div>
+        <div className="node-name">
+          <span ref={nameTextRef} className="node-name-text">{data.name}</span>
+          {nameOverflow && <span className="node-name-tooltip">{data.name}</span>}
+        </div>
         {data.title && (
           <div className="node-title">
             <span className="node-title-text" data-title={data.formalTitle || data.title}>

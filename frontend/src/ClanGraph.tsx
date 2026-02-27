@@ -71,8 +71,6 @@ const CTRL_HOVER_DIM_NODE_OPACITY = 0.18;
 const CTRL_HOVER_DIM_EDGE_OPACITY = 0.12;
 const CTRL_HOVER_EDGE_WIDTH_BOOST = 2;
 const CTRL_HOVER_MIN_EDGE_WIDTH = 4;
-const COARSE_NEAR_GAP_BONUS = 6;
-const COARSE_NEAR_CENTER_Y_BONUS = 6;
 const COARSE_MIN_DRAG_DISTANCE_BONUS = 6;
 const COARSE_Y_SNAP_BONUS = 4;
 const COARSE_Y_RELEASE_BONUS = 6;
@@ -168,6 +166,7 @@ export function ClanGraph({
   const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
   const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
   const pendingFocusRetryRef = useRef<number | null>(null);
+  const initialAutoFocusDoneRef = useRef(false);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
   const baseLockStorageKey = 'clan.flowLocked';
   const lockStorageKey = useMemo(() => (
@@ -817,113 +816,17 @@ export function ClanGraph({
     );
   }, [pendingRelationshipChoice, createRelationshipWithUndo]);
 
-  const hasDirectRelationship = useCallback((aId: string, bId: string, type?: string) => {
-    if (!graphData) return false;
-    return graphData.edges.some((edge) => {
-      const matchesPair = (
-        (edge.from_person_id === aId && edge.to_person_id === bId)
-        || (edge.from_person_id === bId && edge.to_person_id === aId)
-      );
-      if (!matchesPair) return false;
-      return type ? edge.type === type : true;
-    });
-  }, [graphData]);
-
   const getAutoSpouseLinkCandidate = useCallback((
     draggedId: string,
     selectedIds: string[],
     options?: { overlapOnly?: boolean }
   ) => {
-    if (!graphData) return null as { from: string; to: string } | null;
-    if (selectedIds.length !== 1 || selectedIds[0] !== draggedId) return null;
-
-    const draggedNode = nodesRef.current.find((item) => item.id === draggedId);
-    const draggedPerson = graphData.nodes.find((item) => item.id === draggedId);
-    if (!draggedNode || !draggedPerson) return null;
-    if (!draggedPerson.gender || draggedPerson.gender === 'O') return null;
-
-    const draggedWidth = draggedNode.width ?? 120;
-    const draggedHeight = draggedNode.height ?? 120;
-    const draggedArea = draggedWidth * draggedHeight;
-    const nearGapXThreshold = graphSettings.nearGapXThreshold + (isCoarsePointer ? COARSE_NEAR_GAP_BONUS : 0);
-    const nearCenterYThreshold = graphSettings.nearCenterYThreshold + (isCoarsePointer ? COARSE_NEAR_CENTER_Y_BONUS : 0);
-    const minVerticalOverlapRatio = graphSettings.autoSpouseMinVerticalOverlapRatio;
-    const minOverlapRatio = graphSettings.autoSpouseMinOverlapRatio;
-    const candidates: Array<{ to: string; score: number }> = [];
-    const overlapOnly = Boolean(options?.overlapOnly);
-
-    for (const otherNode of nodesRef.current) {
-      if (otherNode.id === draggedId) continue;
-      const otherPerson = graphData.nodes.find((item) => item.id === otherNode.id);
-      if (!otherPerson || !otherPerson.gender || otherPerson.gender === 'O') continue;
-      if (otherPerson.gender === draggedPerson.gender) continue;
-
-      if (hasDirectRelationship(draggedId, otherNode.id, 'spouse')) continue;
-      if (hasDirectRelationship(draggedId, otherNode.id)) continue;
-
-      const otherWidth = otherNode.width ?? 120;
-      const otherHeight = otherNode.height ?? 120;
-      const otherArea = otherWidth * otherHeight;
-      const overlapWidth = Math.min(
-        draggedNode.position.x + draggedWidth,
-        otherNode.position.x + otherWidth
-      ) - Math.max(draggedNode.position.x, otherNode.position.x);
-      const overlapHeight = Math.min(
-        draggedNode.position.y + draggedHeight,
-        otherNode.position.y + otherHeight
-      ) - Math.max(draggedNode.position.y, otherNode.position.y);
-      const overlapArea = overlapWidth > 0 && overlapHeight > 0
-        ? overlapWidth * overlapHeight
-        : 0;
-      const overlapRatio = overlapArea > 0
-        ? overlapArea / Math.max(1, Math.min(draggedArea, otherArea))
-        : 0;
-
-      const gapX = Math.max(
-        0,
-        otherNode.position.x - (draggedNode.position.x + draggedWidth),
-        draggedNode.position.x - (otherNode.position.x + otherWidth)
-      );
-      const gapY = Math.max(
-        0,
-        otherNode.position.y - (draggedNode.position.y + draggedHeight),
-        draggedNode.position.y - (otherNode.position.y + otherHeight)
-      );
-      const centerYDragged = draggedNode.position.y + draggedHeight / 2;
-      const centerYOther = otherNode.position.y + otherHeight / 2;
-      const centerYDelta = Math.abs(centerYDragged - centerYOther);
-      const verticalOverlapRatio = overlapHeight > 0
-        ? overlapHeight / Math.max(1, Math.min(draggedHeight, otherHeight))
-        : 0;
-
-      const strongOverlap = overlapRatio >= minOverlapRatio;
-      const horizontalNear = !overlapOnly && (
-        gapX <= nearGapXThreshold
-        && gapY <= nearCenterYThreshold
-        && centerYDelta <= nearCenterYThreshold
-        && verticalOverlapRatio >= minVerticalOverlapRatio
-      );
-
-      if (!strongOverlap && !horizontalNear) continue;
-
-      const score = strongOverlap
-        ? (1000000 + overlapRatio * 10000 - centerYDelta)
-        : (1000 - gapX * 10 - centerYDelta);
-      candidates.push({ to: otherNode.id, score });
-    }
-
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.score - a.score);
-    if (candidates.length > 1) {
-      const scoreGap = candidates[0].score - candidates[1].score;
-      const ambiguousGap = candidates[0].score >= 100000 ? 800 : 10;
-      if (scoreGap <= ambiguousGap) {
-        return null;
-      }
-    }
-
-    return { from: draggedId, to: candidates[0].to };
-  }, [graphData, graphSettings, hasDirectRelationship, isCoarsePointer]);
+    // Disabled: dragging/overlapping nodes should never auto-create spouse links.
+    void draggedId;
+    void selectedIds;
+    void options;
+    return null as { from: string; to: string } | null;
+  }, []);
 
   const syncAllPositions = useCallback(async () => {
     if (!ensureEditable()) return;
@@ -1030,7 +933,9 @@ export function ClanGraph({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [avatarPreview]);
 
-  const handleEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
+  const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    event.preventDefault();
+    event.stopPropagation();
     console.log('Edge clicked:', edge.id);
     if (!graphData) {
       setSelectedEdge(edge.id);
@@ -1547,6 +1452,21 @@ export function ClanGraph({
       || null;
   }, [graphData]);
 
+  const getRelationshipFocusPosition = useCallback((edgeId: string) => {
+    if (!graphData) return null;
+    const numericId = Number(edgeId.startsWith('e') ? edgeId.slice(1) : edgeId);
+    if (!Number.isFinite(numericId)) return null;
+    const relationship = graphData.edges.find((edge) => edge.id === numericId);
+    if (!relationship) return null;
+    const fromPos = getFocusPosition(relationship.from_person_id);
+    const toPos = getFocusPosition(relationship.to_person_id);
+    if (!fromPos || !toPos) return null;
+    return {
+      x: (fromPos.x + toPos.x) / 2,
+      y: (fromPos.y + toPos.y) / 2
+    };
+  }, [graphData, getFocusPosition]);
+
   const getViewportForNode = useCallback((id: string, zoom = 1.0) => {
     const focusPosition = getFocusPosition(id);
     if (!focusPosition) return null;
@@ -1565,7 +1485,6 @@ export function ClanGraph({
     if (!viewport) return;
     try {
       localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
-      localStorage.setItem('clan.pendingCenterId', id);
     } catch (error) {
       console.warn('Failed to persist pending viewport:', error);
     }
@@ -1592,7 +1511,7 @@ export function ClanGraph({
     setSelectedNode(match.id);
     setNodesRef.current?.((prev) => prev.map((node) => ({ ...node, selected: node.id === match.id })));
     persistPendingViewport(match.id, 1.0);
-    setPendingCenterId(match.id);
+    setPendingFocus({ id: match.id, zoom: 1.0 });
     if (searchFlashTimer.current) {
       window.clearTimeout(searchFlashTimer.current);
     }
@@ -1625,6 +1544,48 @@ export function ClanGraph({
     });
     return true;
   }, [getViewportForNode, getFocusPosition, reactFlowInstance]);
+
+  const deleteRelationshipWithFocus = useCallback(async (edgeId: string) => {
+    const focusPosition = getRelationshipFocusPosition(edgeId);
+    const zoom = reactFlowInstance?.getZoom?.() ?? 1;
+    await deleteRelationship(edgeId);
+    if (focusPosition) {
+      setPendingFocusPosition({
+        x: focusPosition.x,
+        y: focusPosition.y,
+        zoom
+      });
+    }
+  }, [deleteRelationship, getRelationshipFocusPosition, reactFlowInstance]);
+
+  const updateRelationshipWithFocus = useCallback(async (
+    edgeId: string,
+    updates: { type?: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' }
+  ) => {
+    const focusPosition = getRelationshipFocusPosition(edgeId);
+    const zoom = reactFlowInstance?.getZoom?.() ?? 1;
+    await updateRelationship(edgeId, updates);
+    if (focusPosition) {
+      setPendingFocusPosition({
+        x: focusPosition.x,
+        y: focusPosition.y,
+        zoom
+      });
+    }
+  }, [getRelationshipFocusPosition, reactFlowInstance, updateRelationship]);
+
+  const reverseRelationshipWithFocus = useCallback(async (edgeId: string) => {
+    const focusPosition = getRelationshipFocusPosition(edgeId);
+    const zoom = reactFlowInstance?.getZoom?.() ?? 1;
+    await reverseRelationship(edgeId);
+    if (focusPosition) {
+      setPendingFocusPosition({
+        x: focusPosition.x,
+        y: focusPosition.y,
+        zoom
+      });
+    }
+  }, [getRelationshipFocusPosition, reactFlowInstance, reverseRelationship]);
 
   const focusMe = useCallback((options?: { highlight?: boolean; syncCenter?: boolean }) => {
     const highlight = options?.highlight ?? true;
@@ -1663,11 +1624,12 @@ export function ClanGraph({
   }, [graphData, centerId, focusNodeById, setCenterId, persistPendingViewport]);
 
   const handleFocusMe = useCallback(() => {
-    focusMe({ highlight: true, syncCenter: true });
+    focusMe({ highlight: true, syncCenter: false });
   }, [focusMe]);
 
   useEffect(() => {
-    if (!graphData || !reactFlowInstance) return;
+    if (!graphData || !reactFlowInstance || initialAutoFocusDoneRef.current) return;
+    initialAutoFocusDoneRef.current = true;
     focusMe({ highlight: false, syncCenter: false });
   }, [graphData, reactFlowInstance, focusMe]);
 
@@ -1709,13 +1671,13 @@ export function ClanGraph({
 
     try {
       for (const edge of relatedEdges) {
-        await deleteRelationship(`e${edge.id}`);
+        await deleteRelationshipWithFocus(`e${edge.id}`);
       }
       setSelectedEdge(null);
     } catch (error) {
       console.error('Failed to delete relations:', error);
     }
-  }, [ensureEditable, graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationshipWithFocus]);
 
   const handleDeleteSiblingRelations = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -1729,13 +1691,13 @@ export function ClanGraph({
 
     try {
       for (const edge of relatedEdges) {
-        await deleteRelationship(`e${edge.id}`);
+        await deleteRelationshipWithFocus(`e${edge.id}`);
       }
       setSelectedEdge(null);
     } catch (error) {
       console.error('Failed to delete sibling relations:', error);
     }
-  }, [ensureEditable, graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationshipWithFocus]);
 
   const handleDeleteChildRelations = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -1747,13 +1709,13 @@ export function ClanGraph({
 
     try {
       for (const edge of relatedEdges) {
-        await deleteRelationship(`e${edge.id}`);
+        await deleteRelationshipWithFocus(`e${edge.id}`);
       }
       setSelectedEdge(null);
     } catch (error) {
       console.error('Failed to delete child relations:', error);
     }
-  }, [ensureEditable, graphData, deleteRelationship]);
+  }, [ensureEditable, graphData, deleteRelationshipWithFocus]);
 
   const dimIds = useMemo(() => {
     const dimSet = new Set<string>(dimNodeIds);
@@ -2028,9 +1990,10 @@ export function ClanGraph({
           })(),
           label: getLabel(edge.type),
           zIndex: isSelected ? 1000 : (isConnectedToHoverNode ? 800 : 0),
+          interactionWidth: isCoarsePointer ? 56 : 24,
         };
       });
-  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, ctrlHoverConnectedEdgeIds, isCtrlHoverActive]);
+  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -2493,8 +2456,6 @@ export function ClanGraph({
           if (focusId) {
             try {
               const focusPosition = nextPositions[focusId];
-              localStorage.setItem('clan.centerId', focusId);
-              localStorage.setItem('clan.pendingCenterId', focusId);
               if (focusPosition) {
                 const bounds = flowWrapperRef.current?.getBoundingClientRect();
                 const width = bounds?.width || window.innerWidth;
@@ -2656,7 +2617,7 @@ export function ClanGraph({
           return;
         }
         if (selectedEdge) {
-          deleteRelationship(selectedEdge);
+          void deleteRelationshipWithFocus(selectedEdge);
           setSelectedEdge(null);
         } else if (selectedNode && !editingPersonId && !showAddModal) {
           handleDeletePerson(selectedNode);
@@ -2729,7 +2690,7 @@ export function ClanGraph({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationship, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming]);
+  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming]);
 
   if (loading) {
     return (
@@ -2804,19 +2765,19 @@ export function ClanGraph({
         onUpdateRelationship={(type) => {
           if (!ensureEditable()) return;
           if (selectedEdge) {
-            updateRelationship(selectedEdge, { type });
+            void updateRelationshipWithFocus(selectedEdge, { type });
           }
         }}
         onReverseRelationship={() => {
           if (!ensureEditable()) return;
           if (selectedEdge) {
-            reverseRelationship(selectedEdge);
+            void reverseRelationshipWithFocus(selectedEdge);
           }
         }}
         onDeleteRelationship={() => {
           if (!ensureEditable()) return;
           if (selectedEdge) {
-            deleteRelationship(selectedEdge);
+            void deleteRelationshipWithFocus(selectedEdge);
             setSelectedEdge(null);
           }
         }}
@@ -2869,7 +2830,7 @@ export function ClanGraph({
           onNodeContextMenu={onNodeContextMenu}
           onPaneClick={onPaneClick}
           onPaneMouseMove={onPaneMouseMove}
-          onEdgeClick={isLocked ? undefined : handleEdgeClick}
+          onEdgeClick={isLocked && !isCoarsePointer ? undefined : handleEdgeClick}
           fitView={fitViewEnabled}
           minZoom={0.3}
           maxZoom={2}
@@ -3241,17 +3202,21 @@ export function ClanGraph({
               console.warn('Failed to persist last edited id:', error);
             }
 
-            await updatePerson(id, filteredUpdates);
-            setEditingPersonId(null);
-            showToast('已儲存', 'success');
-            const viewport = getViewportForNode(id, 1.0);
-            if (viewport && reactFlowInstance?.setViewport) {
-              reactFlowInstance.setViewport(viewport);
-              localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+            try {
+              await updatePerson(id, filteredUpdates);
+              setEditingPersonId(null);
+              showToast('已儲存', 'success');
+              const viewport = getViewportForNode(id, 1.0);
+              if (viewport && reactFlowInstance?.setViewport) {
+                reactFlowInstance.setViewport(viewport);
+                localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+              }
+              focusNodeById(id, 1.0);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : '儲存失敗';
+              showToast(message, 'warning');
+              throw error;
             }
-            setPendingCenterId(id);
-            localStorage.setItem('clan.pendingCenterId', id);
-            focusNodeById(id, 1.0);
           }}
         />
       )}

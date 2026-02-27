@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { AuthUser } from './types';
 import { LoginPage } from './components/LoginPage';
@@ -17,6 +17,9 @@ import {
 import './App.css';
 
 type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'settings';
+type ThemeMode = 'light' | 'dark';
+
+const THEME_STORAGE_KEY = 'clan.theme.mode';
 
 const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/users') return 'users';
@@ -27,6 +30,22 @@ const getViewFromHash = (): AppView => {
   return 'graph';
 };
 
+const getInitialTheme = (): ThemeMode => {
+  try {
+    const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === 'light' || storedTheme === 'dark') {
+      return storedTheme;
+    }
+  } catch (error) {
+    console.warn('Failed to load theme from localStorage:', error);
+  }
+
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+};
+
 function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -34,6 +53,7 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<AppView>(() => getViewFromHash());
   const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialTheme());
 
   const navigateTo = useCallback((next: AppView) => {
     const nextHash = next === 'users'
@@ -44,9 +64,9 @@ function App() {
           ? '#/notifications'
           : next === 'auditLogs'
             ? '#/audit-logs'
-          : next === 'settings'
-            ? '#/settings'
-        : '#/graph';
+            : next === 'settings'
+              ? '#/settings'
+              : '#/graph';
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
     }
@@ -177,96 +197,145 @@ function App() {
     setGraphSettings(loadGraphSettings(authUser.username || null));
   }, [isAuthed, authUser?.username]);
 
-  if (!authChecked) {
-    return (
-      <div className="app">
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>驗證中...</p>
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = themeMode;
+    root.style.colorScheme = themeMode;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch (error) {
+      console.warn('Failed to save theme to localStorage:', error);
+    }
+  }, [themeMode]);
+
+  const toggleTheme = useCallback(() => {
+    setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
+  }, []);
+
+  const themeToggleLabel = useMemo(
+    () => (themeMode === 'light' ? '切換深色' : '切換淺色'),
+    [themeMode],
+  );
+
+  const pageContent = useMemo(() => {
+    if (!authChecked) {
+      return (
+        <div className="app">
+          <div className="loading">
+            <div className="spinner"></div>
+            <p>驗證中...</p>
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (!isAuthed) {
-    return <LoginPage error={authError} onLogin={handleLogin} />;
-  }
-  if (!authUser) {
-    return (
-      <div className="app">
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>載入使用者資訊...</p>
+    if (!isAuthed) {
+      return <LoginPage error={authError} onLogin={handleLogin} />;
+    }
+
+    if (!authUser) {
+      return (
+        <div className="app">
+          <div className="loading">
+            <div className="spinner"></div>
+            <p>載入使用者資訊...</p>
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (view === 'users' && authUser.role === 'admin') {
+    if (view === 'users' && authUser.role === 'admin') {
+      return (
+        <UserManagementPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    if (view === 'sessions') {
+      return (
+        <SessionManagementPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    if (view === 'notifications' && authUser.role === 'admin') {
+      return (
+        <NotificationManagementPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    if (view === 'auditLogs' && authUser.role === 'admin') {
+      return (
+        <AuditLogPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    if (view === 'settings') {
+      return (
+        <GraphSettingsPage
+          currentUser={authUser}
+          settings={graphSettings}
+          onSave={handleSaveGraphSettings}
+          onBack={() => navigateTo('graph')}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
     return (
-      <UserManagementPage
-        currentUser={authUser}
-        onBack={() => navigateTo('graph')}
+      <ClanGraph
+        username={authUser.username || null}
+        readOnly={authUser.role === 'readonly'}
+        isAdmin={authUser.role === 'admin'}
+        graphSettings={graphSettings}
+        onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+        onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
+        onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
+        onManageSessions={() => navigateTo('sessions')}
+        onOpenSettings={() => navigateTo('settings')}
         onLogout={handleLogout}
       />
     );
-  }
-
-  if (view === 'sessions') {
-    return (
-      <SessionManagementPage
-        currentUser={authUser}
-        onBack={() => navigateTo('graph')}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  if (view === 'notifications' && authUser.role === 'admin') {
-    return (
-      <NotificationManagementPage
-        currentUser={authUser}
-        onBack={() => navigateTo('graph')}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  if (view === 'auditLogs' && authUser.role === 'admin') {
-    return (
-      <AuditLogPage
-        currentUser={authUser}
-        onBack={() => navigateTo('graph')}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  if (view === 'settings') {
-    return (
-      <GraphSettingsPage
-        currentUser={authUser}
-        settings={graphSettings}
-        onSave={handleSaveGraphSettings}
-        onBack={() => navigateTo('graph')}
-        onLogout={handleLogout}
-      />
-    );
-  }
+  }, [
+    authChecked,
+    isAuthed,
+    authError,
+    authUser,
+    view,
+    graphSettings,
+    handleLogin,
+    handleLogout,
+    handleSaveGraphSettings,
+    navigateTo,
+  ]);
 
   return (
-    <ClanGraph
-      username={authUser.username || null}
-      readOnly={authUser.role === 'readonly'}
-      isAdmin={authUser.role === 'admin'}
-      graphSettings={graphSettings}
-      onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
-      onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
-      onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
-      onManageSessions={() => navigateTo('sessions')}
-      onOpenSettings={() => navigateTo('settings')}
-      onLogout={handleLogout}
-    />
+    <>
+      <button
+        type="button"
+        className="theme-toggle"
+        onClick={toggleTheme}
+        aria-label={themeToggleLabel}
+        title={themeToggleLabel}
+      >
+        {themeMode === 'light' ? 'Dark' : 'Light'}
+      </button>
+      {pageContent}
+    </>
   );
 }
 

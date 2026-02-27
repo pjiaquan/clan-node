@@ -18,13 +18,6 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const resolveInitialCenterId = () => {
     try {
-      const pendingFocusRaw = localStorage.getItem('clan.pendingFocus');
-      if (pendingFocusRaw) {
-        const parsed = JSON.parse(pendingFocusRaw) as { id?: string };
-        if (parsed?.id) return parsed.id;
-      }
-      const pendingCenter = localStorage.getItem('clan.pendingCenterId');
-      if (pendingCenter) return pendingCenter;
       const storedCenter = localStorage.getItem('clan.centerId');
       if (storedCenter) return storedCenter;
     } catch {
@@ -93,23 +86,6 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     const initCenter = async () => {
       try {
         setLoading(true);
-        const pendingFocusRaw = localStorage.getItem('clan.pendingFocus');
-        if (pendingFocusRaw) {
-          try {
-            const parsed = JSON.parse(pendingFocusRaw) as { id?: string };
-            if (parsed?.id) {
-              if (!cancelled) setCenterIdState(parsed.id);
-              return;
-            }
-          } catch {
-            // Ignore parse errors and fall back to stored center.
-          }
-        }
-        const pendingCenter = localStorage.getItem('clan.pendingCenterId');
-        if (pendingCenter) {
-          if (!cancelled) setCenterIdState(pendingCenter);
-          return;
-        }
         const storedCenter = localStorage.getItem(centerStorageKey);
         if (storedCenter) {
           if (!cancelled) setCenterIdState(storedCenter);
@@ -143,20 +119,16 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       try {
         localStorage.setItem('clan.lastEditedId', id);
         localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: 1.0 }));
-        localStorage.setItem('clan.pendingCenterId', id);
       } catch (error) {
         console.warn('Failed to persist last edited id:', error);
       }
       await api.updatePerson(id, updates);
-      if (centerId === id) {
-        fetchGraph();
-      } else {
-        setCenterId(id);
-      }
+      fetchGraph();
     } catch (error) {
       console.error('Failed to update person:', error);
+      throw error;
     }
-  }, [centerId, fetchGraph, setCenterId]);
+  }, [fetchGraph]);
 
   const updatePersonPosition = useCallback(async (
     id: string,
