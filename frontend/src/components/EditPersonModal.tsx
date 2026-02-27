@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Person } from '../types';
 import { getGanzhiYear, getZodiacAnimal, getModernTimeRange, normalizeTraditionalHour, TRADITIONAL_HOURS } from '../utils/chineseTime';
 import { api } from '../api';
-import { clampDay, composePartialDate, isFullDate, parsePartialDate } from '../utils/partialDate';
+import { clampDay, composePartialDate, parsePartialDate } from '../utils/partialDate';
 
 interface EditPersonModalProps {
   person: Person;
@@ -372,21 +372,33 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setDobDay((prev) => clampDay(nextYearText, dobMonth, prev));
   };
   const calculateWesternAge = () => {
-    if (!isFullDate(dob)) return null;
-    const birth = new Date(dob);
+    if (!birthYear) return null;
     const end = dod ? new Date(dod) : new Date();
-    let age = end.getFullYear() - birth.getFullYear();
-    const m = end.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && end.getDate() < birth.getDate())) {
-      age--;
+    if (Number.isNaN(end.getTime())) return null;
+    let age = end.getFullYear() - birthYear;
+    const birthMonthNum = Number.parseInt(dobMonth, 10);
+    const birthDayNum = Number.parseInt(dobDay, 10);
+    if (Number.isFinite(birthMonthNum) && birthMonthNum >= 1 && birthMonthNum <= 12) {
+      const endMonth = end.getMonth() + 1;
+      if (endMonth < birthMonthNum) {
+        age--;
+      } else if (
+        endMonth === birthMonthNum
+        && Number.isFinite(birthDayNum)
+        && birthDayNum >= 1
+        && birthDayNum <= 31
+        && end.getDate() < birthDayNum
+      ) {
+        age--;
+      }
     }
     return age;
   };
   const calculateTraditionalAge = () => {
-    if (!isFullDate(dob)) return null;
-    const birth = new Date(dob);
+    if (!birthYear) return null;
     const end = dod ? new Date(dod) : new Date();
-    return end.getFullYear() - birth.getFullYear() + 1;
+    if (Number.isNaN(end.getTime())) return null;
+    return end.getFullYear() - birthYear + 1;
   };
   const westernAge = calculateWesternAge();
   const traditionalAge = calculateTraditionalAge();
