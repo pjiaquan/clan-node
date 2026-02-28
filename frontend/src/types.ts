@@ -30,6 +30,18 @@ export interface Relationship {
   } | null;
 }
 
+export type RelationshipTypeKey = 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law';
+
+export interface RelationshipTypeLabel {
+  type: RelationshipTypeKey;
+  label: string;
+  description: string;
+  default_label: string;
+  default_description: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface GraphData {
   center: string;
   nodes: Person[];

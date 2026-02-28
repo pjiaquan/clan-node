@@ -11,7 +11,7 @@ import ReactFlow, {
   useNodesState,
   MarkerType,
 } from 'reactflow';
-import type { Person, Relationship } from './types';
+import type { Person, Relationship, RelationshipTypeKey } from './types';
 import { api } from './api';
 import PersonNode from './PersonNode';
 import { useClanGraph } from './hooks/useClanGraph';
@@ -78,6 +78,13 @@ const COARSE_X_SNAP_BONUS = 10;
 const COARSE_X_RELEASE_BONUS = 12;
 const COARSE_SPOUSE_SNAP_BONUS = 14;
 const COARSE_SPOUSE_RELEASE_BONUS = 20;
+const DEFAULT_RELATIONSHIP_TYPE_LABELS: Record<RelationshipTypeKey, string> = {
+  parent_child: '親子',
+  spouse: '夫妻',
+  ex_spouse: '前配偶',
+  sibling: '手足',
+  in_law: '姻親',
+};
 
 type ClanGraphProps = {
   username: string | null;
@@ -87,6 +94,7 @@ type ClanGraphProps = {
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
+  onManageRelationshipNames?: () => void;
   onManageSessions?: () => void;
   onOpenSettings?: () => void;
   onLogout: () => void;
@@ -100,6 +108,7 @@ export function ClanGraph({
   onManageUsers,
   onManageNotifications,
   onManageAuditLogs,
+  onManageRelationshipNames,
   onManageSessions,
   onOpenSettings,
   onLogout
@@ -159,12 +168,14 @@ export function ClanGraph({
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
-  const [syncingPositions, setSyncingPositions] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
   const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
   const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
+  const [relationshipTypeLabelMap, setRelationshipTypeLabelMap] = useState<Record<RelationshipTypeKey, string>>(
+    DEFAULT_RELATIONSHIP_TYPE_LABELS
+  );
   const pendingFocusRetryRef = useRef<number | null>(null);
   const initialAutoFocusDoneRef = useRef(false);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -236,6 +247,32 @@ export function ClanGraph({
       window.removeEventListener('focus', handleFocus);
     };
   }, [canManageUsers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRelationshipTypeLabels = async () => {
+      try {
+        const labels = await api.fetchRelationshipTypeLabels();
+        if (cancelled) return;
+        const next: Record<RelationshipTypeKey, string> = { ...DEFAULT_RELATIONSHIP_TYPE_LABELS };
+        for (const item of labels) {
+          if (item.label) {
+            next[item.type] = item.label;
+          }
+        }
+        setRelationshipTypeLabelMap(next);
+      } catch (error) {
+        if (!cancelled) {
+          setRelationshipTypeLabelMap(DEFAULT_RELATIONSHIP_TYPE_LABELS);
+        }
+        console.warn('Failed to fetch relationship type labels:', error);
+      }
+    };
+    void loadRelationshipTypeLabels();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!window.matchMedia) return;
@@ -828,33 +865,6 @@ export function ClanGraph({
     return null as { from: string; to: string } | null;
   }, []);
 
-  const syncAllPositions = useCallback(async () => {
-    if (!ensureEditable()) return;
-    if (!graphData) return;
-    setSyncingPositions(true);
-    try {
-      const updates = graphData.nodes.map(async (person) => {
-        const position = nodesRef.current.find(node => node.id === person.id)?.position
-          || nodePositionMap.current[person.id]
-          || person.metadata?.position;
-        if (!position) return;
-        const nextMetadata = {
-          ...(person.metadata ?? {}),
-          position
-        };
-        await api.updatePerson(person.id, { metadata: nextMetadata });
-      });
-      await Promise.all(updates);
-      showToast('已同步全部位置', 'success');
-      fetchGraph();
-    } catch (error) {
-      console.error('Failed to sync positions:', error);
-      showToast('同步失敗', 'warning');
-    } finally {
-      setSyncingPositions(false);
-    }
-  }, [ensureEditable, graphData, fetchGraph, showToast]);
-
   const handleCreateUser = useCallback(async (username: string, password: string, role: 'admin' | 'readonly') => {
     try {
       await api.createUser(username, password, role);
@@ -936,24 +946,44 @@ export function ClanGraph({
   const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault();
     event.stopPropagation();
-    console.log('Edge clicked:', edge.id);
+    const clickedId = String(edge.id);
     if (!graphData) {
-      setSelectedEdge(edge.id);
+      setSelectedEdge(clickedId);
       setSelectedNode(null);
       return;
     }
-    const candidates = graphData.edges.filter((item) => {
+
+    const pairCandidates = graphData.edges.filter((item) => {
       const sameForward = item.from_person_id === edge.source && item.to_person_id === edge.target;
       const sameReverse = item.from_person_id === edge.target && item.to_person_id === edge.source;
       return sameForward || sameReverse;
     }).map((item) => ({ id: `e${item.id}` }));
+
+    // If multiple relationships are visually stacked on the same pair, cycle in that pair first.
+    // Otherwise, cycle by the connected target endpoint only (not source endpoint).
+    const targetEndpointCandidates = graphData.edges.filter((item) => (
+      item.to_person_id === edge.target
+      && (edge.targetHandle ? item.metadata?.targetHandle === edge.targetHandle : true)
+    )).map((item) => ({ id: `e${item.id}` }));
+
+    const deduped = new Set<string>();
+    const candidates = (pairCandidates.length > 1 ? pairCandidates : targetEndpointCandidates)
+      .filter((item) => {
+        if (deduped.has(item.id)) return false;
+        deduped.add(item.id);
+        return true;
+      })
+      .sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+
     if (candidates.length > 1) {
       const currentIndex = candidates.findIndex((item) => item.id === selectedEdge);
-      const nextIndex = currentIndex === -1 ? candidates.findIndex((item) => item.id === edge.id) : currentIndex + 1;
-      const nextEdge = candidates[nextIndex % candidates.length] || { id: edge.id };
-      setSelectedEdge(nextEdge.id);
+      const clickedIndex = candidates.findIndex((item) => item.id === clickedId);
+      const nextIndex = currentIndex === -1
+        ? (clickedIndex === -1 ? 0 : clickedIndex)
+        : (currentIndex + 1) % candidates.length;
+      setSelectedEdge(candidates[nextIndex]?.id ?? clickedId);
     } else {
-      setSelectedEdge(edge.id);
+      setSelectedEdge(clickedId);
     }
     setSelectedNode(null);
   }, [graphData, selectedEdge]);
@@ -1997,6 +2027,12 @@ export function ClanGraph({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const selectedEdgeType = useMemo(() => {
+    if (!graphData || !selectedEdge) return null;
+    const edgeId = Number(selectedEdge.startsWith('e') ? selectedEdge.slice(1) : selectedEdge);
+    if (!Number.isFinite(edgeId)) return null;
+    return graphData.edges.find((edge) => edge.id === edgeId)?.type ?? null;
+  }, [graphData, selectedEdge]);
   const spouseHandleMap = useMemo(() => {
     if (!graphData) return {};
     const nodesById = new Map(nodes.map((item) => [item.id, item]));
@@ -2724,6 +2760,7 @@ export function ClanGraph({
         onManageUsers={canManageUsers ? onManageUsers : undefined}
         onManageNotifications={canManageUsers ? onManageNotifications : undefined}
         onManageAuditLogs={canManageUsers ? onManageAuditLogs : undefined}
+        onManageRelationshipNames={canManageUsers ? onManageRelationshipNames : undefined}
         pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
         onOpenSettings={onOpenSettings}
@@ -2733,14 +2770,14 @@ export function ClanGraph({
           setShowAddModal(true);
         }}
         onFocusMe={handleFocusMe}
-        onSyncPositions={syncAllPositions}
-        syncingPositions={syncingPositions}
         onClearAllDim={clearAllDimming}
         hasActiveDimming={hasActiveDimming}
         onExpandAllCollapsed={expandAllCollapsed}
         hasCollapsedNodes={hasCollapsedNodes}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
+        selectedEdgeType={selectedEdgeType}
+        relationshipTypeLabelMap={relationshipTypeLabelMap}
         linkMode={linkMode}
         onUndo={handleUndo}
         canUndo={canUndo}

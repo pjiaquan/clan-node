@@ -7,6 +7,7 @@ import { registerRelationshipRoutes } from './relationships';
 import { registerGraphRoutes } from './graph';
 import { registerNotificationRoutes } from './notifications';
 import { registerAuditRoutes } from './audit';
+import { registerRelationshipTypeLabelRoutes } from './relationship_type_labels';
 
 const app = new Hono<AppBindings>();
 
@@ -41,5 +42,6 @@ registerRelationshipRoutes(app);
 registerGraphRoutes(app);
 registerNotificationRoutes(app);
 registerAuditRoutes(app);
+registerRelationshipTypeLabelRoutes(app);
 
 export default app;

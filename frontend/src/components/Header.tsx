@@ -1,17 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createNameMatcher, preloadNameSearchConverters } from '../utils/nameSearch';
+import type { RelationshipTypeKey } from '../types';
+
+const DEFAULT_RELATIONSHIP_TYPE_LABELS: Record<RelationshipTypeKey, string> = {
+  parent_child: '親子',
+  spouse: '夫妻',
+  ex_spouse: '前配偶',
+  sibling: '手足',
+  in_law: '姻親',
+};
 
 interface HeaderProps {
   onAddMember: () => void;
   onFocusMe: () => void;
-  onSyncPositions: () => void;
-  syncingPositions?: boolean;
   onClearAllDim: () => void;
   hasActiveDimming: boolean;
   onExpandAllCollapsed: () => void;
   hasCollapsedNodes: boolean;
   selectedNode: string | null;
   selectedEdge: string | null;
+  selectedEdgeType?: string | null;
   linkMode: { from: string } | null;
   onStartLink: () => void;
   onSetCenter: () => void;
@@ -25,6 +33,7 @@ interface HeaderProps {
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
+  onManageRelationshipNames?: () => void;
   pendingNotificationCount?: number;
   onManageSessions?: () => void;
   onOpenSettings?: () => void;
@@ -33,19 +42,19 @@ interface HeaderProps {
   onLogout: () => void;
   onSearch: (query: string) => void;
   searchOptions: Array<{ id: string; name: string; english_name?: string | null }>;
+  relationshipTypeLabelMap?: Partial<Record<RelationshipTypeKey, string>>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onAddMember,
   onFocusMe,
-  onSyncPositions,
-  syncingPositions,
   onClearAllDim,
   hasActiveDimming,
   onExpandAllCollapsed,
   hasCollapsedNodes,
   selectedNode,
   selectedEdge,
+  selectedEdgeType,
   linkMode,
   onStartLink,
   onSetCenter,
@@ -59,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
   onManageUsers,
   onManageNotifications,
   onManageAuditLogs,
+  onManageRelationshipNames,
   pendingNotificationCount,
   onManageSessions,
   onOpenSettings,
@@ -67,6 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onSearch,
   searchOptions,
+  relationshipTypeLabelMap,
 }) => {
   const [searchText, setSearchText] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
@@ -89,6 +100,14 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const hasSelection = Boolean(selectedNode || selectedEdge);
+  const getRelationshipLabel = (type: RelationshipTypeKey) => (
+    relationshipTypeLabelMap?.[type] || DEFAULT_RELATIONSHIP_TYPE_LABELS[type]
+  );
+  const spouseToggleType: 'spouse' | 'ex_spouse' = selectedEdgeType === 'spouse' ? 'ex_spouse' : 'spouse';
+  const spouseToggleLabel = `設為${getRelationshipLabel(spouseToggleType)}`;
+  const parentChildLabel = `設為${getRelationshipLabel('parent_child')}`;
+  const siblingLabel = `設為${getRelationshipLabel('sibling')}`;
+  const inLawLabel = `設為${getRelationshipLabel('in_law')}`;
   const hasPendingNotifications = Boolean(pendingNotificationCount && pendingNotificationCount > 0);
   const pendingLabel = pendingNotificationCount && pendingNotificationCount > 99
     ? '99+'
@@ -243,17 +262,6 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 className="header-action-item"
                 onClick={() => {
-                  onSyncPositions();
-                  closeMobileMenu();
-                }}
-                disabled={editDisabled || syncingPositions}
-              >
-                {syncingPositions ? '同步中...' : '同步位置'}
-              </button>
-              <button
-                type="button"
-                className="header-action-item"
-                onClick={() => {
                   onClearAllDim();
                   closeMobileMenu();
                 }}
@@ -335,23 +343,12 @@ export const Header: React.FC<HeaderProps> = ({
                     type="button"
                     className="header-action-item"
                     onClick={() => {
-                      onUpdateRelationship('spouse');
+                      onUpdateRelationship(spouseToggleType);
                       closeMobileMenu();
                     }}
                     disabled={editDisabled}
                   >
-                    設為夫妻
-                  </button>
-                  <button
-                    type="button"
-                    className="header-action-item"
-                    onClick={() => {
-                      onUpdateRelationship('ex_spouse');
-                      closeMobileMenu();
-                    }}
-                    disabled={editDisabled}
-                  >
-                    設為前配偶
+                    {spouseToggleLabel}
                   </button>
                   <button
                     type="button"
@@ -362,7 +359,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    設為親子
+                    {parentChildLabel}
                   </button>
                   <button
                     type="button"
@@ -373,7 +370,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    設為手足
+                    {siblingLabel}
                   </button>
                   <button
                     type="button"
@@ -384,7 +381,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    設為姻親
+                    {inLawLabel}
                   </button>
                   <button
                     type="button"
@@ -461,6 +458,18 @@ export const Header: React.FC<HeaderProps> = ({
                   修改記錄
                 </button>
               )}
+              {isAdmin && onManageRelationshipNames && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageRelationshipNames();
+                    closeMobileMenu();
+                  }}
+                >
+                  關係名稱
+                </button>
+              )}
               <button
                 type="button"
                 className="header-action-item"
@@ -482,15 +491,6 @@ export const Header: React.FC<HeaderProps> = ({
             </svg>
           </span>
           <span className="btn-label">復原</span>
-        </button>
-        <button
-          onClick={onSyncPositions}
-          className="btn-secondary btn-icon"
-          disabled={editDisabled || syncingPositions}
-          aria-label="同步位置"
-          title="同步全部節點位置"
-        >
-          <span className="btn-label">{syncingPositions ? '同步中...' : '同步位置'}</span>
         </button>
         <button
           onClick={onClearAllDim}
@@ -570,23 +570,12 @@ export const Header: React.FC<HeaderProps> = ({
                       type="button"
                       className="header-action-item"
                       onClick={() => {
-                        onUpdateRelationship('spouse');
+                        onUpdateRelationship(spouseToggleType);
                         closeActionMenu();
                       }}
                       disabled={editDisabled}
                     >
-                      設為夫妻
-                    </button>
-                    <button
-                      type="button"
-                      className="header-action-item"
-                      onClick={() => {
-                        onUpdateRelationship('ex_spouse');
-                        closeActionMenu();
-                      }}
-                      disabled={editDisabled}
-                    >
-                      設為前配偶
+                      {spouseToggleLabel}
                     </button>
                     <button
                       type="button"
@@ -597,7 +586,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      設為親子
+                      {parentChildLabel}
                     </button>
                     <button
                       type="button"
@@ -608,7 +597,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      設為手足
+                      {siblingLabel}
                     </button>
                     <button
                       type="button"
@@ -619,7 +608,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      設為姻親
+                      {inLawLabel}
                     </button>
                     <button
                       type="button"
@@ -706,6 +695,13 @@ export const Header: React.FC<HeaderProps> = ({
             <li className="header-menu-item">
               <button onClick={onManageAuditLogs} className="btn-secondary btn-icon" aria-label="修改記錄">
                 <span className="btn-label">修改記錄</span>
+              </button>
+            </li>
+          )}
+          {isAdmin && onManageRelationshipNames && (
+            <li className="header-menu-item">
+              <button onClick={onManageRelationshipNames} className="btn-secondary btn-icon" aria-label="關係名稱">
+                <span className="btn-label">關係名稱</span>
               </button>
             </li>
           )}

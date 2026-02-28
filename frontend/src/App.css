@@ -652,6 +652,100 @@
   padding: 1.2rem 0.8rem;
 }
 
+.relationship-name-page {
+  background: linear-gradient(160deg, #f0fdf4 0%, #f8fafc 44%, #ffffff 100%);
+}
+
+.relationship-name-header {
+  background: linear-gradient(135deg, #047857 0%, #0f172a 100%);
+}
+
+.relationship-name-main {
+  width: min(1220px, calc(100vw - 2rem));
+}
+
+.relationship-name-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.relationship-name-search {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.86rem;
+  background: #ffffff;
+  color: #0f172a;
+  min-width: 260px;
+  flex: 1;
+}
+
+.relationship-name-search:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+}
+
+.relationship-name-table {
+  min-width: 1120px;
+}
+
+.relationship-name-code {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.relationship-name-code strong {
+  color: #065f46;
+}
+
+.relationship-name-code span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.relationship-name-input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.38rem 0.45rem;
+  font-size: 0.84rem;
+  background: #ffffff;
+  color: #0f172a;
+  width: min(220px, 100%);
+}
+
+.relationship-name-description {
+  width: min(320px, 100%);
+}
+
+.relationship-name-input:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+}
+
+.relationship-name-default {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.relationship-name-default strong {
+  color: #0f172a;
+}
+
+.relationship-name-default span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.relationship-name-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
 .graph-settings-page {
   height: 100vh;
   height: 100dvh;
@@ -906,6 +1000,26 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.avatar-actions .btn-danger {
+  background: linear-gradient(180deg, #fff5f5 0%, #ffe8e8 100%);
+  color: #b42318;
+  border: 1px solid #f2b4b1;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.avatar-actions .btn-danger:hover {
+  background: linear-gradient(180deg, #feeeee 0%, #ffdede 100%);
+  border-color: #ea9b97;
+  color: #a61b11;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.16);
+}
+
+.avatar-actions .btn-danger:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(220, 38, 38, 0.14), inset 0 1px 2px rgba(185, 28, 28, 0.12);
 }
 
 .avatar-upload input {
@@ -2025,6 +2139,15 @@ button:disabled:hover {
     flex: 1;
   }
 
+  .relationship-name-search {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .relationship-name-actions {
+    flex-direction: column;
+  }
+
   .graph-settings-header {
     flex-direction: column;
     align-items: stretch;
@@ -2334,6 +2457,7 @@ button:disabled:hover {
 :root[data-theme='dark'] .user-admin-page,
 :root[data-theme='dark'] .session-page,
 :root[data-theme='dark'] .notice-page,
+:root[data-theme='dark'] .relationship-name-page,
 :root[data-theme='dark'] .graph-settings-page {
   background: linear-gradient(160deg, #0b1220 0%, #111827 48%, #020617 100%);
   color: var(--app-text);
@@ -2402,6 +2526,18 @@ button:disabled:hover {
   border-bottom-color: rgba(148, 163, 184, 0.18);
 }
 
+:root[data-theme='dark'] .relationship-name-search,
+:root[data-theme='dark'] .relationship-name-input {
+  background: var(--app-surface-soft);
+  border-color: var(--app-border);
+  color: var(--app-text);
+}
+
+:root[data-theme='dark'] .relationship-name-code strong,
+:root[data-theme='dark'] .relationship-name-default strong {
+  color: var(--app-text);
+}
+
 :root[data-theme='dark'] .notice-message,
 :root[data-theme='dark'] .report-issue-person,
 :root[data-theme='dark'] .form-group label,
@@ -2440,6 +2576,19 @@ button:disabled:hover {
 :root[data-theme='dark'] .header-action-item:hover,
 :root[data-theme='dark'] .mobile-search-item:hover {
   background: rgba(148, 163, 184, 0.18);
+}
+
+:root[data-theme='dark'] .avatar-actions .btn-danger {
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.48) 0%, rgba(127, 29, 29, 0.7) 100%);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .avatar-actions .btn-danger:hover {
+  background: linear-gradient(180deg, rgba(153, 27, 27, 0.62) 0%, rgba(153, 27, 27, 0.82) 100%);
+  border-color: rgba(252, 165, 165, 0.62);
+  color: #fee2e2;
 }
 
 :root[data-theme='dark'] .user-admin-btn.secondary,

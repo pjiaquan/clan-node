@@ -9,7 +9,9 @@ import type {
   NotificationStatus,
   NotificationType,
   Person,
-  Relationship
+  Relationship,
+  RelationshipTypeKey,
+  RelationshipTypeLabel
 } from './types';
 
 export type CreateRelationshipResponse = Relationship & {
@@ -317,6 +319,42 @@ export const api = {
 
   fetchNotificationStats: async (): Promise<NotificationStats> => {
     const res = await fetchWithAuth(`${API_BASE}/api/notifications/stats`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  fetchRelationshipTypeLabels: async (): Promise<RelationshipTypeLabel[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/relationship-type-labels`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  updateRelationshipTypeLabel: async (
+    type: RelationshipTypeKey,
+    updates: { label?: string; description?: string }
+  ): Promise<RelationshipTypeLabel> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/relationship-type-labels/${type}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  resetRelationshipTypeLabels: async (): Promise<{ items: RelationshipTypeLabel[] }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/relationship-type-labels/reset`, {
+      method: 'POST',
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`HTTP ${res.status}: ${text}`);
