@@ -40,6 +40,8 @@ interface HeaderProps {
   onCreateUser?: () => void;
   username?: string | null;
   onLogout: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onSearch: (query: string) => void;
   searchOptions: Array<{ id: string; name: string; english_name?: string | null }>;
   relationshipTypeLabelMap?: Partial<Record<RelationshipTypeKey, string>>;
@@ -75,6 +77,8 @@ export const Header: React.FC<HeaderProps> = ({
   onCreateUser,
   username,
   onLogout,
+  themeMode,
+  onToggleTheme,
   onSearch,
   searchOptions,
   relationshipTypeLabelMap,
@@ -112,6 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
   const pendingLabel = pendingNotificationCount && pendingNotificationCount > 99
     ? '99+'
     : String(pendingNotificationCount || 0);
+  const themeToggleLabel = themeMode === 'dark' ? '切換淺色' : '切換深色';
   const closeActionMenu = () => setActionMenuOpen(false);
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
@@ -205,8 +210,7 @@ export const Header: React.FC<HeaderProps> = ({
                   type="button"
                   className="mobile-search-item"
                   onClick={() => {
-                    setSearchText(option.name);
-                    onSearch(option.name);
+                    onSearch(option.id);
                     setSearchText('');
                   }}
                 >
@@ -468,6 +472,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   稱呼管理
+                </button>
+              )}
+              {onToggleTheme && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onToggleTheme();
+                    closeMobileMenu();
+                  }}
+                >
+                  {themeToggleLabel}
                 </button>
               )}
               <button

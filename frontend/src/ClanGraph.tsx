@@ -90,6 +90,8 @@ type ClanGraphProps = {
   username: string | null;
   readOnly?: boolean;
   isAdmin?: boolean;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   graphSettings: GraphSettings;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
@@ -104,6 +106,8 @@ export function ClanGraph({
   username,
   readOnly,
   isAdmin,
+  themeMode,
+  onToggleTheme,
   graphSettings,
   onManageUsers,
   onManageNotifications,
@@ -2785,6 +2789,8 @@ export function ClanGraph({
         searchOptions={graphData?.nodes ?? []}
         username={username}
         onLogout={onLogout}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
         onStartLink={() => {
           if (!ensureEditable()) return;
           if (selectedNode) {

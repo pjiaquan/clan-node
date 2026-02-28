@@ -56,6 +56,11 @@ function App() {
   const [view, setView] = useState<AppView>(() => getViewFromHash());
   const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialTheme());
+  const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() => (
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(max-width: 640px)').matches
+      : false
+  ));
 
   const navigateTo = useCallback((next: AppView) => {
     const nextHash = next === 'users'
@@ -212,6 +217,17 @@ function App() {
     }
   }, [themeMode]);
 
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobileViewport(event.matches);
+    };
+    setIsMobileViewport(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
   const toggleTheme = useCallback(() => {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   }, []);
@@ -315,6 +331,8 @@ function App() {
         username={authUser.username || null}
         readOnly={authUser.role === 'readonly'}
         isAdmin={authUser.role === 'admin'}
+        themeMode={themeMode}
+        onToggleTheme={toggleTheme}
         graphSettings={graphSettings}
         onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
         onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
@@ -336,19 +354,25 @@ function App() {
     handleLogout,
     handleSaveGraphSettings,
     navigateTo,
+    themeMode,
+    toggleTheme,
   ]);
+
+  const hideFloatingThemeToggle = isAuthed && view === 'graph' && isMobileViewport;
 
   return (
     <>
-      <button
-        type="button"
-        className="theme-toggle"
-        onClick={toggleTheme}
-        aria-label={themeToggleLabel}
-        title={themeToggleLabel}
-      >
-        {themeMode === 'light' ? 'Dark' : 'Light'}
-      </button>
+      {!hideFloatingThemeToggle && (
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          aria-label={themeToggleLabel}
+          title={themeToggleLabel}
+        >
+          {themeMode === 'light' ? 'Dark' : 'Light'}
+        </button>
+      )}
       {pageContent}
     </>
   );

@@ -31,7 +31,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [dobDay, setDobDay] = useState(initialDobParts.day);
   const [dobUnknown, setDobUnknown] = useState(!person.dob);
   const [tob, setTob] = useState(normalizeTraditionalHour(person.tob || ''));
-  const [dod, setDod] = useState(person.dod || '');
+  const initialDodParts = parsePartialDate(person.dod);
+  const [dodYear, setDodYear] = useState(initialDodParts.year);
+  const [dodMonth, setDodMonth] = useState(initialDodParts.month);
+  const [dodDay, setDodDay] = useState(initialDodParts.day);
   const [dodUnknown, setDodUnknown] = useState(!person.dod);
   const [showDeathFields, setShowDeathFields] = useState(Boolean(person.dod || person.tod));
   const birthLabelClickCountRef = useRef(0);
@@ -45,7 +48,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [customFields, setCustomFields] = useState<CustomField[]>(() => normalizeCustomFields(person.metadata?.customFields));
-  const dragStateRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const dragStateRef = useRef<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const cropperRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const skipClickRef = useRef(false);
@@ -60,7 +63,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setDobDay(nextDobParts.day);
     setDobUnknown(!person.dob);
     setTob(normalizeTraditionalHour(person.tob || ''));
-    setDod(person.dod || '');
+    const nextDodParts = parsePartialDate(person.dod);
+    setDodYear(nextDodParts.year);
+    setDodMonth(nextDodParts.month);
+    setDodDay(nextDodParts.day);
     setDodUnknown(!person.dod);
     setShowDeathFields(Boolean(person.dod || person.tod));
     birthLabelClickCountRef.current = 0;
@@ -138,6 +144,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   }, [avatarPreview]);
 
   const dob = composePartialDate({ year: dobYear, month: dobMonth, day: dobDay });
+  const dod = composePartialDate({ year: dodYear, month: dodMonth, day: dodDay });
 
   useEffect(() => {
     if (!dobDay) return;
@@ -146,6 +153,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
       setDobDay(nextDay);
     }
   }, [dobDay, dobMonth, dobYear]);
+
+  useEffect(() => {
+    if (!dodDay) return;
+    const nextDay = clampDay(dodYear, dodMonth, dodDay);
+    if (nextDay !== dodDay) {
+      setDodDay(nextDay);
+    }
+  }, [dodDay, dodMonth, dodYear]);
 
   const cropSize = 140;
   const baseZoom = useMemo(() => {
@@ -170,26 +185,18 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setOffset((prev) => clampOffset(prev));
   }, [effectiveZoom, clampOffset]);
 
+  const stopAvatarDrag = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    if (event && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragStateRef.current = null;
+  }, []);
+
   useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!dragStateRef.current) return;
-      const deltaX = event.clientX - dragStateRef.current.x;
-      const deltaY = event.clientY - dragStateRef.current.y;
-      setOffset(clampOffset({
-        x: dragStateRef.current.offsetX + deltaX,
-        y: dragStateRef.current.offsetY + deltaY
-      }));
-    };
-    const handlePointerUp = () => {
+    return () => {
       dragStateRef.current = null;
     };
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [clampOffset]);
+  }, []);
 
   const createCroppedAvatar = async () => {
     if (!avatarFile || !avatarImage) return null;
@@ -267,7 +274,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   }, [createCroppedAvatar, customFields, dob, dobUnknown, dod, dodUnknown, englishName, gender, name, onSubmit, person.id, person.metadata, removeAvatar, tob, tod]);
 
   const initialDob = person.dob ? (composePartialDate(parsePartialDate(person.dob)) || person.dob) : '';
-  const initialDod = person.dod || '';
+  const initialDod = person.dod ? (composePartialDate(parsePartialDate(person.dod)) || person.dod) : '';
   const initialTob = normalizeTraditionalHour(person.tob || '');
   const initialTod = normalizeTraditionalHour(person.tod || '');
   const initialEnglish = person.english_name || '';
@@ -352,7 +359,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const birthYear = Number.isFinite(birthYearParsed) && birthYearParsed >= 1 && birthYearParsed <= 9999
     ? birthYearParsed
     : null;
-  const deathYear = dod ? new Date(dod).getFullYear() : null;
+  const deathYearParsed = Number.parseInt(dodYear, 10);
+  const deathYear = Number.isFinite(deathYearParsed) && deathYearParsed >= 1 && deathYearParsed <= 9999
+    ? deathYearParsed
+    : null;
   const zodiac = birthYear ? getZodiacAnimal(birthYear) : '';
   const ganzhi = birthYear ? getGanzhiYear(birthYear) : '';
   const deathZodiac = deathYear ? getZodiacAnimal(deathYear) : '';
@@ -360,8 +370,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
   const monthNum = Number.parseInt(dobMonth, 10);
+  const deathMonthNum = Number.parseInt(dodMonth, 10);
+  const deathDayNum = Number.parseInt(dodDay, 10);
   const maxDobDay = birthYear && Number.isFinite(monthNum) && monthNum >= 1 && monthNum <= 12
     ? new Date(birthYear, monthNum, 0).getDate()
+    : 31;
+  const maxDodDay = deathYear && Number.isFinite(deathMonthNum) && deathMonthNum >= 1 && deathMonthNum <= 12
+    ? new Date(deathYear, deathMonthNum, 0).getDate()
     : 31;
   const adjustDobYear = (delta: number) => {
     const yearNum = Number.parseInt(dobYear, 10);
@@ -373,21 +388,28 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   };
   const calculateWesternAge = () => {
     if (!birthYear) return null;
-    const end = dod ? new Date(dod) : new Date();
-    if (Number.isNaN(end.getTime())) return null;
-    let age = end.getFullYear() - birthYear;
+    const hasDod = Boolean(deathYear);
+    const now = new Date();
+    let age = (deathYear ?? now.getFullYear()) - birthYear;
     const birthMonthNum = Number.parseInt(dobMonth, 10);
     const birthDayNum = Number.parseInt(dobDay, 10);
     if (Number.isFinite(birthMonthNum) && birthMonthNum >= 1 && birthMonthNum <= 12) {
-      const endMonth = end.getMonth() + 1;
-      if (endMonth < birthMonthNum) {
+      const endMonth = hasDod
+        ? (Number.isFinite(deathMonthNum) && deathMonthNum >= 1 && deathMonthNum <= 12 ? deathMonthNum : null)
+        : (now.getMonth() + 1);
+      const endDay = hasDod
+        ? (Number.isFinite(deathDayNum) && deathDayNum >= 1 && deathDayNum <= 31 ? deathDayNum : null)
+        : now.getDate();
+      if (endMonth !== null && endMonth < birthMonthNum) {
         age--;
       } else if (
-        endMonth === birthMonthNum
+        endMonth !== null
+        && endMonth === birthMonthNum
         && Number.isFinite(birthDayNum)
         && birthDayNum >= 1
         && birthDayNum <= 31
-        && end.getDate() < birthDayNum
+        && endDay !== null
+        && endDay < birthDayNum
       ) {
         age--;
       }
@@ -396,9 +418,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   };
   const calculateTraditionalAge = () => {
     if (!birthYear) return null;
-    const end = dod ? new Date(dod) : new Date();
-    if (Number.isNaN(end.getTime())) return null;
-    return end.getFullYear() - birthYear + 1;
+    return (deathYear ?? new Date().getFullYear()) - birthYear + 1;
   };
   const westernAge = calculateWesternAge();
   const traditionalAge = calculateTraditionalAge();
@@ -432,14 +452,31 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                 ref={cropperRef}
                 className={`avatar-cropper ${avatarPreview ? 'has-image' : ''} ${isDragging ? 'dragging' : ''}`}
                 onPointerDown={(event) => {
-                  if (!avatarImage) return;
+                  if (!avatarImage || event.button !== 0) return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
                   dragStateRef.current = {
+                    pointerId: event.pointerId,
                     x: event.clientX,
                     y: event.clientY,
                     offsetX: offset.x,
                     offsetY: offset.y
                   };
                 }}
+                onPointerMove={(event) => {
+                  const dragState = dragStateRef.current;
+                  if (!dragState || dragState.pointerId !== event.pointerId) return;
+                  event.preventDefault();
+                  const deltaX = event.clientX - dragState.x;
+                  const deltaY = event.clientY - dragState.y;
+                  setOffset(clampOffset({
+                    x: dragState.offsetX + deltaX,
+                    y: dragState.offsetY + deltaY
+                  }));
+                }}
+                onPointerUp={stopAvatarDrag}
+                onPointerCancel={stopAvatarDrag}
+                onLostPointerCapture={stopAvatarDrag}
                 onDragOver={(event) => {
                   event.preventDefault();
                   setIsDragging(true);
@@ -557,7 +594,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                     }
                   }}
                   disabled={dobUnknown}
-                  style={{ maxWidth: '6.5rem' }}
+                  className="date-year-input"
                 />
                 <select
                   value={dobMonth}
@@ -569,6 +606,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                     }
                   }}
                   disabled={dobUnknown || !dobYear}
+                  className="date-month-select"
                 >
                   <option value="">月(選填)</option>
                   {Array.from({ length: 12 }, (_, idx) => {
@@ -584,6 +622,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                   value={dobDay}
                   onChange={(e) => setDobDay(e.target.value)}
                   disabled={dobUnknown || !dobYear || !dobMonth}
+                  className="date-day-select"
                 >
                   <option value="">日(選填)</option>
                   {Array.from({ length: maxDobDay }, (_, idx) => {
@@ -614,7 +653,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                   +年
                 </button>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+              <label className="date-unknown-toggle">
                 <input
                   type="checkbox"
                   checked={dobUnknown}
@@ -656,20 +695,65 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                 <label>
                   歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
                 </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <input
-                    type="date"
-                    value={dod}
-                    onChange={(e) => {
-                      const nextDod = e.target.value;
-                      setDod(nextDod);
-                      if (!nextDod) {
-                        setTod('');
-                      }
-                    }}
-                    disabled={dodUnknown}
-                  />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+                <div className="date-input-row">
+                  <div className="date-input-main">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="年"
+                      value={dodYear}
+                      onChange={(e) => {
+                        const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setDodYear(nextYear);
+                        if (!nextYear) {
+                          setDodMonth('');
+                          setDodDay('');
+                          setTod('');
+                        }
+                      }}
+                      disabled={dodUnknown}
+                      className="date-year-input"
+                    />
+                    <select
+                      value={dodMonth}
+                      onChange={(e) => {
+                        const nextMonth = e.target.value;
+                        setDodMonth(nextMonth);
+                        if (!nextMonth) {
+                          setDodDay('');
+                        }
+                      }}
+                      disabled={dodUnknown || !dodYear}
+                      className="date-month-select"
+                    >
+                      <option value="">月(選填)</option>
+                      {Array.from({ length: 12 }, (_, idx) => {
+                        const value = String(idx + 1);
+                        return (
+                          <option key={value} value={value}>
+                            {value}月
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <select
+                      value={dodDay}
+                      onChange={(e) => setDodDay(e.target.value)}
+                      disabled={dodUnknown || !dodYear || !dodMonth}
+                      className="date-day-select"
+                    >
+                      <option value="">日(選填)</option>
+                      {Array.from({ length: maxDodDay }, (_, idx) => {
+                        const value = String(idx + 1);
+                        return (
+                          <option key={value} value={value}>
+                            {value}日
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  <label className="date-unknown-toggle">
                     <input
                       type="checkbox"
                       checked={dodUnknown}
@@ -677,7 +761,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                         const nextUnknown = e.target.checked;
                         setDodUnknown(nextUnknown);
                         if (nextUnknown) {
-                          setDod('');
+                          setDodYear('');
+                          setDodMonth('');
+                          setDodDay('');
                           setTod('');
                           setShowDeathFields(false);
                           birthLabelClickCountRef.current = 0;
@@ -695,7 +781,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
                 <select
                   value={tod}
                   onChange={(e) => setTod(e.target.value)}
-                  disabled={dodUnknown || !dod}
+                  disabled={dodUnknown || !dodYear}
                 >
                   <option value="">-</option>
                   {TRADITIONAL_HOURS.map((hour) => (
