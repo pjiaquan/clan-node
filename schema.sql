@@ -50,6 +50,55 @@ INSERT OR IGNORE INTO relationship_type_labels (type, label, description) VALUES
     ('sibling', '手足', '兄弟姐妹關係'),
     ('in_law', '姻親', '婚姻延伸關係');
 
+-- Kinship labels table: stores editable display labels for calculated titles
+CREATE TABLE IF NOT EXISTS kinship_labels (
+    default_title TEXT NOT NULL,
+    default_formal_title TEXT NOT NULL,
+    custom_title TEXT,
+    custom_formal_title TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (default_title, default_formal_title)
+);
+
+INSERT OR IGNORE INTO kinship_labels (
+    default_title, default_formal_title, custom_title, custom_formal_title, description
+) VALUES
+    ('我', '我', NULL, NULL, '自己'),
+    ('父親', '父親', NULL, NULL, '爸爸'),
+    ('母親', '母親', NULL, NULL, '媽媽'),
+    ('爺爺', '爺爺', NULL, NULL, '父系祖父'),
+    ('奶奶', '奶奶', NULL, NULL, '父系祖母'),
+    ('外公', '外公', NULL, NULL, '母系祖父'),
+    ('外婆', '外婆', NULL, NULL, '母系祖母'),
+    ('丈夫', '丈夫', NULL, NULL, '男性配偶稱呼'),
+    ('妻子', '妻子', NULL, NULL, '女性配偶稱呼'),
+    ('前夫', '前夫', NULL, NULL, '過往婚姻男性配偶'),
+    ('前妻', '前妻', NULL, NULL, '過往婚姻女性配偶'),
+    ('哥哥', '哥哥', NULL, NULL, '男性年長手足'),
+    ('弟弟', '弟弟', NULL, NULL, '男性年幼手足'),
+    ('姐姐', '姐姐', NULL, NULL, '女性年長手足'),
+    ('妹妹', '妹妹', NULL, NULL, '女性年幼手足'),
+    ('伯父', '伯父', NULL, NULL, '父親年長兄弟'),
+    ('叔叔', '叔叔', NULL, NULL, '父親年幼兄弟'),
+    ('姑姑', '姑姑', NULL, NULL, '父親姊妹'),
+    ('舅舅', '舅舅', NULL, NULL, '母親兄弟'),
+    ('阿姨', '阿姨', NULL, NULL, '母親姊妹'),
+    ('伯母', '伯母', NULL, NULL, '伯父配偶'),
+    ('嬸嬸', '嬸嬸', NULL, NULL, '叔叔配偶'),
+    ('姑丈', '姑丈', NULL, NULL, '姑姑配偶'),
+    ('舅媽', '舅媽', NULL, NULL, '舅舅配偶'),
+    ('姨丈', '姨丈', NULL, NULL, '阿姨配偶'),
+    ('兒子', '兒子', NULL, NULL, '男性子女'),
+    ('女兒', '女兒', NULL, NULL, '女性子女'),
+    ('媳婦', '媳婦', NULL, NULL, '兒子配偶'),
+    ('女婿', '女婿', NULL, NULL, '女兒配偶'),
+    ('孫子', '孫子', NULL, NULL, '子女的男性子女'),
+    ('孫女', '孫女', NULL, NULL, '子女的女性子女'),
+    ('外孫', '外孫', NULL, NULL, '外家第三代男性'),
+    ('外孫女', '外孫女', NULL, NULL, '外家第三代女性');
+
 -- Custom fields table: stores editable label/value pairs for each person
 CREATE TABLE IF NOT EXISTS person_custom_fields (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

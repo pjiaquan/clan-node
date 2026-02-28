@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { AppBindings, Person, Relationship } from './types';
 import { safeParse } from './utils';
 import { calculateKinship } from './kinship';
+import { loadKinshipLabelMap, resolveKinshipLabel, trackKinshipLabelDefaults } from './kinship_labels';
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
   // Get graph data centered on a person with kinship titles
@@ -77,21 +78,42 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         to_person_id: String(rel.to_person_id),
         type: String(rel.type)
       }));
+      const kinshipLabelMap = await loadKinshipLabelMap(c.env.DB);
+      const observedKinshipDefaults: Array<{ default_title: string; default_formal_title: string }> = [];
 
       // Calculate kinship titles for each person relative to center
       console.log('Calculating kinship titles...');
       const graphNodes = people.map((person: any) => {
         try {
           if (person.id === centerId) {
-        return { ...person, title: '我', formal_title: '我' };
+            const resolved = resolveKinshipLabel(kinshipLabelMap, '我', '我');
+            observedKinshipDefaults.push({
+              default_title: '我',
+              default_formal_title: '我',
+            });
+            return { ...person, title: resolved.title, formal_title: resolved.formalTitle };
           }
           const { title, formalTitle } = calculateKinship(centerId, person.id, kinshipRelationships, kinshipPeople, center as any);
-          return { ...person, title, formal_title: formalTitle };
+          observedKinshipDefaults.push({
+            default_title: title,
+            default_formal_title: formalTitle,
+          });
+          const resolved = resolveKinshipLabel(kinshipLabelMap, title, formalTitle);
+          return { ...person, title: resolved.title, formal_title: resolved.formalTitle };
         } catch (err) {
           console.error(`Error calculating title for person ${person.id}:`, err);
           return { ...person, title: 'Error' };
         }
       });
+
+      const sessionUser = c.get('sessionUser');
+      if (sessionUser?.role === 'admin') {
+        try {
+          await trackKinshipLabelDefaults(c.env.DB, observedKinshipDefaults);
+        } catch (trackError) {
+          console.warn('Failed to track kinship label defaults:', trackError);
+        }
+      }
 
       console.log('Graph data prepared successfully');
       return c.json({

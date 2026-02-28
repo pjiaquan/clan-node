@@ -8,7 +8,7 @@ import { SessionManagementPage } from './components/SessionManagementPage';
 import { NotificationManagementPage } from './components/NotificationManagementPage';
 import { AuditLogPage } from './components/AuditLogPage';
 import { GraphSettingsPage } from './components/GraphSettingsPage';
-import { RelationshipTypeManagementPage } from './components/RelationshipTypeManagementPage';
+import { KinshipLabelManagementPage } from './components/KinshipLabelManagementPage';
 import {
   DEFAULT_GRAPH_SETTINGS,
   loadGraphSettings,
@@ -17,7 +17,7 @@ import {
 } from './graphSettings';
 import './App.css';
 
-type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'relationshipNames' | 'settings';
+type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
 type ThemeMode = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'clan.theme.mode';
@@ -27,7 +27,7 @@ const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/sessions') return 'sessions';
   if (window.location.hash === '#/notifications') return 'notifications';
   if (window.location.hash === '#/audit-logs') return 'auditLogs';
-  if (window.location.hash === '#/relationship-names') return 'relationshipNames';
+  if (window.location.hash === '#/kinship-labels' || window.location.hash === '#/relationship-names') return 'kinshipLabels';
   if (window.location.hash === '#/settings') return 'settings';
   return 'graph';
 };
@@ -66,8 +66,8 @@ function App() {
           ? '#/notifications'
           : next === 'auditLogs'
             ? '#/audit-logs'
-            : next === 'relationshipNames'
-              ? '#/relationship-names'
+            : next === 'kinshipLabels'
+              ? '#/kinship-labels'
             : next === 'settings'
               ? '#/settings'
               : '#/graph';
@@ -168,7 +168,7 @@ function App() {
 
   useEffect(() => {
     if (!isAuthed) return;
-    if ((view === 'users' || view === 'notifications' || view === 'auditLogs' || view === 'relationshipNames') && authUser?.role !== 'admin') {
+    if ((view === 'users' || view === 'notifications' || view === 'auditLogs' || view === 'kinshipLabels') && authUser?.role !== 'admin') {
       navigateTo('graph');
     }
   }, [view, authUser, isAuthed, navigateTo]);
@@ -288,9 +288,9 @@ function App() {
       );
     }
 
-    if (view === 'relationshipNames' && authUser.role === 'admin') {
+    if (view === 'kinshipLabels' && authUser.role === 'admin') {
       return (
-        <RelationshipTypeManagementPage
+        <KinshipLabelManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
           onLogout={handleLogout}
@@ -319,7 +319,7 @@ function App() {
         onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
         onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
         onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
-        onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('relationshipNames') : undefined}
+        onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
         onManageSessions={() => navigateTo('sessions')}
         onOpenSettings={() => navigateTo('settings')}
         onLogout={handleLogout}

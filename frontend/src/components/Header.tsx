@@ -467,7 +467,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  關係名稱
+                  稱呼管理
                 </button>
               )}
               <button
@@ -700,8 +700,8 @@ export const Header: React.FC<HeaderProps> = ({
           )}
           {isAdmin && onManageRelationshipNames && (
             <li className="header-menu-item">
-              <button onClick={onManageRelationshipNames} className="btn-secondary btn-icon" aria-label="關係名稱">
-                <span className="btn-label">關係名稱</span>
+              <button onClick={onManageRelationshipNames} className="btn-secondary btn-icon" aria-label="稱呼管理">
+                <span className="btn-label">稱呼管理</span>
               </button>
             </li>
           )}

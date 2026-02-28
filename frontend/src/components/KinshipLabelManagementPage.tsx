@@ -1,24 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import type { AuthUser, RelationshipTypeKey, RelationshipTypeLabel } from '../types';
+import type { AuthUser, KinshipLabel } from '../types';
 
-type RelationshipTypeManagementPageProps = {
+type KinshipLabelManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
   onLogout: () => Promise<void> | void;
 };
 
 type RowDraft = {
-  label: string;
+  custom_title: string;
+  custom_formal_title: string;
   description: string;
-};
-
-const TYPE_CODE_LABEL: Record<RelationshipTypeKey, string> = {
-  parent_child: '親子',
-  spouse: '夫妻',
-  ex_spouse: '前配偶',
-  sibling: '手足',
-  in_law: '姻親',
 };
 
 const formatDate = (value?: string | null) => {
@@ -34,31 +27,49 @@ const formatDate = (value?: string | null) => {
   }).format(date);
 };
 
-const isDirty = (row: RelationshipTypeLabel, draft: RowDraft) => (
-  row.label !== draft.label || row.description !== draft.description
+const isDirty = (row: KinshipLabel, draft: RowDraft) => (
+  (row.custom_title ?? '') !== draft.custom_title
+  || (row.custom_formal_title ?? '') !== draft.custom_formal_title
+  || row.description !== draft.description
 );
 
-export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagementPageProps> = ({
+const currentTitleFrom = (row: KinshipLabel, draft: RowDraft) => (
+  draft.custom_title.trim() || row.default_title
+);
+
+const currentFormalTitleFrom = (row: KinshipLabel, draft: RowDraft) => (
+  draft.custom_formal_title.trim() || row.default_formal_title
+);
+
+export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProps> = ({
   currentUser,
   onBack,
   onLogout,
 }) => {
-  const [items, setItems] = useState<RelationshipTypeLabel[]>([]);
-  const [drafts, setDrafts] = useState<Record<RelationshipTypeKey, RowDraft>>({} as Record<RelationshipTypeKey, RowDraft>);
+  const [items, setItems] = useState<KinshipLabel[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
-  const [busyType, setBusyType] = useState<RelationshipTypeKey | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  const hydrateDrafts = useCallback((rows: RelationshipTypeLabel[]) => {
-    const next = {} as Record<RelationshipTypeKey, RowDraft>;
+  const makeKey = useCallback((row: Pick<KinshipLabel, 'default_title' | 'default_formal_title'>) => (
+    `${row.default_title}\u0001${row.default_formal_title}`
+  ), []);
+
+  const hydrateDrafts = useCallback((rows: KinshipLabel[]) => {
+    const next: Record<string, RowDraft> = {};
     for (const row of rows) {
-      next[row.type] = { label: row.label, description: row.description };
+      next[makeKey(row)] = {
+        custom_title: row.custom_title ?? '',
+        custom_formal_title: row.custom_formal_title ?? '',
+        description: row.description,
+      };
     }
     setDrafts(next);
-  }, []);
+  }, [makeKey]);
 
   const loadItems = useCallback(async (silent = false) => {
     try {
@@ -68,11 +79,11 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
         setLoading(true);
       }
       setError(null);
-      const rows = await api.fetchRelationshipTypeLabels();
+      const rows = await api.fetchKinshipLabels();
       setItems(rows);
       hydrateDrafts(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入關係名稱失敗');
+      setError(err instanceof Error ? err.message : '載入稱呼表失敗');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -83,43 +94,44 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
     void loadItems(false);
   }, [loadItems]);
 
-  const saveRow = useCallback(async (type: RelationshipTypeKey, payload: RowDraft) => {
-    const nextLabel = payload.label.trim();
-    const nextDescription = payload.description.trim();
-    if (!nextLabel) {
-      throw new Error('名稱不可為空白');
-    }
-    const updated = await api.updateRelationshipTypeLabel(type, {
-      label: nextLabel,
-      description: nextDescription,
+  const saveRow = useCallback(async (row: KinshipLabel, draft: RowDraft) => {
+    const updated = await api.updateKinshipLabel({
+      default_title: row.default_title,
+      default_formal_title: row.default_formal_title,
+      custom_title: draft.custom_title.trim() || null,
+      custom_formal_title: draft.custom_formal_title.trim() || null,
+      description: draft.description.trim(),
     });
-    setItems((prev) => prev.map((row) => (row.type === updated.type ? updated : row)));
+    const rowKey = makeKey(updated);
+    setItems((prev) => prev.map((item) => (makeKey(item) === rowKey ? updated : item)));
     setDrafts((prev) => ({
       ...prev,
-      [updated.type]: {
-        label: updated.label,
+      [rowKey]: {
+        custom_title: updated.custom_title ?? '',
+        custom_formal_title: updated.custom_formal_title ?? '',
         description: updated.description,
       }
     }));
-  }, []);
+  }, [makeKey]);
 
-  const handleSaveOne = useCallback(async (row: RelationshipTypeLabel) => {
-    const draft = drafts[row.type];
+  const handleSaveOne = useCallback(async (row: KinshipLabel) => {
+    const rowKey = makeKey(row);
+    const draft = drafts[rowKey];
     if (!draft || !isDirty(row, draft)) return;
-    setBusyType(row.type);
+    setBusyKey(rowKey);
     setError(null);
     try {
-      await saveRow(row.type, draft);
+      await saveRow(row, draft);
     } catch (err) {
       setError(err instanceof Error ? err.message : '儲存失敗');
     } finally {
-      setBusyType(null);
+      setBusyKey(null);
     }
-  }, [drafts, saveRow]);
+  }, [drafts, makeKey, saveRow]);
 
   const handleSaveAll = useCallback(async () => {
     const dirtyRows = items.filter((row) => {
-      const draft = drafts[row.type];
+      const draft = drafts[makeKey(row)];
       return draft ? isDirty(row, draft) : false;
     });
     if (!dirtyRows.length) return;
@@ -128,41 +140,43 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
     setError(null);
     try {
       for (const row of dirtyRows) {
-        const draft = drafts[row.type];
+        const draft = drafts[makeKey(row)];
         if (!draft) continue;
-        await saveRow(row.type, draft);
+        await saveRow(row, draft);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '批次儲存失敗');
     } finally {
       setSavingAll(false);
     }
-  }, [drafts, items, saveRow]);
+  }, [drafts, items, makeKey, saveRow]);
 
-  const handleResetRow = useCallback(async (row: RelationshipTypeLabel) => {
-    const confirmed = window.confirm(`確定將「${TYPE_CODE_LABEL[row.type]}」重設為預設名稱？`);
+  const handleResetRow = useCallback(async (row: KinshipLabel) => {
+    const confirmed = window.confirm(`確定重設「${row.default_title}」這筆稱呼？`);
     if (!confirmed) return;
-    setBusyType(row.type);
+    const rowKey = makeKey(row);
+    setBusyKey(rowKey);
     setError(null);
     try {
-      await saveRow(row.type, {
-        label: row.default_label,
-        description: row.default_description,
+      await saveRow(row, {
+        custom_title: '',
+        custom_formal_title: '',
+        description: row.description,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : '重設失敗');
     } finally {
-      setBusyType(null);
+      setBusyKey(null);
     }
-  }, [saveRow]);
+  }, [makeKey, saveRow]);
 
   const handleResetAll = useCallback(async () => {
-    const confirmed = window.confirm('確定將全部關係名稱重設為預設值？');
+    const confirmed = window.confirm('確定將全部稱呼重設為預設值？');
     if (!confirmed) return;
     setSavingAll(true);
     setError(null);
     try {
-      const result = await api.resetRelationshipTypeLabels();
+      const result = await api.resetKinshipLabels();
       setItems(result.items);
       hydrateDrafts(result.items);
     } catch (err) {
@@ -174,10 +188,10 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
 
   const stats = useMemo(() => {
     const customized = items.filter((row) => (
-      row.label !== row.default_label || row.description !== row.default_description
+      row.custom_title || row.custom_formal_title
     )).length;
     const dirty = items.filter((row) => {
-      const draft = drafts[row.type];
+      const draft = drafts[makeKey(row)];
       return draft ? isDirty(row, draft) : false;
     }).length;
     return {
@@ -185,19 +199,25 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
       customized,
       dirty,
     };
-  }, [drafts, items]);
+  }, [drafts, items, makeKey]);
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return items;
     return items.filter((row) => {
-      const draft = drafts[row.type] ?? { label: row.label, description: row.description };
-      return row.type.toLowerCase().includes(keyword)
-        || TYPE_CODE_LABEL[row.type].toLowerCase().includes(keyword)
-        || draft.label.toLowerCase().includes(keyword)
+      const rowKey = makeKey(row);
+      const draft = drafts[rowKey] ?? {
+        custom_title: row.custom_title ?? '',
+        custom_formal_title: row.custom_formal_title ?? '',
+        description: row.description,
+      };
+      return row.default_title.toLowerCase().includes(keyword)
+        || row.default_formal_title.toLowerCase().includes(keyword)
+        || draft.custom_title.toLowerCase().includes(keyword)
+        || draft.custom_formal_title.toLowerCase().includes(keyword)
         || draft.description.toLowerCase().includes(keyword);
     });
-  }, [drafts, items, search]);
+  }, [drafts, items, makeKey, search]);
 
   return (
     <div className="notice-page relationship-name-page">
@@ -207,8 +227,8 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
             返回族譜
           </button>
           <div>
-            <h1>親戚關係名稱管理</h1>
-            <p>可調整關係名稱，立即套用到圖譜操作按鈕</p>
+            <h1>稱呼管理表</h1>
+            <p>可編輯節點稱呼（稱呼 / 正式稱呼），儲存後即套用</p>
           </div>
         </div>
         <div className="notice-header-right">
@@ -222,7 +242,7 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
       <main className="notice-main relationship-name-main">
         <section className="notice-stats">
           <article className="notice-stat-card">
-            <span>總關係類型</span>
+            <span>總稱呼條目</span>
             <strong>{stats.total}</strong>
           </article>
           <article className="notice-stat-card">
@@ -240,7 +260,7 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
             <input
               type="search"
               className="relationship-name-search"
-              placeholder="搜尋代碼、名稱、描述"
+              placeholder="搜尋稱呼、正式稱呼或說明"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -273,74 +293,106 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
           {error && <div className="notice-error">{error}</div>}
 
           {loading ? (
-            <div className="notice-loading">載入關係名稱中...</div>
+            <div className="notice-loading">載入稱呼中...</div>
           ) : (
             <div className="notice-table-wrap">
               <table className="notice-table relationship-name-table">
                 <thead>
                   <tr>
-                    <th>代碼</th>
-                    <th>目前名稱</th>
-                    <th>描述</th>
-                    <th>預設</th>
+                    <th>預設稱呼</th>
+                    <th>預設正式稱呼</th>
+                    <th>目前稱呼</th>
+                    <th>目前正式稱呼</th>
+                    <th>自訂稱呼</th>
+                    <th>自訂正式稱呼</th>
+                    <th>說明</th>
                     <th>更新時間</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.map((row) => {
-                    const draft = drafts[row.type] ?? { label: row.label, description: row.description };
+                    const rowKey = makeKey(row);
+                    const draft = drafts[rowKey] ?? {
+                      custom_title: row.custom_title ?? '',
+                      custom_formal_title: row.custom_formal_title ?? '',
+                      description: row.description,
+                    };
                     const rowDirty = isDirty(row, draft);
-                    const rowBusy = busyType === row.type || savingAll;
+                    const rowBusy = busyKey === rowKey || savingAll;
                     return (
-                      <tr key={row.type}>
-                        <td>
-                          <div className="relationship-name-code">
-                            <strong>{TYPE_CODE_LABEL[row.type]}</strong>
-                            <span>{row.type}</span>
-                          </div>
-                        </td>
+                      <tr key={rowKey}>
+                        <td>{row.default_title}</td>
+                        <td>{row.default_formal_title}</td>
+                        <td>{currentTitleFrom(row, draft)}</td>
+                        <td>{currentFormalTitleFrom(row, draft)}</td>
                         <td>
                           <input
                             className="relationship-name-input"
-                            value={draft.label}
+                            value={draft.custom_title}
                             maxLength={24}
                             onChange={(event) => {
                               const value = event.target.value;
                               setDrafts((prev) => ({
                                 ...prev,
-                                [row.type]: {
-                                  ...(prev[row.type] ?? { label: row.label, description: row.description }),
-                                  label: value,
+                                [rowKey]: {
+                                  ...(prev[rowKey] ?? {
+                                    custom_title: row.custom_title ?? '',
+                                    custom_formal_title: row.custom_formal_title ?? '',
+                                    description: row.description,
+                                  }),
+                                  custom_title: value,
                                 }
                               }));
                             }}
                             disabled={rowBusy}
+                            placeholder="留白即使用預設"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="relationship-name-input"
+                            value={draft.custom_formal_title}
+                            maxLength={24}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [rowKey]: {
+                                  ...(prev[rowKey] ?? {
+                                    custom_title: row.custom_title ?? '',
+                                    custom_formal_title: row.custom_formal_title ?? '',
+                                    description: row.description,
+                                  }),
+                                  custom_formal_title: value,
+                                }
+                              }));
+                            }}
+                            disabled={rowBusy}
+                            placeholder="留白即使用預設"
                           />
                         </td>
                         <td>
                           <input
                             className="relationship-name-input relationship-name-description"
                             value={draft.description}
-                            maxLength={80}
+                            maxLength={120}
                             onChange={(event) => {
                               const value = event.target.value;
                               setDrafts((prev) => ({
                                 ...prev,
-                                [row.type]: {
-                                  ...(prev[row.type] ?? { label: row.label, description: row.description }),
+                                [rowKey]: {
+                                  ...(prev[rowKey] ?? {
+                                    custom_title: row.custom_title ?? '',
+                                    custom_formal_title: row.custom_formal_title ?? '',
+                                    description: row.description,
+                                  }),
                                   description: value,
                                 }
                               }));
                             }}
                             disabled={rowBusy}
                           />
-                        </td>
-                        <td>
-                          <div className="relationship-name-default">
-                            <strong>{row.default_label}</strong>
-                            <span>{row.default_description}</span>
-                          </div>
                         </td>
                         <td>{formatDate(row.updated_at)}</td>
                         <td>
@@ -368,7 +420,7 @@ export const RelationshipTypeManagementPage: React.FC<RelationshipTypeManagement
                   })}
                   {filteredItems.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="notice-empty">沒有符合條件的關係名稱</td>
+                      <td colSpan={9} className="notice-empty">沒有符合條件的稱呼</td>
                     </tr>
                   )}
                 </tbody>

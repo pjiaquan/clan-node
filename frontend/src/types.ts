@@ -42,6 +42,16 @@ export interface RelationshipTypeLabel {
   updated_at: string | null;
 }
 
+export interface KinshipLabel {
+  default_title: string;
+  default_formal_title: string;
+  custom_title: string | null;
+  custom_formal_title: string | null;
+  description: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface GraphData {
   center: string;
   nodes: Person[];
