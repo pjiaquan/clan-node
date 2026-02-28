@@ -761,6 +761,41 @@ function pathToTitle(
     return '從伯叔/從姑';
   }
 
+  // Parent's in-law's sibling's child's spouse (父/母 的 姻親 的 手足 的 子/女 的 夫妻)
+  if (
+    pathStr === 'up-inlaw-sibling-down-spouse'
+    || pathStr === 'up-spouse-up-down-down-spouse'
+    || pathStr === 'up-spouse-sibling-down-spouse'
+  ) {
+    const parent = getPerson(nodePath[1]);
+    const cousin = getPerson(nodePath[nodePath.length - 2]);
+    return getCousinInLawTitle(parent, cousin);
+  }
+
+  // Parent's in-law's sibling's child's spouse's child
+  // (父/母 的 姻親 的 手足 的 子/女 的 夫妻 的 子/女)
+  if (
+    pathStr === 'up-inlaw-sibling-down-spouse-down'
+    || pathStr === 'up-spouse-up-down-down-spouse-down'
+    || pathStr === 'up-spouse-sibling-down-spouse-down'
+  ) {
+    if (target.gender === 'M') return '姻親表親之子';
+    if (target.gender === 'F') return '姻親表親之女';
+    return '姻親表親之子/女';
+  }
+
+  // Parent's in-law's sibling's child's spouse's grandchild
+  // (父/母 的 姻親 的 手足 的 子/女 的 夫妻 的 子/女 的 子/女)
+  if (
+    pathStr === 'up-inlaw-sibling-down-spouse-down-down'
+    || pathStr === 'up-spouse-up-down-down-spouse-down-down'
+    || pathStr === 'up-spouse-sibling-down-spouse-down-down'
+  ) {
+    if (target.gender === 'M') return '姻親表親孫輩(男)';
+    if (target.gender === 'F') return '姻親表親孫輩(女)';
+    return '姻親表親孫輩';
+  }
+
   // In-law's sibling's child (姻親 的 手足 的 子/女)
   if (pathStr === 'inlaw-sibling-down') {
     return '姻親的子女';

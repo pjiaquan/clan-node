@@ -1,3 +1,7 @@
+:root {
+  --header-control-height: 2.35rem;
+}
+
 .app {
   display: flex;
   flex-direction: column;
@@ -83,6 +87,11 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.3);
+  min-height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .user-admin-main {
@@ -297,6 +306,11 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.3);
+  min-height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .session-main {
@@ -491,6 +505,11 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   border: 1px solid rgba(255, 255, 255, 0.28);
+  min-height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .notice-main {
@@ -551,6 +570,11 @@
   background: #f8fafc;
   color: #1e293b;
   box-shadow: none;
+  min-height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
 }
 
 .notice-btn:hover {
@@ -653,15 +677,56 @@
 }
 
 .relationship-name-page {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: linear-gradient(160deg, #f0fdf4 0%, #f8fafc 44%, #ffffff 100%);
 }
 
 .relationship-name-header {
   background: linear-gradient(135deg, #047857 0%, #0f172a 100%);
+  min-height: 4.5rem;
+}
+
+.relationship-name-header .notice-header-left {
+  min-height: 3rem;
+  align-items: center;
+}
+
+.relationship-name-header .notice-header-left > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 2.25rem;
+  gap: 0.05rem;
+}
+
+.relationship-name-header .notice-header-left h1,
+.relationship-name-header .notice-header-left p {
+  text-align: center;
+}
+
+.relationship-name-header .notice-header-left p {
+  margin: 0;
+}
+
+.relationship-name-header .notice-header-right {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+}
+
+.relationship-name-header .notice-user-chip,
+.relationship-name-header .notice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .relationship-name-main {
-  width: min(1220px, calc(100vw - 2rem));
+  width: min(1460px, calc(100vw - 2rem));
 }
 
 .relationship-name-toolbar {
@@ -687,7 +752,7 @@
 }
 
 .relationship-name-table {
-  min-width: 1120px;
+  min-width: 1360px;
 }
 
 .relationship-name-code {
@@ -798,6 +863,11 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.3);
+  min-height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .graph-settings-main {
@@ -1054,6 +1124,7 @@
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .mobile-visible {
@@ -1205,6 +1276,22 @@
   align-items: center;
 }
 
+.header .btn-primary,
+.header .btn-secondary,
+.header-profile-btn {
+  min-height: var(--header-control-height);
+  height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header .btn-label,
+.header-user span {
+  display: inline-flex;
+  align-items: center;
+}
+
 .header-notice-btn {
   position: relative;
 }
@@ -1249,6 +1336,9 @@
 .readonly-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-height: var(--header-control-height);
+  height: var(--header-control-height);
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
   font-size: 0.75rem;
@@ -2437,6 +2527,8 @@ button:disabled:hover {
   top: 0.9rem;
   right: 0.9rem;
   min-width: 5.25rem;
+  min-height: var(--header-control-height);
+  height: var(--header-control-height);
   border-radius: 999px;
   border: 1px solid var(--theme-toggle-border);
   background: var(--theme-toggle-bg);
@@ -2444,12 +2536,42 @@ button:disabled:hover {
   box-shadow: var(--app-shadow);
   backdrop-filter: blur(8px);
   font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   z-index: 2500;
+}
+
+.user-admin-header-right .user-admin-btn,
+.session-header-right .session-btn,
+.notice-header-right .notice-btn,
+.graph-settings-header-right .graph-settings-btn,
+.notice-header-right .notice-user-chip,
+.session-header-right .session-user-chip,
+.user-admin-header-right .user-admin-current-user,
+.graph-settings-header-right .graph-settings-user-chip {
+  min-height: var(--header-control-height);
+  height: var(--header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .theme-toggle:hover {
   transform: translateY(-1px);
   filter: brightness(1.03);
+}
+
+@media (min-width: 641px) {
+  .header,
+  .user-admin-header,
+  .session-header,
+  .notice-header,
+  .graph-settings-header {
+    padding-right: 7.6rem;
+  }
 }
 
 :root[data-theme='dark'] .app,
@@ -2533,6 +2655,58 @@ button:disabled:hover {
   color: var(--app-text);
 }
 
+:root[data-theme='dark'] .relationship-name-page .notice-table th {
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .relationship-name-page .notice-table td {
+  color: #e6edf7;
+}
+
+:root[data-theme='dark'] .relationship-name-page .relationship-name-code span,
+:root[data-theme='dark'] .relationship-name-page .relationship-name-default span {
+  color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .relationship-name-page .relationship-name-input::placeholder,
+:root[data-theme='dark'] .relationship-name-page .relationship-name-search::placeholder {
+  color: #cbd5e1;
+  opacity: 0.9;
+}
+
+:root[data-theme='dark'] .relationship-name-header .notice-header-left h1 {
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .relationship-name-header .notice-header-left p {
+  color: #e2e8f0;
+  opacity: 0.95;
+}
+
+:root[data-theme='dark'] .notice-btn.secondary {
+  background: rgba(30, 41, 59, 0.86);
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .notice-btn.secondary:hover {
+  background: rgba(51, 65, 85, 0.98);
+  color: #ffffff;
+}
+
+:root[data-theme='dark'] .notice-btn.danger {
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.72) 0%, rgba(127, 29, 29, 0.95) 100%);
+  border-color: rgba(248, 113, 113, 0.75);
+  color: #fff1f2;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme='dark'] .notice-btn.danger:hover {
+  background: linear-gradient(180deg, rgba(153, 27, 27, 0.85) 0%, rgba(153, 27, 27, 1) 100%);
+  border-color: rgba(252, 165, 165, 0.88);
+  color: #ffffff;
+}
+
 :root[data-theme='dark'] .relationship-name-code strong,
 :root[data-theme='dark'] .relationship-name-default strong {
   color: var(--app-text);
@@ -2571,6 +2745,23 @@ button:disabled:hover {
 :root[data-theme='dark'] .notice-btn,
 :root[data-theme='dark'] .graph-settings-btn {
   color: var(--app-text);
+}
+
+:root[data-theme='dark'] .btn-secondary {
+  background: rgba(15, 23, 42, 0.68) !important;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  color: #f8fafc !important;
+}
+
+:root[data-theme='dark'] .btn-secondary:hover {
+  background: rgba(30, 41, 59, 0.9) !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='dark'] .btn-primary {
+  background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%) !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(226, 232, 240, 0.7);
 }
 
 :root[data-theme='dark'] .header-action-item:hover,
