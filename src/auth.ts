@@ -48,6 +48,26 @@ type SessionSchemaSupport = {
 
 let sessionSchemaSupportCache: SessionSchemaSupport | null = null;
 
+const addSessionColumnIfMissing = async (
+  db: D1Database,
+  existing: Set<string>,
+  column: string,
+  ddl: string
+) => {
+  if (existing.has(column)) return;
+  try {
+    await db.prepare(`ALTER TABLE sessions ADD COLUMN ${ddl}`).run();
+    existing.add(column);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('duplicate column name')) {
+      existing.add(column);
+      return;
+    }
+    throw error;
+  }
+};
+
 const getSessionSchemaSupport = async (db: D1Database): Promise<SessionSchemaSupport> => {
   if (sessionSchemaSupportCache) return sessionSchemaSupportCache;
   const { results } = await db.prepare("PRAGMA table_info('sessions')").all();
@@ -56,6 +76,10 @@ const getSessionSchemaSupport = async (db: D1Database): Promise<SessionSchemaSup
       .map((row) => (row as any).name as string)
       .filter(Boolean)
   );
+  // Self-heal old databases created before session metadata fields existed.
+  await addSessionColumnIfMissing(db, names, 'user_agent', 'user_agent TEXT');
+  await addSessionColumnIfMissing(db, names, 'ip_address', 'ip_address TEXT');
+  await addSessionColumnIfMissing(db, names, 'last_seen_at', 'last_seen_at TEXT');
   sessionSchemaSupportCache = {
     hasUserAgent: names.has('user_agent'),
     hasIpAddress: names.has('ip_address'),
@@ -158,13 +182,27 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
 
   try {
     const schema = await getSessionSchemaSupport(c.env.DB);
+    const updates: string[] = [];
+    const values: Array<string | null> = [];
     if (schema.hasLastSeenAt) {
+      updates.push('last_seen_at = ?');
+      values.push(new Date().toISOString());
+    }
+    if (schema.hasUserAgent) {
+      updates.push('user_agent = COALESCE(user_agent, ?)');
+      values.push(getRequestUserAgent(c));
+    }
+    if (schema.hasIpAddress) {
+      updates.push('ip_address = COALESCE(ip_address, ?)');
+      values.push(getRequestIpAddress(c));
+    }
+    if (updates.length > 0) {
       await c.env.DB.prepare(
-        'UPDATE sessions SET last_seen_at = ? WHERE id = ?'
-      ).bind(new Date().toISOString(), sessionUser.sessionId).run();
+        `UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`
+      ).bind(...values, sessionUser.sessionId).run();
     }
   } catch (error) {
-    console.warn('Failed to update session last_seen_at:', error);
+    console.warn('Failed to update session metadata:', error);
   }
 
   return next();

@@ -105,6 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const desktopMenuRef = useRef<HTMLDivElement | null>(null);
   const searchBoxRef = useRef<HTMLFormElement | null>(null);
@@ -188,6 +189,42 @@ export const Header: React.FC<HeaderProps> = ({
       document.removeEventListener('touchstart', handleOutsideClick);
     };
   }, [desktopMenuOpen]);
+
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!actionMenuRef.current || !target) return;
+      if (!actionMenuRef.current.contains(target)) {
+        setActionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [actionMenuOpen]);
+
+  useEffect(() => {
+    const closeMenusOnBlur = () => {
+      setActionMenuOpen(false);
+      setMobileMenuOpen(false);
+      setDesktopMenuOpen(false);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        closeMenusOnBlur();
+      }
+    };
+    window.addEventListener('blur', closeMenusOnBlur);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('blur', closeMenusOnBlur);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     if (!mobileOptions.length) return;
@@ -543,7 +580,7 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
         {hasSelection && (
-          <div className="header-action-menu desktop-visible">
+          <div className="header-action-menu desktop-visible" ref={actionMenuRef}>
             <button
               className="btn-secondary btn-icon icon-only-btn"
               type="button"

@@ -290,18 +290,21 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     <div className="graph-settings-page">
       <header className="graph-settings-header">
         <div className="graph-settings-header-left">
-          <button type="button" className="graph-settings-btn ghost" onClick={handleBack}>
-            返回族谱
+          <button type="button" className="graph-settings-btn ghost page-header-icon-btn" onClick={handleBack} aria-label="返回族譜" title="返回族譜">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
-          <div>
-            <h1>图形设置</h1>
-            <p>保存后将自动应用到节点拖拽、吸附和自动连线</p>
-          </div>
+          <h1>图形设置</h1>
         </div>
         <div className="graph-settings-header-right">
           <span className="graph-settings-user-chip">{currentUser.username}</span>
-          <button type="button" className="graph-settings-btn ghost" onClick={onLogout}>
-            登出
+          <button type="button" className="graph-settings-btn ghost page-header-icon-btn" onClick={onLogout} aria-label="登出" title="登出">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 7h-4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path d="M16 12H9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path d="M13 9l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
       </header>
