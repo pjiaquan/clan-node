@@ -935,6 +935,30 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
 }
 
+.graph-settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.7rem 0.75rem;
+}
+
+.graph-settings-toggle input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1rem;
+}
+
+.graph-settings-toggle small {
+  display: block;
+  margin-top: 0.28rem;
+  color: #64748b;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
 .graph-settings-actions {
   display: flex;
   justify-content: flex-end;
@@ -1073,6 +1097,49 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.avatar-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 0.5rem;
+  width: min(360px, 100%);
+}
+
+.avatar-gallery-item {
+  border: 1px solid #dbe3f1;
+  border-radius: 12px;
+  padding: 0.35rem;
+  background: #f8fafc;
+}
+
+.avatar-gallery-item.is-primary {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.avatar-gallery-item.is-deleted {
+  opacity: 0.55;
+}
+
+.avatar-gallery-item img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+.avatar-gallery-actions {
+  margin-top: 0.35rem;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.avatar-gallery-actions button {
+  flex: 1;
+  font-size: 0.68rem;
+  padding: 0.28rem 0.35rem;
 }
 
 .avatar-actions .btn-danger {
@@ -1450,7 +1517,8 @@ button:disabled:hover {
 .person-node {
   padding: 0;
   width: 132px;
-  height: 124px;
+  min-height: 124px;
+  height: auto;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1624,6 +1692,25 @@ button:disabled:hover {
   color: #1e293b;
   font-size: 0.95rem;
   min-height: 1.4rem;
+}
+
+.node-meta {
+  min-height: 1.05rem;
+  padding: 0 0.48rem 0.1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.28rem;
+  flex-wrap: wrap;
+}
+
+.node-meta-chip {
+  font-size: 0.64rem;
+  line-height: 1.2;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  color: #334155;
+  background: #e2e8f0;
 }
 
 .node-name-text {
@@ -2684,7 +2771,8 @@ button:disabled:hover {
 :root[data-theme='dark'] .user-admin-stat-card,
 :root[data-theme='dark'] .session-stat-card,
 :root[data-theme='dark'] .notice-stat-card,
-:root[data-theme='dark'] .graph-settings-field {
+:root[data-theme='dark'] .graph-settings-field,
+:root[data-theme='dark'] .graph-settings-toggle {
   background: var(--app-surface);
   border-color: var(--app-border);
   box-shadow: none;
@@ -2692,6 +2780,15 @@ button:disabled:hover {
 
 :root[data-theme='dark'] .graph-settings-field {
   background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] .graph-settings-toggle {
+  background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] .node-meta-chip {
+  background: rgba(148, 163, 184, 0.18);
+  color: #dbe7f8;
 }
 
 :root[data-theme='dark'] .user-admin-table th,

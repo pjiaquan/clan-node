@@ -1,4 +1,5 @@
 import type {
+  Avatar,
   AuditLogItem,
   AuthSession,
   AuthUser,
@@ -78,11 +79,23 @@ export const api = {
     return res.json();
   },
 
-  createPerson: async (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string, metadata?: any, id?: string, avatar_url?: string): Promise<Person> => {
+  createPerson: async (
+    name: string,
+    english_name: string | undefined,
+    gender: 'M' | 'F' | 'O',
+    dob?: string,
+    dod?: string,
+    tob?: string,
+    tod?: string,
+    blood_type?: string,
+    metadata?: any,
+    id?: string,
+    avatar_url?: string
+  ): Promise<Person> => {
     const res = await fetchWithAuth(`${API_BASE}/api/people`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata }),
+      body: JSON.stringify({ id, name, english_name, gender, dob, dod, tob, tod, blood_type, avatar_url, metadata }),
     });
     return res.json();
   },
@@ -97,14 +110,65 @@ export const api = {
   },
 
   uploadAvatar: async (id: string, file: File): Promise<{ avatar_url: string }> => {
+    const uploaded = await api.uploadPersonAvatar(id, file, { setPrimary: true });
+    return { avatar_url: uploaded.avatar_url || '' };
+  },
+
+  fetchPersonAvatars: async (id: string): Promise<{ person_id: string; avatar_url: string | null; avatars: Avatar[] }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/people/${id}/avatars`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  uploadPersonAvatar: async (
+    id: string,
+    file: File,
+    options?: { setPrimary?: boolean }
+  ): Promise<{ avatar_url: string | null; avatars: Avatar[]; avatar: Avatar | null }> => {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetchWithAuth(`${API_BASE}/api/people/${id}/avatar`, {
+    if (options?.setPrimary !== undefined) {
+      formData.append('set_primary', options.setPrimary ? '1' : '0');
+    }
+    const res = await fetchWithAuth(`${API_BASE}/api/people/${id}/avatars`, {
       method: 'POST',
       body: formData,
     });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  updatePersonAvatar: async (
+    id: string,
+    avatarId: string,
+    updates: { is_primary?: boolean; sort_order?: number }
+  ): Promise<{ avatar_url: string | null; avatars: Avatar[]; avatar: Avatar | null }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/people/${id}/avatars/${avatarId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  deletePersonAvatar: async (
+    id: string,
+    avatarId: string
+  ): Promise<{ success: boolean; avatar_id: string; avatar_url: string | null; avatars: Avatar[] }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/people/${id}/avatars/${avatarId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
     }
     return res.json();
   },

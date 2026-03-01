@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
@@ -11,6 +11,17 @@ type UploadFile = Blob & {
   type: string;
   stream: () => ReadableStream;
   arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
+type PersonAvatar = {
+  id: string;
+  person_id: string;
+  avatar_url: string;
+  storage_key: string | null;
+  is_primary: boolean;
+  sort_order: number;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 const isUploadFile = (value: unknown): value is UploadFile => (
@@ -60,6 +71,152 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     'image/gif': 'gif'
   };
 
+  const avatarSelectSql = `
+    SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
+    FROM person_avatars
+  `;
+
+  const normalizeAvatar = (row: any): PersonAvatar => ({
+    id: String(row.id),
+    person_id: String(row.person_id),
+    avatar_url: String(row.avatar_url),
+    storage_key: row.storage_key ? String(row.storage_key) : null,
+    is_primary: Number(row.is_primary) === 1,
+    sort_order: Number(row.sort_order ?? 0),
+    created_at: row.created_at ? String(row.created_at) : null,
+    updated_at: row.updated_at ? String(row.updated_at) : null
+  });
+
+  const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
+    if (!avatarUrl) return null;
+    if (!avatarUrl.startsWith('/api/avatars/')) return null;
+    return avatarUrl.replace('/api/avatars/', '');
+  };
+
+  const loadAvatarMap = async (db: Env['DB']) => {
+    const { results } = await db.prepare(
+      `${avatarSelectSql} ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
+    ).all();
+    const map = new Map<string, PersonAvatar[]>();
+    results.forEach((row: any) => {
+      const avatar = normalizeAvatar(row);
+      const list = map.get(avatar.person_id) || [];
+      list.push(avatar);
+      map.set(avatar.person_id, list);
+    });
+    return map;
+  };
+
+  const loadPersonAvatars = async (db: Env['DB'], personId: string) => {
+    const { results } = await db.prepare(
+      `${avatarSelectSql} WHERE person_id = ? ORDER BY is_primary DESC, sort_order ASC, created_at ASC`
+    ).bind(personId).all();
+    return results.map((row) => normalizeAvatar(row));
+  };
+
+  const resolvePrimaryAvatar = (avatars: PersonAvatar[]) => (
+    avatars.find((avatar) => avatar.is_primary) || avatars[0] || null
+  );
+
+  const syncPrimaryAvatar = async (
+    db: Env['DB'],
+    personId: string,
+    now: string,
+    preferredAvatarId?: string
+  ) => {
+    const avatars = await loadPersonAvatars(db, personId);
+    if (avatars.length === 0) {
+      await db.prepare(
+        'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
+      ).bind(null, now, personId).run();
+      return { primary: null as PersonAvatar | null, avatars };
+    }
+
+    const preferred = preferredAvatarId
+      ? avatars.find((avatar) => avatar.id === preferredAvatarId)
+      : null;
+    const primary = preferred || resolvePrimaryAvatar(avatars) || avatars[0];
+
+    await db.prepare(
+      `UPDATE person_avatars
+       SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END,
+           updated_at = CASE WHEN id = ? THEN ? ELSE updated_at END
+       WHERE person_id = ?`
+    ).bind(primary.id, primary.id, now, personId).run();
+
+    await db.prepare(
+      'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
+    ).bind(primary.avatar_url, now, personId).run();
+
+    const synced = await loadPersonAvatars(db, personId);
+    return {
+      primary: resolvePrimaryAvatar(synced),
+      avatars: synced
+    };
+  };
+
+  const appendAvatar = async (
+    db: Env['DB'],
+    personId: string,
+    avatarUrl: string,
+    storageKey: string | null,
+    options?: { now?: string; isPrimary?: boolean; sortOrder?: number }
+  ) => {
+    const now = options?.now || new Date().toISOString();
+    const avatarId = crypto.randomUUID();
+    const isPrimary = options?.isPrimary !== false;
+
+    let sortOrder = options?.sortOrder;
+    if (sortOrder === undefined) {
+      const row = await db.prepare(
+        'SELECT COALESCE(MAX(sort_order), -1) AS max_sort FROM person_avatars WHERE person_id = ?'
+      ).bind(personId).first();
+      sortOrder = Number((row as any)?.max_sort ?? -1) + 1;
+    }
+
+    await db.prepare(
+      `INSERT INTO person_avatars (
+        id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      avatarId,
+      personId,
+      avatarUrl,
+      storageKey,
+      isPrimary ? 1 : 0,
+      sortOrder,
+      now,
+      now
+    ).run();
+
+    const synced = await syncPrimaryAvatar(db, personId, now, isPrimary ? avatarId : undefined);
+    return {
+      avatar: synced.avatars.find((item) => item.id === avatarId) || null,
+      primary: synced.primary,
+      avatars: synced.avatars
+    };
+  };
+
+  const ensureAvatarFromLegacy = async (db: Env['DB'], person: any) => {
+    const legacyUrl = person?.avatar_url as string | null | undefined;
+    const personId = person?.id as string;
+    let avatars = await loadPersonAvatars(db, personId);
+    if (avatars.length > 0 || !legacyUrl) {
+      return avatars;
+    }
+
+    const now = new Date().toISOString();
+    await appendAvatar(
+      db,
+      personId,
+      legacyUrl,
+      deriveStorageKeyFromUrl(legacyUrl),
+      { now, isPrimary: true, sortOrder: 0 }
+    );
+    avatars = await loadPersonAvatars(db, personId);
+    return avatars;
+  };
+
   const loadCustomFields = async (db: Env['DB']) => {
     const { results } = await db.prepare(
       'SELECT person_id, label, value FROM person_custom_fields'
@@ -86,19 +243,136 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     return null;
   };
 
+  const buildPersonPayload = (
+    person: any,
+    customFields: { label: string; value: string }[],
+    avatars: PersonAvatar[]
+  ) => {
+    const primaryAvatar = resolvePrimaryAvatar(avatars);
+    return {
+      ...person,
+      avatar_url: primaryAvatar?.avatar_url || person.avatar_url || null,
+      avatars,
+      metadata: {
+        ...safeParse(person.metadata as string),
+        customFields
+      }
+    };
+  };
+
+  const parseBoolean = (value: unknown, fallback = false) => {
+    if (value === null || value === undefined) return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+    return fallback;
+  };
+
+  const ensurePersonExists = async (db: Env['DB'], personId: string) => {
+    const existing = await db.prepare(
+      'SELECT id, name, avatar_url FROM people WHERE id = ?'
+    ).bind(personId).first();
+    if (!existing) return null;
+    await ensureAvatarFromLegacy(db, existing as any);
+    return existing as any;
+  };
+
+  const handleAvatarUpload = async (
+    c: Context<AppBindings>,
+    personId: string,
+    file: UploadFile,
+    options?: {
+      setPrimary?: boolean;
+      mirrorPath?: string;
+      mirrorSetPrimary?: boolean;
+      notifySource?: 'legacy' | 'multi';
+    }
+  ) => {
+    if (file.size > MAX_AVATAR_BYTES) {
+      return c.json({ error: 'file is too large' }, 413);
+    }
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      return c.json({ error: 'unsupported file type' }, 400);
+    }
+
+    const ext = ALLOWED_AVATAR_TYPES[file.type];
+    if (!ext) {
+      return c.json({ error: 'unsupported file type' }, 400);
+    }
+
+    const existing = await ensurePersonExists(c.env.DB, personId);
+    if (!existing) {
+      return c.json({ error: 'Person not found' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const key = `person-${personId}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
+    await c.env.AVATARS.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type }
+    });
+
+    const avatarUrl = `/api/avatars/${key}`;
+    const created = await appendAvatar(
+      c.env.DB,
+      personId,
+      avatarUrl,
+      key,
+      {
+        now,
+        isPrimary: options?.setPrimary !== false
+      }
+    );
+
+    const avatarLink = new URL(avatarUrl, c.req.url).toString();
+    notifyUpdate(c, 'people:avatar', {
+      id: personId,
+      name: existing.name ?? null,
+      avatar_url: created.primary?.avatar_url ?? avatarUrl,
+      avatar_id: created.avatar?.id ?? null,
+      avatar_count: created.avatars.length,
+      source: options?.notifySource || 'multi'
+    }, { photoUrl: avatarLink });
+
+    await recordAuditLog(c, {
+      action: 'update_avatar',
+      resourceType: 'people',
+      resourceId: personId,
+      summary: `更新人物頭像 ${String(existing.name ?? personId)}`,
+      details: {
+        avatar_url: avatarUrl,
+        avatar_id: created.avatar?.id ?? null,
+        set_primary: options?.setPrimary !== false,
+        avatar_count: created.avatars.length
+      }
+    });
+
+    const avatarBuffer = await file.arrayBuffer();
+    const mirrorForm = new FormData();
+    mirrorForm.set('file', new Blob([avatarBuffer], { type: file.type || 'application/octet-stream' }), file.name || 'avatar');
+    if (options?.mirrorSetPrimary !== undefined) {
+      mirrorForm.set('set_primary', options.mirrorSetPrimary ? '1' : '0');
+    }
+    queueRemoteFormData(c, options?.mirrorPath || `/api/people/${personId}/avatars`, mirrorForm);
+
+    return c.json({
+      avatar: created.avatar,
+      avatars: created.avatars,
+      avatar_url: created.primary?.avatar_url || null
+    });
+  };
+
   // Get all people
   app.get('/api/people', async (c) => {
     const { results } = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
+      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
     ).all();
     const customFieldsMap = await loadCustomFields(c.env.DB);
+    const avatarMap = await loadAvatarMap(c.env.DB);
 
-    const parsedResults = results.map(person => ({
-      ...person,
-      metadata: {
-        ...safeParse(person.metadata as string),
-        customFields: customFieldsMap.get((person as any).id) || []
-      }
+    const parsedResults = await Promise.all(results.map(async (person: any) => {
+      const avatars = avatarMap.get(person.id) || await ensureAvatarFromLegacy(c.env.DB, person);
+      return buildPersonPayload(person, customFieldsMap.get(person.id) || [], avatars);
     }));
 
     return c.json(parsedResults);
@@ -108,26 +382,40 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   app.get('/api/people/:id', async (c) => {
     const id = c.req.param('id');
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
     const customFields = await loadPersonCustomFields(c.env.DB, id);
+    const avatars = await ensureAvatarFromLegacy(c.env.DB, person as any);
+    return c.json(buildPersonPayload(person, customFields, avatars));
+  });
+
+  // List avatars for a single person
+  app.get('/api/people/:id/avatars', async (c) => {
+    const id = c.req.param('id');
+    const existing = await c.env.DB.prepare(
+      'SELECT id, avatar_url FROM people WHERE id = ?'
+    ).bind(id).first();
+
+    if (!existing) {
+      return c.json({ error: 'Person not found' }, 404);
+    }
+
+    const avatars = await ensureAvatarFromLegacy(c.env.DB, existing as any);
     return c.json({
-      ...person,
-      metadata: {
-        ...safeParse((person as any).metadata as string),
-        customFields
-      }
+      person_id: id,
+      avatar_url: resolvePrimaryAvatar(avatars)?.avatar_url || (existing as any).avatar_url || null,
+      avatars
     });
   });
 
   // Create a new person
   app.post('/api/people', async (c) => {
     const body = await c.req.json();
-    const { id: providedId, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { id: providedId, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     if (!name) {
       return c.json({ error: 'Name is required' }, 400);
@@ -137,12 +425,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const now = new Date().toISOString();
 
     await c.env.DB.prepare(
-      'INSERT INTO people (id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO people (id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(
       id,
       name,
       english_name || null,
       gender || 'O',
+      blood_type || null,
       dob || null,
       dod || null,
       tob || null,
@@ -169,11 +458,48 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     }
 
+    const inputAvatars = Array.isArray(body?.avatars) ? body.avatars : [];
+    if (inputAvatars.length > 0) {
+      const candidates = inputAvatars
+        .map((entry: any, index: number) => ({
+          avatar_url: typeof entry?.avatar_url === 'string' ? entry.avatar_url.trim() : '',
+          is_primary: entry?.is_primary === true,
+          sort_order: Number.isFinite(entry?.sort_order) ? Number(entry.sort_order) : index
+        }))
+        .filter((entry: any) => Boolean(entry.avatar_url));
+
+      let primaryPicked = false;
+      for (const entry of candidates) {
+        const makePrimary = entry.is_primary === true || (!primaryPicked && !candidates.some((candidate: any) => candidate.is_primary === true));
+        await appendAvatar(
+          c.env.DB,
+          id,
+          entry.avatar_url,
+          deriveStorageKeyFromUrl(entry.avatar_url),
+          {
+            now,
+            isPrimary: makePrimary,
+            sortOrder: entry.sort_order
+          }
+        );
+        if (makePrimary) primaryPicked = true;
+      }
+    } else if (avatar_url) {
+      await appendAvatar(
+        c.env.DB,
+        id,
+        avatar_url,
+        deriveStorageKeyFromUrl(avatar_url),
+        { now, isPrimary: true }
+      );
+    }
+
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    const avatars = person ? await ensureAvatarFromLegacy(c.env.DB, person as any) : [];
     const metadataKeys = metadata && typeof metadata === 'object'
       ? Object.keys(metadata as Record<string, unknown>)
       : [];
@@ -190,11 +516,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       name,
       english_name,
       gender,
+      blood_type,
       dob,
       dod,
       tob,
       tod,
       avatar_url,
+      avatars_count: avatars.length,
       metadata_keys: metadataKeys,
       custom_fields_count: customFieldsCount,
       custom_fields: customFieldsSummary
@@ -208,11 +536,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         name,
         english_name: english_name || null,
         gender: gender || 'O',
+        blood_type: blood_type || null,
         dob: dob || null,
         dod: dod || null,
         tob: tob || null,
         tod: tod || null,
         avatar_url: avatar_url || null,
+        avatars_count: avatars.length,
         metadata_keys: metadataKeys,
         custom_fields_count: customFieldsCount
       }
@@ -223,11 +553,18 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       name,
       english_name: english_name || null,
       gender: gender || 'O',
+      blood_type: blood_type || null,
       dob: dob || null,
       dod: dod || null,
       tob: tob || null,
       tod: tod || null,
       avatar_url: avatar_url || null,
+      avatars: avatars.map((avatar) => ({
+        id: avatar.id,
+        avatar_url: avatar.avatar_url,
+        is_primary: avatar.is_primary,
+        sort_order: avatar.sort_order
+      })),
       metadata: metadata || null
     };
     if (customFields) {
@@ -235,23 +572,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     queueRemoteJson(c, 'POST', '/api/people', mirrorPayload);
 
-    return c.json({
-      ...person,
-      metadata: {
-        ...safeParse((person as any).metadata as string),
-        customFields: customFieldsResult
-      }
-    }, 201);
+    return c.json(buildPersonPayload(person, customFieldsResult, avatars), 201);
   });
 
   // Update a person
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     const existing = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?'
     ).bind(id).first();
 
     if (!existing) {
@@ -260,6 +591,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const existingAny = existing as any;
     const previousDob = existingAny.dob as string | null;
     const existingCustomFields = await loadPersonCustomFields(c.env.DB, id);
+    await ensureAvatarFromLegacy(c.env.DB, existingAny);
 
     const now = new Date().toISOString();
     const updates: string[] = [];
@@ -280,6 +612,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       updates.push('gender = ?');
       values.push(gender);
       changedFields.push('gender');
+    }
+    if (blood_type !== undefined) {
+      updates.push('blood_type = ?');
+      values.push(blood_type);
+      changedFields.push('blood_type');
     }
     if (dob !== undefined) {
       updates.push('dob = ?');
@@ -348,15 +685,42 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     }
 
+    if (avatar_url !== undefined) {
+      if (!avatar_url) {
+        await c.env.DB.prepare(
+          'UPDATE person_avatars SET is_primary = 0, updated_at = ? WHERE person_id = ? AND is_primary = 1'
+        ).bind(now, id).run();
+        await c.env.DB.prepare(
+          'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
+        ).bind(null, now, id).run();
+      } else {
+        const existingAvatar = await c.env.DB.prepare(
+          'SELECT id FROM person_avatars WHERE person_id = ? AND avatar_url = ? LIMIT 1'
+        ).bind(id, avatar_url).first();
+        if (existingAvatar) {
+          await syncPrimaryAvatar(c.env.DB, id, now, (existingAvatar as any).id as string);
+        } else {
+          await appendAvatar(
+            c.env.DB,
+            id,
+            avatar_url,
+            deriveStorageKeyFromUrl(avatar_url),
+            { now, isPrimary: true }
+          );
+        }
+      }
+    }
+
     if (dob !== undefined && dob !== previousDob) {
       await updateSiblingOrdering(c.env.DB, id);
     }
 
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
+    const avatars = person ? await ensureAvatarFromLegacy(c.env.DB, person as any) : [];
     const formatCustomFields = (fields: { label: string; value: string }[]) => (
       fields.map((field) => ({
         label: field.label || '',
@@ -383,6 +747,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       };
     }
     if (gender !== undefined) updateDetails.gender = gender;
+    if (blood_type !== undefined) updateDetails.blood_type = blood_type;
     if (dob !== undefined) updateDetails.dob = dob;
     if (dod !== undefined) updateDetails.dod = dod;
     if (tob !== undefined) updateDetails.tob = tob;
@@ -390,12 +755,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     let avatarLink: string | undefined;
     if (avatar_url !== undefined) {
       const prevAvatar = existingAny.avatar_url ?? null;
+      const currentPrimary = resolvePrimaryAvatar(avatars)?.avatar_url || null;
       updateDetails.avatar_url = {
         old: prevAvatar,
-        new: avatar_url
+        new: currentPrimary
       };
-      if (avatar_url) {
-        avatarLink = new URL(avatar_url, c.req.url).toString();
+      if (currentPrimary) {
+        avatarLink = new URL(currentPrimary, c.req.url).toString();
       }
     }
     if (metadata !== undefined && typeof metadata === 'object') {
@@ -426,86 +792,163 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     });
     queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
-    return c.json({
-      ...person,
-      metadata: {
-        ...safeParse((person as any).metadata as string),
-        customFields: customFieldsResult
-      }
-    });
+    return c.json(buildPersonPayload(person, customFieldsResult, avatars));
   });
 
-  // Upload avatar for a person
-  app.post('/api/people/:id/avatar', async (c) => {
-    const id = c.req.param('id');
-    const existing = await c.env.DB.prepare(
-      'SELECT name, avatar_url FROM people WHERE id = ?'
-    ).bind(id).first();
-
-    if (!existing) {
-      return c.json({ error: 'Person not found' }, 404);
-    }
-
+  // Upload avatar for a person (multi-avatar API)
+  app.post('/api/people/:id/avatars', async (c) => {
     try {
+      const id = c.req.param('id');
       const formData = await c.req.formData();
       const file = formData.get('file');
       if (!isUploadFile(file)) {
         return c.json({ error: 'file is required' }, 400);
       }
-      if (file.size > MAX_AVATAR_BYTES) {
-        return c.json({ error: 'file is too large' }, 413);
-      }
-
-      if (!file.type || !file.type.startsWith('image/')) {
-        return c.json({ error: 'unsupported file type' }, 400);
-      }
-
-      const ext = ALLOWED_AVATAR_TYPES[file.type];
-      if (!ext) {
-        return c.json({ error: 'unsupported file type' }, 400);
-      }
-
-      const prevUrl = (existing as any).avatar_url as string | null;
-      if (prevUrl && prevUrl.startsWith('/api/avatars/')) {
-        const prevKey = prevUrl.replace('/api/avatars/', '');
-        await c.env.AVATARS.delete(prevKey);
-      }
-
-      const key = `person-${id}-${Date.now()}.${ext}`;
-      await c.env.AVATARS.put(key, file.stream(), {
-        httpMetadata: { contentType: file.type }
+      const setPrimary = parseBoolean(formData.get('set_primary'), true);
+      return handleAvatarUpload(c, id, file, {
+        setPrimary,
+        mirrorPath: `/api/people/${id}/avatars`,
+        mirrorSetPrimary: setPrimary,
+        notifySource: 'multi'
       });
-
-      const avatarUrl = `/api/avatars/${key}`;
-      await c.env.DB.prepare(
-        'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-      ).bind(avatarUrl, new Date().toISOString(), id).run();
-
-      const avatarLink = new URL(avatarUrl, c.req.url).toString();
-      notifyUpdate(c, 'people:avatar', {
-        id,
-        name: (existing as any).name ?? null,
-        avatar_url: avatarUrl
-      }, { photoUrl: avatarLink });
-      await recordAuditLog(c, {
-        action: 'update_avatar',
-        resourceType: 'people',
-        resourceId: id,
-        summary: `更新人物頭像 ${(existing as any).name ?? id}`,
-        details: {
-          previous_avatar_url: prevUrl,
-          avatar_url: avatarUrl
-        }
-      });
-      const avatarBuffer = await file.arrayBuffer();
-      const mirrorForm = new FormData();
-      mirrorForm.set('file', new Blob([avatarBuffer], { type: file.type || 'application/octet-stream' }), file.name || 'avatar');
-      queueRemoteFormData(c, `/api/people/${id}/avatar`, mirrorForm);
-      return c.json({ avatar_url: avatarUrl });
     } catch (error) {
       console.error('Avatar upload failed:', error);
       return c.json({ error: 'Avatar upload failed' }, 500);
     }
+  });
+
+  // Backward-compatible single-avatar endpoint
+  app.post('/api/people/:id/avatar', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const formData = await c.req.formData();
+      const file = formData.get('file');
+      if (!isUploadFile(file)) {
+        return c.json({ error: 'file is required' }, 400);
+      }
+      return handleAvatarUpload(c, id, file, {
+        setPrimary: true,
+        mirrorPath: `/api/people/${id}/avatar`,
+        notifySource: 'legacy'
+      });
+    } catch (error) {
+      console.error('Avatar upload failed:', error);
+      return c.json({ error: 'Avatar upload failed' }, 500);
+    }
+  });
+
+  // Update avatar metadata (set primary / reorder)
+  app.put('/api/people/:id/avatars/:avatarId', async (c) => {
+    const id = c.req.param('id');
+    const avatarId = c.req.param('avatarId');
+    const body = await c.req.json();
+    const now = new Date().toISOString();
+
+    const existing = await ensurePersonExists(c.env.DB, id);
+    if (!existing) {
+      return c.json({ error: 'Person not found' }, 404);
+    }
+
+    const avatar = await c.env.DB.prepare(
+      'SELECT id, person_id FROM person_avatars WHERE id = ? AND person_id = ?'
+    ).bind(avatarId, id).first();
+
+    if (!avatar) {
+      return c.json({ error: 'Avatar not found' }, 404);
+    }
+
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    const wantsPrimary = body?.is_primary === true;
+    if (Number.isFinite(body?.sort_order)) {
+      updates.push('sort_order = ?');
+      values.push(Number(body.sort_order));
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = ?');
+      values.push(now);
+      values.push(avatarId);
+      values.push(id);
+      await c.env.DB.prepare(
+        `UPDATE person_avatars SET ${updates.join(', ')} WHERE id = ? AND person_id = ?`
+      ).bind(...values).run();
+    }
+
+    const synced = await syncPrimaryAvatar(c.env.DB, id, now, wantsPrimary ? avatarId : undefined);
+
+    await recordAuditLog(c, {
+      action: 'update_avatar',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `更新人物頭像設定 ${String(existing.name ?? id)}`,
+      details: {
+        avatar_id: avatarId,
+        is_primary: wantsPrimary,
+        sort_order: Number.isFinite(body?.sort_order) ? Number(body.sort_order) : undefined
+      }
+    });
+
+    queueRemoteJson(c, 'PUT', `/api/people/${id}/avatars/${avatarId}`, body);
+
+    return c.json({
+      avatar: synced.avatars.find((item) => item.id === avatarId) || null,
+      avatars: synced.avatars,
+      avatar_url: synced.primary?.avatar_url || null
+    });
+  });
+
+  // Delete one avatar for a person
+  app.delete('/api/people/:id/avatars/:avatarId', async (c) => {
+    const id = c.req.param('id');
+    const avatarId = c.req.param('avatarId');
+    const now = new Date().toISOString();
+
+    const existing = await ensurePersonExists(c.env.DB, id);
+    if (!existing) {
+      return c.json({ error: 'Person not found' }, 404);
+    }
+
+    const avatar = await c.env.DB.prepare(
+      `${avatarSelectSql} WHERE id = ? AND person_id = ? LIMIT 1`
+    ).bind(avatarId, id).first();
+
+    if (!avatar) {
+      return c.json({ error: 'Avatar not found' }, 404);
+    }
+
+    const normalized = normalizeAvatar(avatar);
+    await c.env.DB.prepare(
+      'DELETE FROM person_avatars WHERE id = ? AND person_id = ?'
+    ).bind(avatarId, id).run();
+
+    const key = normalized.storage_key || deriveStorageKeyFromUrl(normalized.avatar_url);
+    if (key) {
+      await c.env.AVATARS.delete(key);
+    }
+
+    const synced = await syncPrimaryAvatar(c.env.DB, id, now);
+    await recordAuditLog(c, {
+      action: 'update_avatar',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `刪除人物頭像 ${String(existing.name ?? id)}`,
+      details: {
+        avatar_id: avatarId,
+        avatar_url: normalized.avatar_url,
+        deleted_storage_key: key || null,
+        remaining_count: synced.avatars.length
+      }
+    });
+
+    queueRemoteJson(c, 'DELETE', `/api/people/${id}/avatars/${avatarId}`, undefined);
+
+    return c.json({
+      success: true,
+      avatar_id: avatarId,
+      avatars: synced.avatars,
+      avatar_url: synced.primary?.avatar_url || null
+    });
   });
 
   // Serve avatar images from R2
@@ -545,6 +988,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Person not found' }, 404);
     }
 
+    const avatarRows = await loadPersonAvatars(c.env.DB, id);
+    for (const avatar of avatarRows) {
+      const key = avatar.storage_key || deriveStorageKeyFromUrl(avatar.avatar_url);
+      if (!key) continue;
+      await c.env.AVATARS.delete(key);
+    }
+
     await c.env.DB.prepare(
       'DELETE FROM person_custom_fields WHERE person_id = ?'
     ).bind(id).run();
@@ -566,7 +1016,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         summary: `刪除人物 ${(existing as any).name ?? id}`,
         details: {
           name: (existing as any).name ?? null,
-          english_name: (existing as any).english_name ?? null
+          english_name: (existing as any).english_name ?? null,
+          removed_avatar_count: avatarRows.length
         }
       });
       queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);

@@ -1,13 +1,26 @@
+export interface Avatar {
+  id: string;
+  person_id: string;
+  avatar_url: string;
+  storage_key?: string | null;
+  is_primary: boolean;
+  sort_order: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface Person {
   id: string;
   name: string;
   english_name?: string | null;
   gender: 'M' | 'F' | 'O';
+  blood_type?: string | null;
   dob?: string | null;
   dod?: string | null;
   tob?: string | null;
   tod?: string | null;
   avatar_url?: string | null;
+  avatars?: Avatar[];
   title?: string;
   formal_title?: string;
   metadata?: {

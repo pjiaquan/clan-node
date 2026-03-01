@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS people (
     name TEXT NOT NULL,
     english_name TEXT,
     gender TEXT CHECK(gender IN ('M', 'F', 'O')) NOT NULL DEFAULT 'O',
+    blood_type TEXT, -- ABO blood type (A/B/O/AB), nullable
     dob TEXT, -- ISO date string for age comparison (older/younger sibling)
     dod TEXT, -- ISO date string for time of death date
     tob TEXT, -- HH:MM 24h string for time of birth
@@ -15,6 +16,22 @@ CREATE TABLE IF NOT EXISTS people (
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Person avatars table: stores multiple avatars per person (with one primary)
+CREATE TABLE IF NOT EXISTS person_avatars (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    avatar_url TEXT NOT NULL,
+    storage_key TEXT,
+    is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_person_avatars_person ON person_avatars(person_id, sort_order, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_person_primary_avatar ON person_avatars(person_id) WHERE is_primary = 1;
 
 -- Relationships table: stores connections between people (edges in the graph)
 CREATE TABLE IF NOT EXISTS relationships (

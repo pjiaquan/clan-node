@@ -14,12 +14,14 @@ wrangler d1 export "$DB_NAME" --local --output="$EXPORT_PATH"
 echo "Dropping remote tables (keeping users/sessions)..."
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS relationships;"
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_custom_fields;"
+wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_avatars;"
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS people;"
 
 echo "Applying schema on remote..."
 wrangler d1 execute "$DB_NAME" --remote --file="./schema.sql"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM relationships;"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_custom_fields;"
+wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_avatars;"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM people;"
 
 echo "Importing into remote D1 (data only)..."
@@ -60,6 +62,19 @@ write_inserts(
         "tod",
         "avatar_url",
         "metadata",
+        "created_at",
+        "updated_at",
+    ],
+)
+write_inserts(
+    "person_avatars",
+    [
+        "id",
+        "person_id",
+        "avatar_url",
+        "storage_key",
+        "is_primary",
+        "sort_order",
         "created_at",
         "updated_at",
     ],

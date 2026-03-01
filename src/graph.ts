@@ -5,6 +5,35 @@ import { calculateKinship } from './kinship';
 import { loadKinshipLabelMap, resolveKinshipLabel, trackKinshipLabelDefaults } from './kinship_labels';
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
+  const loadAvatarMap = async (db: D1Database) => {
+    const { results } = await db.prepare(
+      `SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
+       FROM person_avatars
+       ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
+    ).all();
+    const map = new Map<string, any[]>();
+    results.forEach((row: any) => {
+      const list = map.get(row.person_id) || [];
+      list.push({
+        id: String(row.id),
+        person_id: String(row.person_id),
+        avatar_url: String(row.avatar_url),
+        storage_key: row.storage_key ? String(row.storage_key) : null,
+        is_primary: Number(row.is_primary) === 1,
+        sort_order: Number(row.sort_order ?? 0),
+        created_at: row.created_at ?? null,
+        updated_at: row.updated_at ?? null
+      });
+      map.set(String(row.person_id), list);
+    });
+    return map;
+  };
+
+  const resolvePrimaryAvatarUrl = (avatars: any[], fallback: string | null | undefined) => {
+    const primary = avatars.find((avatar) => avatar.is_primary) || avatars[0] || null;
+    return primary?.avatar_url || fallback || null;
+  };
+
   // Get graph data centered on a person with kinship titles
   app.get('/api/graph', async (c) => {
     try {
@@ -19,7 +48,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       // Verify center person exists
       console.log('Verifying center person...');
       const center = await c.env.DB.prepare(
-        'SELECT id, name, english_name, gender, dob, dod, tob, tod FROM people WHERE id = ?'
+        'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod FROM people WHERE id = ?'
       ).bind(centerId).first();
 
       if (!center) {
@@ -30,9 +59,10 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       // Get all people
       console.log('Fetching all people...');
       const { results: peopleRaw } = await c.env.DB.prepare(
-        'SELECT id, name, english_name, gender, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
+        'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
       ).all();
       console.log(`Fetched ${peopleRaw.length} people`);
+      const avatarMap = await loadAvatarMap(c.env.DB);
 
       const { results: customFieldRows } = await c.env.DB.prepare(
         'SELECT person_id, label, value FROM person_custom_fields'
@@ -44,13 +74,18 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         customFieldMap.set(row.person_id, list);
       });
 
-      const people = peopleRaw.map(person => ({
-        ...person,
-        metadata: {
-          ...safeParse(person.metadata as string),
-          customFields: customFieldMap.get((person as any).id) || []
-        }
-      }));
+      const people = peopleRaw.map((person: any) => {
+        const avatars = avatarMap.get(String(person.id)) || [];
+        return {
+          ...person,
+          avatar_url: resolvePrimaryAvatarUrl(avatars, person.avatar_url as string | null | undefined),
+          avatars,
+          metadata: {
+            ...safeParse(person.metadata as string),
+            customFields: customFieldMap.get((person as any).id) || []
+          }
+        };
+      });
       const kinshipPeople: Person[] = people.map((person: any) => ({
         id: String(person.id),
         name: String(person.name),

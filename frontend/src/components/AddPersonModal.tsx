@@ -4,7 +4,16 @@ import { clampDay, composePartialDate } from '../utils/partialDate';
 
 interface AddPersonModalProps {
   onClose: () => void;
-  onSubmit: (name: string, english_name: string | undefined, gender: 'M' | 'F' | 'O', dob?: string, dod?: string, tob?: string, tod?: string) => void;
+  onSubmit: (
+    name: string,
+    english_name: string | undefined,
+    gender: 'M' | 'F' | 'O',
+    dob?: string,
+    dod?: string,
+    tob?: string,
+    tod?: string,
+    blood_type?: string
+  ) => void;
 }
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
@@ -20,6 +29,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
   const birthLabelClickCountRef = useRef(0);
   const [tob, setTob] = useState('');
   const [tod, setTod] = useState('');
+  const [bloodType, setBloodType] = useState('');
 
   const dob = composePartialDate({ year: dobYear, month: dobMonth, day: dobDay });
   const dod = composePartialDate({ year: dodYear, month: dodMonth, day: dodDay });
@@ -76,7 +86,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
             dobUnknown ? undefined : dob || undefined,
             dodUnknown ? undefined : dod || undefined,
             normalizeTraditionalHour(formData.get('tob') as string || ''),
-            (dodUnknown || !dod) ? undefined : normalizeTraditionalHour(tod || '')
+            (dodUnknown || !dod) ? undefined : normalizeTraditionalHour(tod || ''),
+            (formData.get('blood_type') as string) || undefined
           );
         }}>
           <div className="form-group">
@@ -93,6 +104,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
               <option value="M">男</option>
               <option value="F">女</option>
               <option value="O">其他</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>血型</label>
+            <select
+              name="blood_type"
+              value={bloodType}
+              onChange={(event) => setBloodType(event.target.value)}
+            >
+              <option value="">未知</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="O">O</option>
+              <option value="AB">AB</option>
             </select>
           </div>
           <div className="form-group">

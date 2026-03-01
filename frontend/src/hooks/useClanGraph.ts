@@ -248,13 +248,14 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     dod?: string,
     tob?: string,
     tod?: string,
+    blood_type?: string,
     metadata?: any,
     id?: string,
     avatar_url?: string,
     options?: { skipFetch?: boolean }
   ) => {
     try {
-      const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, metadata, id, avatar_url);
+      const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, blood_type, metadata, id, avatar_url);
       const normalizedPerson = {
         ...person,
         metadata: parseMetadata((person as any).metadata),

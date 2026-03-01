@@ -1,0 +1,2 @@
+ALTER TABLE people ADD COLUMN blood_type TEXT;
+

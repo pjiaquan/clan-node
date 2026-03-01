@@ -92,27 +92,43 @@ const fetchAvatar = async (sourceUrl, baseUrl, cookie) => {
   });
 };
 
+const collectAvatarEntries = (person) => {
+  const entries = [];
+  if (Array.isArray(person.avatars) && person.avatars.length > 0) {
+    for (const avatar of person.avatars) {
+      if (!avatar?.avatar_url || typeof avatar.avatar_url !== 'string') continue;
+      entries.push(avatar.avatar_url);
+    }
+  }
+  if (entries.length === 0 && person.avatar_url) {
+    entries.push(person.avatar_url);
+  }
+  return [...new Set(entries)];
+};
+
 const auditSide = async (label, baseUrl, cookie, peopleById) => {
   const missing = [];
-  let hasAvatar = 0;
+  let avatarCount = 0;
 
   for (const person of peopleById.values()) {
-    if (!person.avatar_url) continue;
-    hasAvatar += 1;
-    const avatarUrl = resolveAvatarUrl(baseUrl, person.avatar_url);
-    if (!avatarUrl) continue;
-    const res = await fetchAvatar(avatarUrl, baseUrl, cookie);
-    if (!res.ok) {
-      missing.push({
-        id: person.id,
-        name: person.name || '',
-        status: res.status,
-        avatar_url: person.avatar_url,
-      });
+    const avatarUrls = collectAvatarEntries(person);
+    avatarCount += avatarUrls.length;
+    for (const avatarUrlRaw of avatarUrls) {
+      const avatarUrl = resolveAvatarUrl(baseUrl, avatarUrlRaw);
+      if (!avatarUrl) continue;
+      const res = await fetchAvatar(avatarUrl, baseUrl, cookie);
+      if (!res.ok) {
+        missing.push({
+          id: person.id,
+          name: person.name || '',
+          status: res.status,
+          avatar_url: avatarUrlRaw,
+        });
+      }
     }
   }
 
-  console.log(`${label}: ${hasAvatar} people with avatar_url, ${missing.length} missing files`);
+  console.log(`${label}: ${avatarCount} avatars checked, ${missing.length} missing files`);
   return missing;
 };
 
@@ -143,12 +159,13 @@ const run = async () => {
   const missingLocal = await auditSide('Local avatars', LOCAL_API_BASE, localCookie, localById);
   const missingRemote = await auditSide('Remote avatars', REMOTE_API_BASE, remoteCookie, remoteById);
 
-  const localMissingSet = new Set(missingLocal.map((entry) => entry.id));
-  const remoteMissingSet = new Set(missingRemote.map((entry) => entry.id));
+  const entryKey = (entry) => `${entry.id}|${entry.avatar_url}`;
+  const localMissingSet = new Set(missingLocal.map(entryKey));
+  const remoteMissingSet = new Set(missingRemote.map(entryKey));
 
-  const missingOnlyLocal = missingLocal.filter((entry) => !remoteMissingSet.has(entry.id));
-  const missingOnlyRemote = missingRemote.filter((entry) => !localMissingSet.has(entry.id));
-  const missingBoth = missingLocal.filter((entry) => remoteMissingSet.has(entry.id));
+  const missingOnlyLocal = missingLocal.filter((entry) => !remoteMissingSet.has(entryKey(entry)));
+  const missingOnlyRemote = missingRemote.filter((entry) => !localMissingSet.has(entryKey(entry)));
+  const missingBoth = missingLocal.filter((entry) => remoteMissingSet.has(entryKey(entry)));
 
   printList('Missing only on local', missingOnlyLocal);
   printList('Missing only on remote', missingOnlyRemote);

@@ -14,8 +14,12 @@ type GraphSettingsPageProps = {
   onLogout: () => Promise<void> | void;
 };
 
+type NumericGraphSettingsKey = {
+  [Key in keyof GraphSettings]: GraphSettings[Key] extends number ? Key : never;
+}[keyof GraphSettings];
+
 type FieldSpec = {
-  key: keyof GraphSettings;
+  key: NumericGraphSettingsKey;
   label: string;
   hint: string;
   min: number;
@@ -171,7 +175,7 @@ const AUTO_LINK_FIELDS: FieldSpec[] = [
 const renderField = (
   field: FieldSpec,
   draft: GraphSettings,
-  onNumberChange: (key: keyof GraphSettings, value: string) => void
+  onNumberChange: (key: NumericGraphSettingsKey, value: string) => void
 ) => (
   <label className="graph-settings-field" key={field.key}>
     <span className="graph-settings-field-label">{field.label}</span>
@@ -201,7 +205,7 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     setDraft(normalizeGraphSettings(settings));
   }, [settings]);
 
-  const onNumberChange = (key: keyof GraphSettings, value: string) => {
+  const onNumberChange = (key: NumericGraphSettingsKey, value: string) => {
     const next = Number(value);
     if (!Number.isFinite(next)) return;
     setDraft((prev) => ({
@@ -258,6 +262,27 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
           <div className="graph-settings-grid">
             {AUTO_LINK_FIELDS.map((field) => renderField(field, draft, onNumberChange))}
           </div>
+        </section>
+
+        <section className="graph-settings-panel">
+          <h2>節點顯示</h2>
+          <label className="graph-settings-toggle">
+            <input
+              type="checkbox"
+              checked={draft.showBirthTimeOnNode}
+              onChange={(event) => {
+                const nextChecked = event.target.checked;
+                setDraft((prev) => ({
+                  ...prev,
+                  showBirthTimeOnNode: nextChecked,
+                }));
+              }}
+            />
+            <div>
+              <span className="graph-settings-field-label">顯示出生時辰</span>
+              <small>關閉時節點不顯示出生時辰，開啟後才會顯示</small>
+            </div>
+          </label>
         </section>
 
         <section className="graph-settings-actions">

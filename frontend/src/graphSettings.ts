@@ -16,6 +16,7 @@ export type GraphSettings = {
   nearCenterYThreshold: number;
   autoSpouseMinOverlapRatio: number;
   autoSpouseMinVerticalOverlapRatio: number;
+  showBirthTimeOnNode: boolean;
 };
 
 export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
@@ -36,6 +37,7 @@ export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   nearCenterYThreshold: 10,
   autoSpouseMinOverlapRatio: 0.32,
   autoSpouseMinVerticalOverlapRatio: 0.45,
+  showBirthTimeOnNode: false,
 };
 
 const STORAGE_KEY = 'clan.graphSettings';
@@ -47,6 +49,17 @@ const toFiniteNumber = (value: unknown, fallback: number) => {
     return fallback;
   }
   return value;
+};
+
+const toBoolean = (value: unknown, fallback: boolean) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+  }
+  return fallback;
 };
 
 const sanitizeGraphSettings = (value?: Partial<GraphSettings> | null): GraphSettings => {
@@ -121,6 +134,7 @@ const sanitizeGraphSettings = (value?: Partial<GraphSettings> | null): GraphSett
       0.05,
       1
     ),
+    showBirthTimeOnNode: toBoolean(source.showBirthTimeOnNode, DEFAULT_GRAPH_SETTINGS.showBirthTimeOnNode),
   };
 };
 

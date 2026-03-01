@@ -40,6 +40,7 @@ export interface Person {
   name: string;
   english_name?: string | null;
   gender: string;
+  blood_type?: string | null;
   dob?: string;
   title?: string;
   formal_title?: string;

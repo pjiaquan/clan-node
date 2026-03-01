@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createNameMatcher, preloadNameSearchConverters } from '../utils/nameSearch';
+import { preloadNameSearchConverters } from '../utils/nameSearch';
+import { createPersonSearchMatcher, type SearchablePerson } from '../utils/personSearch';
 import type { RelationshipTypeKey } from '../types';
 
 const DEFAULT_RELATIONSHIP_TYPE_LABELS: Record<RelationshipTypeKey, string> = {
@@ -43,7 +44,7 @@ interface HeaderProps {
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onSearch: (query: string) => void;
-  searchOptions: Array<{ id: string; name: string; english_name?: string | null }>;
+  searchOptions: SearchablePerson[];
   relationshipTypeLabelMap?: Partial<Record<RelationshipTypeKey, string>>;
 }
 
@@ -123,11 +124,9 @@ export const Header: React.FC<HeaderProps> = ({
   const mobileOptions = useMemo(() => {
     const query = searchText.trim();
     if (!query) return [];
-    const matchesQuery = createNameMatcher(query);
+    const matchesQuery = createPersonSearchMatcher(query);
     return searchOptions
-      .filter((option) => {
-        return matchesQuery(option.name) || matchesQuery(option.english_name);
-      })
+      .filter((option) => matchesQuery(option))
       .slice(0, 8);
   }, [searchText, searchOptions]);
 
@@ -185,7 +184,7 @@ export const Header: React.FC<HeaderProps> = ({
           <input
             className="search-input"
             type="text"
-            placeholder="搜尋姓名"
+            placeholder="搜尋姓名或自訂欄位"
             value={searchText}
             id="clan-search-input"
             onChange={handleSearchChange}

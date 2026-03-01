@@ -112,12 +112,13 @@ const resolveContentType = (contentType, filename) => {
   return contentType || 'application/octet-stream';
 };
 
-const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, filename) => {
+const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, filename, setPrimary) => {
   const origin = resolveOrigin(baseUrl);
   const formData = new FormData();
   const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
   formData.append('file', blob, filename || 'avatar.png');
-  const res = await fetchWithTimeout(`${baseUrl}/api/people/${personId}/avatar`, {
+  formData.append('set_primary', setPrimary ? '1' : '0');
+  const res = await fetchWithTimeout(`${baseUrl}/api/people/${personId}/avatars`, {
     method: 'POST',
     headers: { Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: formData,
@@ -127,6 +128,41 @@ const uploadAvatar = async (baseUrl, cookie, personId, buffer, contentType, file
     throw new Error(`Upload failed ${res.status} ${res.statusText}: ${text}`);
   }
   return res.json();
+};
+
+const collectAvatarEntries = (person) => {
+  const legacyPrimary = typeof person.avatar_url === 'string' ? person.avatar_url : '';
+  const entries = [];
+
+  if (Array.isArray(person.avatars) && person.avatars.length > 0) {
+    const normalized = person.avatars
+      .filter((avatar) => typeof avatar?.avatar_url === 'string' && avatar.avatar_url)
+      .map((avatar, index) => ({
+        avatar_url: avatar.avatar_url,
+        is_primary: avatar.is_primary === true,
+        sort_order: Number.isFinite(avatar.sort_order) ? Number(avatar.sort_order) : index,
+      }))
+      .sort((left, right) => {
+        if (left.is_primary !== right.is_primary) return left.is_primary ? -1 : 1;
+        return left.sort_order - right.sort_order;
+      });
+
+    let primaryAssigned = false;
+    for (const avatar of normalized) {
+      const isPrimary = avatar.is_primary || (!primaryAssigned && avatar.avatar_url === legacyPrimary);
+      entries.push({ avatar_url: avatar.avatar_url, is_primary: isPrimary });
+      if (isPrimary) primaryAssigned = true;
+    }
+    if (!primaryAssigned && entries.length > 0) {
+      entries[0].is_primary = true;
+    }
+    return entries;
+  }
+
+  if (legacyPrimary) {
+    entries.push({ avatar_url: legacyPrimary, is_primary: true });
+  }
+  return entries;
 };
 
 const run = async () => {
@@ -149,32 +185,41 @@ const run = async () => {
       throw error;
     }
   }
-  const withAvatar = people.filter((person) => person.avatar_url);
 
-  console.log(`Found ${withAvatar.length} avatars to sync (${direction}).`);
+  const avatarEntries = people.flatMap((person) => (
+    collectAvatarEntries(person).map((avatar, index) => ({
+      person_id: person.id,
+      person_name: person.name || '',
+      avatar_url: avatar.avatar_url,
+      is_primary: avatar.is_primary,
+      index,
+    }))
+  ));
+
+  console.log(`Found ${avatarEntries.length} avatars to sync (${direction}).`);
   const failures = [];
   const missingSource = [];
   let alreadyPresent = 0;
 
-  for (const person of withAvatar) {
-    const sourceUrl = resolveAvatarUrl(fromBase, person.avatar_url);
+  for (const entry of avatarEntries) {
+    const sourceUrl = resolveAvatarUrl(fromBase, entry.avatar_url);
     if (!sourceUrl) continue;
     const res = await fetchAvatar(sourceUrl, fromBase, fromCookie);
     if (!res.ok) {
       let keepExisting = false;
       if (res.status === 404 && fromLocal) {
-        keepExisting = await checkAvatarExists(toBase, toCookie, person.avatar_url);
+        keepExisting = await checkAvatarExists(toBase, toCookie, entry.avatar_url);
       }
 
       if (keepExisting) {
         alreadyPresent += 1;
-        console.log(`Keep existing avatar for ${person.id} (${person.name || ''})`);
+        console.log(`Keep existing avatar for ${entry.person_id} (${entry.person_name})`);
         continue;
       }
 
       const reason = `failed to fetch source avatar (${res.status})`;
-      missingSource.push({ id: person.id, name: person.name || '', reason });
-      console.warn(`Skip ${person.id}: ${reason}`);
+      missingSource.push({ id: entry.person_id, name: entry.person_name, reason, avatar_url: entry.avatar_url });
+      console.warn(`Skip ${entry.person_id}#${entry.index}: ${reason}`);
       continue;
     }
     const buffer = await res.arrayBuffer();
@@ -186,18 +231,18 @@ const run = async () => {
     while (attempt < 3) {
       attempt += 1;
       try {
-        await uploadAvatar(toBase, toCookie, person.id, buffer, contentType, filename);
-        console.log(`Synced avatar for ${person.id} (${person.name || ''})`);
+        await uploadAvatar(toBase, toCookie, entry.person_id, buffer, contentType, filename, entry.is_primary);
+        console.log(`Synced avatar for ${entry.person_id} (${entry.person_name})${entry.is_primary ? ' [primary]' : ''}`);
         lastError = null;
         break;
       } catch (err) {
         lastError = err;
-        console.warn(`Failed avatar upload for ${person.id} (${person.name || ''}) attempt ${attempt}: ${err.message}`);
+        console.warn(`Failed avatar upload for ${entry.person_id} (${entry.person_name}) attempt ${attempt}: ${err.message}`);
         await new Promise((resolve) => setTimeout(resolve, attempt * 300));
       }
     }
     if (lastError) {
-      failures.push({ id: person.id, name: person.name || '', error: lastError.message });
+      failures.push({ id: entry.person_id, name: entry.person_name, error: lastError.message });
     }
   }
 
@@ -208,7 +253,7 @@ const run = async () => {
   if (missingSource.length > 0) {
     console.warn(`Missing source avatars: ${missingSource.length}`);
     missingSource.slice(0, 10).forEach((entry) => {
-      console.warn(`- ${entry.id} ${entry.name}: ${entry.reason}`);
+      console.warn(`- ${entry.id} ${entry.name}: ${entry.reason} (${entry.avatar_url})`);
     });
     if (missingSource.length > 10) {
       console.warn(`...and ${missingSource.length - 10} more.`);

@@ -18,11 +18,11 @@ import { useClanGraph } from './hooks/useClanGraph';
 import { ContextMenu } from './components/ContextMenu';
 import { AddPersonModal } from './components/AddPersonModal';
 import { Header } from './components/Header';
-import { EditPersonModal } from './components/EditPersonModal';
+import { EditPersonModal, type EditPersonAvatarActions } from './components/EditPersonModal';
 import { CreateUserModal } from './components/CreateUserModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
 import type { GraphSettings } from './graphSettings';
-import { createExactNameMatcher, createNameMatcher } from './utils/nameSearch';
+import { createPersonSearchMatcher } from './utils/personSearch';
 import 'reactflow/dist/style.css';
 
 const nodeTypes = {
@@ -1528,15 +1528,8 @@ export function ClanGraph({
     if (!graphData) return;
     const trimmed = query.trim();
     if (!trimmed) return;
-    const exactMatch = createExactNameMatcher(trimmed);
-    const fuzzyMatch = createNameMatcher(trimmed);
-    const match = graphData.nodes.find((person) =>
-      person.id === trimmed
-      || exactMatch(person.name)
-      || exactMatch(person.english_name)
-      || fuzzyMatch(person.name)
-      || fuzzyMatch(person.english_name)
-    );
+    const matchesQuery = createPersonSearchMatcher(trimmed);
+    const match = graphData.nodes.find((person) => matchesQuery(person));
     if (!match) {
       showToast('找不到成員', 'warning');
       return;
@@ -1901,6 +1894,8 @@ export function ClanGraph({
           initial: person.name.charAt(0),
           title: title,
           formalTitle,
+          bloodType: person.blood_type || '',
+          birthTime: graphSettings.showBirthTimeOnNode ? (person.tob || '') : '',
           genderColor: genderColor,
           avatarUrl,
           isCenter: person.id === centerId,
@@ -1961,7 +1956,7 @@ export function ClanGraph({
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -2540,6 +2535,7 @@ export function ClanGraph({
             entry.person.dod ?? undefined,
             entry.person.tob ?? undefined,
             entry.person.tod ?? undefined,
+            entry.person.blood_type ?? undefined,
             entry.person.metadata ?? undefined,
             entry.person.id,
             entry.person.avatar_url ?? undefined
@@ -2589,6 +2585,7 @@ export function ClanGraph({
       person.dod ?? undefined,
       person.tob ?? undefined,
       person.tod ?? undefined,
+      person.blood_type ?? undefined,
       newMetadata,
       undefined,
       person.avatar_url ?? undefined,
@@ -2697,6 +2694,7 @@ export function ClanGraph({
           copiedPerson.dod ?? undefined,
           copiedPerson.tob ?? undefined,
           copiedPerson.tod ?? undefined,
+          copiedPerson.blood_type ?? undefined,
           newMetadata,
           undefined,
           copiedPerson.avatar_url ?? undefined,
@@ -3102,8 +3100,8 @@ export function ClanGraph({
       {!isReadOnly && showAddModal && (
         <AddPersonModal
           onClose={() => setShowAddModal(false)}
-          onSubmit={async (name, englishName, gender, dob, dod, tob, tod) => {
-            const person = await createPerson(name, englishName, gender, dob, dod, tob, tod);
+          onSubmit={async (name, englishName, gender, dob, dod, tob, tod, bloodType) => {
+            const person = await createPerson(name, englishName, gender, dob, dod, tob, tod, bloodType);
             if (selectedNode) {
               const relationshipType = getDefaultRelationshipType(selectedNode, person.id, { toGender: person.gender });
               requestRelationshipChoice({
@@ -3169,13 +3167,31 @@ export function ClanGraph({
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
           onClose={() => setEditingPersonId(null)}
           onUnsavedClose={() => showToast('未儲存變更', 'warning')}
-          onSubmit={async (id, updates, avatarFile, removeAvatar) => {
+          onSubmit={async (id, updates, avatarFile, removeAvatar, avatarActions?: EditPersonAvatarActions) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const person = graphData.nodes.find(p => p.id === id);
             const existingMetadata = person?.metadata ?? {};
+            let avatarOperationApplied = false;
             let mergedMetadata = updates.metadata
               ? { ...existingMetadata, ...updates.metadata }
               : undefined;
+
+            const deleteAvatarIds = avatarActions?.deleteAvatarIds ?? [];
+            if (deleteAvatarIds.length > 0) {
+              for (const avatarId of deleteAvatarIds) {
+                await api.deletePersonAvatar(id, avatarId);
+              }
+              avatarOperationApplied = true;
+            }
+
+            if (avatarActions && Object.prototype.hasOwnProperty.call(avatarActions, 'setPrimaryAvatarId')) {
+              if (avatarActions.setPrimaryAvatarId) {
+                await api.updatePersonAvatar(id, avatarActions.setPrimaryAvatarId, { is_primary: true });
+                avatarOperationApplied = true;
+              } else {
+                nextUpdates.avatar_url = null;
+              }
+            }
 
             if (removeAvatar) {
               nextUpdates.avatar_url = null;
@@ -3189,8 +3205,9 @@ export function ClanGraph({
               const nextHash = await hashAvatarFile(avatarFile);
               const existingHash = (existingMetadata as any).avatarHash as string | undefined;
               if (!nextHash || nextHash !== existingHash) {
-                const { avatar_url } = await api.uploadAvatar(id, avatarFile);
+                const { avatar_url } = await api.uploadPersonAvatar(id, avatarFile, { setPrimary: true });
                 nextUpdates.avatar_url = avatar_url;
+                avatarOperationApplied = true;
                 if (!mergedMetadata) {
                   mergedMetadata = { ...existingMetadata };
                 }
@@ -3218,6 +3235,7 @@ export function ClanGraph({
             assignIfChanged('name', nextUpdates.name, person?.name);
             assignIfChanged('english_name', nextUpdates.english_name, person?.english_name ?? null);
             assignIfChanged('gender', nextUpdates.gender, person?.gender);
+            assignIfChanged('blood_type', nextUpdates.blood_type, person?.blood_type ?? null);
             assignIfChanged('dob', nextUpdates.dob, person?.dob ?? null);
             assignIfChanged('dod', nextUpdates.dod, person?.dod ?? null);
             assignIfChanged('tob', nextUpdates.tob, person?.tob ?? null);
@@ -3233,6 +3251,18 @@ export function ClanGraph({
             }
 
             if (Object.keys(filteredUpdates).length === 0) {
+              if (avatarOperationApplied) {
+                await fetchGraph();
+                setEditingPersonId(null);
+                showToast('已儲存', 'success');
+                const viewport = getViewportForNode(id, 1.0);
+                if (viewport && reactFlowInstance?.setViewport) {
+                  reactFlowInstance.setViewport(viewport);
+                  localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+                }
+                focusNodeById(id, 1.0);
+                return;
+              }
               setEditingPersonId(null);
               showToast('沒有變更', 'warning');
               return;
