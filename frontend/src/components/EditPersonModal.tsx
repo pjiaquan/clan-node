@@ -79,6 +79,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   onSubmit,
 }) => {
   const [name, setName] = useState(person.name);
+  const [isNameEditable, setIsNameEditable] = useState(false);
   const [englishName, setEnglishName] = useState(person.english_name || '');
   const [gender, setGender] = useState(person.gender);
   const [bloodType, setBloodType] = useState(person.blood_type || '');
@@ -120,6 +121,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     const nextAvatars = normalizeAvatars(person.avatars);
     const nextDobParts = parsePartialDate(person.dob);
     setName(person.name);
+    setIsNameEditable(false);
     setEnglishName(person.english_name || '');
     setGender(person.gender);
     setBloodType(person.blood_type || '');
@@ -463,6 +465,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     }
   };
 
+  const handleUnlockNameEdit = useCallback(() => {
+    if (isNameEditable) return;
+    const confirmed = window.confirm('姓名會影響搜尋與識別，確定要解鎖姓名編輯嗎？');
+    if (!confirmed) return;
+    setIsNameEditable(true);
+  }, [isNameEditable]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -606,13 +615,32 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
         <h2>編輯成員</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>姓名</label>
+            <div className="name-lock-row">
+              <label>姓名</label>
+              {!isNameEditable ? (
+                <button
+                  type="button"
+                  className="btn-secondary name-lock-btn"
+                  onClick={handleUnlockNameEdit}
+                  disabled={isSaving}
+                >
+                  解鎖姓名編輯
+                </button>
+              ) : (
+                <span className="name-lock-chip">姓名已解鎖</span>
+              )}
+            </div>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
+              readOnly={!isNameEditable}
+              className={!isNameEditable ? 'name-input-locked' : undefined}
               required
-              autoFocus
+              autoFocus={isNameEditable}
             />
+            {!isNameEditable && (
+              <small className="name-lock-hint">為避免誤改，姓名欄位預設鎖定。</small>
+            )}
           </div>
           <div className="form-group">
             <label>英文名</label>

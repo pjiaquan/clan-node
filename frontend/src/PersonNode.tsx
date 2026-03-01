@@ -284,7 +284,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         </div>
         {(englishName || birthTime) && (
           <div className="node-meta">
-            {englishName && <span className="node-meta-chip">{englishName}</span>}
+            {englishName && <span className="node-meta-chip node-meta-chip-plain">{englishName}</span>}
             {birthTime && <span className="node-meta-chip">生 {birthTime}</span>}
           </div>
         )}

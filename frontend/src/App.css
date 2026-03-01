@@ -1905,6 +1905,13 @@ button:disabled:hover {
   flex: 0 1 100%;
 }
 
+.node-meta-chip-plain {
+  background: transparent;
+  border: none;
+  padding-inline: 0;
+  color: #64748b;
+}
+
 .node-name-text {
   display: block;
   white-space: nowrap;
@@ -2150,6 +2157,46 @@ button:disabled:hover {
   margin-bottom: 0.5rem;
   font-weight: 500;
   color: #475569;
+}
+
+.name-lock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.name-lock-row label {
+  margin-bottom: 0;
+}
+
+.name-lock-btn {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.name-lock-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #bfdbfe;
+}
+
+.name-input-locked {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.name-lock-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.76rem;
+  color: #64748b;
 }
 
 .form-group input,
@@ -3076,6 +3123,25 @@ button:disabled:hover {
 :root[data-theme='dark'] .relationship-name-code strong,
 :root[data-theme='dark'] .relationship-name-default strong {
   color: var(--app-text);
+}
+
+:root[data-theme='dark'] .name-lock-chip {
+  color: #bfdbfe;
+  background: rgba(30, 64, 175, 0.32);
+  border-color: rgba(147, 197, 253, 0.35);
+}
+
+:root[data-theme='dark'] .name-input-locked {
+  background: rgba(30, 41, 59, 0.55);
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] .name-lock-hint {
+  color: #94a3b8;
+}
+
+:root[data-theme='dark'] .node-meta-chip-plain {
+  color: #94a3b8;
 }
 
 :root[data-theme='dark'] .notice-message,
