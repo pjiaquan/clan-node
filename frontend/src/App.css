@@ -3403,6 +3403,8 @@ button:disabled:hover {
 }
 
 :root[data-theme='dark'] .node-meta-chip-plain {
+  background: transparent;
+  border: none;
   color: #94a3b8;
 }
 
