@@ -201,6 +201,7 @@ export function ClanGraph({
   const dragStartPositions = useRef<Record<string, { x: number; y: number }> | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
   const expandSelectTimer = useRef<number | null>(null);
+  const searchFocusTimer = useRef<number | null>(null);
   const searchFlashTimer = useRef<number | null>(null);
   const focusHoverTimer = useRef<number | null>(null);
   const lastEditedFocusTimer = useRef<number | null>(null);
@@ -701,6 +702,9 @@ export function ClanGraph({
   useEffect(() => () => {
     if (expandSelectTimer.current) {
       window.clearTimeout(expandSelectTimer.current);
+    }
+    if (searchFocusTimer.current) {
+      window.clearTimeout(searchFocusTimer.current);
     }
     if (lastEditedFocusTimer.current) {
       window.clearInterval(lastEditedFocusTimer.current);
@@ -1526,6 +1530,68 @@ export function ClanGraph({
     }
   }, [getViewportForNode]);
 
+  const revealCollapsedNodeBySearch = useCallback((targetId: string) => {
+    let changed = false;
+    const expandedIds = new Set<string>();
+
+    const nextMaternalRoots = new Set<string>(collapsedMaternalRoots);
+    collapsedMaternalRoots.forEach((rootId) => {
+      const hiddenIds = collectFamilySide(rootId, 'maternal');
+      if (!hiddenIds.has(targetId)) return;
+      changed = true;
+      nextMaternalRoots.delete(rootId);
+      hiddenIds.forEach((id) => expandedIds.add(id));
+    });
+
+    const nextPaternalRoots = new Set<string>(collapsedPaternalRoots);
+    collapsedPaternalRoots.forEach((rootId) => {
+      const hiddenIds = collectFamilySide(rootId, 'paternal');
+      if (!hiddenIds.has(targetId)) return;
+      changed = true;
+      nextPaternalRoots.delete(rootId);
+      hiddenIds.forEach((id) => expandedIds.add(id));
+    });
+
+    const nextChildRoots = new Set<string>(collapsedChildRoots);
+    collapsedChildRoots.forEach((rootId) => {
+      const hiddenIds = collectChildSide(rootId);
+      if (!hiddenIds.has(targetId)) return;
+      changed = true;
+      nextChildRoots.delete(rootId);
+      hiddenIds.forEach((id) => expandedIds.add(id));
+    });
+
+    const nextSiblingRoots = new Set<string>(collapsedSiblingRoots);
+    collapsedSiblingRoots.forEach((rootId) => {
+      const hiddenIds = collectSiblingSide(rootId);
+      if (!hiddenIds.has(targetId)) return;
+      changed = true;
+      nextSiblingRoots.delete(rootId);
+      hiddenIds.forEach((id) => expandedIds.add(id));
+    });
+
+    if (changed) {
+      setCollapsedMaternalRoots(nextMaternalRoots);
+      setCollapsedPaternalRoots(nextPaternalRoots);
+      setCollapsedChildRoots(nextChildRoots);
+      setCollapsedSiblingRoots(nextSiblingRoots);
+      if (expandedIds.size > 0) {
+        scheduleExpandedRelayout(expandedIds);
+      }
+    }
+
+    return changed;
+  }, [
+    collapsedMaternalRoots,
+    collapsedPaternalRoots,
+    collapsedChildRoots,
+    collapsedSiblingRoots,
+    collectFamilySide,
+    collectChildSide,
+    collectSiblingSide,
+    scheduleExpandedRelayout,
+  ]);
+
   const handleSearch = useCallback((query: string) => {
     if (!graphData) return;
     const trimmed = query.trim();
@@ -1536,11 +1602,31 @@ export function ClanGraph({
       showToast('找不到成員', 'warning');
       return;
     }
+    const wasCollapsed = collapsedNodeIds.has(match.id);
+    if (wasCollapsed) {
+      revealCollapsedNodeBySearch(match.id);
+    }
     setSelectedEdge(null);
     setSelectedNode(match.id);
-    setNodesRef.current?.((prev) => prev.map((node) => ({ ...node, selected: node.id === match.id })));
-    persistPendingViewport(match.id, 1.0);
-    setPendingFocus({ id: match.id, zoom: 1.0 });
+    setNodesRef.current?.((prev) => prev.map((node) => ({
+      ...node,
+      selected: node.id === match.id,
+    })));
+    if (searchFocusTimer.current) {
+      window.clearTimeout(searchFocusTimer.current);
+    }
+    const applyFocus = () => {
+      persistPendingViewport(match.id, 1.0);
+      setPendingFocus({ id: match.id, zoom: 1.0 });
+    };
+    if (wasCollapsed) {
+      searchFocusTimer.current = window.setTimeout(() => {
+        applyFocus();
+        searchFocusTimer.current = null;
+      }, 180);
+    } else {
+      applyFocus();
+    }
     if (searchFlashTimer.current) {
       window.clearTimeout(searchFlashTimer.current);
     }
@@ -1549,7 +1635,7 @@ export function ClanGraph({
     searchFlashTimer.current = window.setTimeout(() => {
       setSearchFlashId(null);
     }, 1400);
-  }, [graphData, persistPendingViewport]);
+  }, [graphData, collapsedNodeIds, persistPendingViewport, revealCollapsedNodeBySearch]);
 
   const focusNodeById = useCallback((id: string, zoom = 1.0) => {
     if (!reactFlowInstance) return false;
