@@ -959,6 +959,59 @@
   line-height: 1.35;
 }
 
+.graph-backup-panel {
+  border-color: #bfdbfe;
+}
+
+.graph-backup-hint {
+  margin: 0 0 0.7rem;
+  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.graph-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.graph-backup-file-input {
+  flex: 1 1 320px;
+  min-width: 220px;
+  max-width: 100%;
+  font-size: 0.82rem;
+  color: #1e293b;
+}
+
+.graph-backup-file-name {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.graph-backup-error,
+.graph-backup-success {
+  margin-top: 0.6rem;
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.graph-backup-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.graph-backup-success {
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
 .graph-settings-actions {
   display: flex;
   justify-content: flex-end;
@@ -2694,6 +2747,17 @@ button:disabled:hover {
     width: 100%;
   }
 
+  .graph-backup-actions {
+    align-items: stretch;
+  }
+
+  .graph-backup-actions .graph-settings-btn,
+  .graph-backup-file-input {
+    width: 100%;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
   .header {
     flex-direction: column;
     gap: 0.4rem;
@@ -3072,6 +3136,27 @@ button:disabled:hover {
 
 :root[data-theme='dark'] .graph-settings-toggle {
   background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] .graph-backup-hint,
+:root[data-theme='dark'] .graph-backup-file-name {
+  color: var(--app-muted);
+}
+
+:root[data-theme='dark'] .graph-backup-file-input {
+  color: var(--app-text);
+}
+
+:root[data-theme='dark'] .graph-backup-error {
+  background: rgba(153, 27, 27, 0.2);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
+:root[data-theme='dark'] .graph-backup-success {
+  background: rgba(5, 150, 105, 0.18);
+  border-color: rgba(74, 222, 128, 0.35);
+  color: #bbf7d0;
 }
 
 :root[data-theme='dark'] .node-meta-chip {

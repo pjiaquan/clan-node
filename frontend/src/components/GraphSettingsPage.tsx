@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { api } from '../api';
 import type { AuthUser } from '../types';
 import {
   DEFAULT_GRAPH_SETTINGS,
@@ -200,6 +201,13 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   onLogout,
 }) => {
   const [draft, setDraft] = useState<GraphSettings>(() => normalizeGraphSettings(settings));
+  const [backupFile, setBackupFile] = useState<File | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+
+  const isAdmin = currentUser.role === 'admin';
 
   useEffect(() => {
     setDraft(normalizeGraphSettings(settings));
@@ -230,6 +238,52 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
 
   const handleReset = () => {
     setDraft(DEFAULT_GRAPH_SETTINGS);
+  };
+
+  const handleExportBackup = async () => {
+    setBackupError(null);
+    setBackupMessage(null);
+    setIsExportingBackup(true);
+    try {
+      const payload = await api.exportNodeBackup();
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `clan-node-backup-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setBackupMessage('備份已下載');
+    } catch (error) {
+      setBackupError(error instanceof Error ? error.message : '匯出備份失敗');
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  const handleImportBackup = async () => {
+    if (!backupFile) return;
+    const confirmed = window.confirm('匯入將覆蓋目前所有節點、關係、頭像索引與自訂欄位，確定繼續？');
+    if (!confirmed) return;
+
+    setBackupError(null);
+    setBackupMessage(null);
+    setIsImportingBackup(true);
+    try {
+      const text = await backupFile.text();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const result = await api.importNodeBackup(parsed);
+      setBackupMessage(`匯入完成：${result.counts.people || 0} 個節點，${result.counts.relationships || 0} 條關係`);
+      setBackupFile(null);
+    } catch (error) {
+      setBackupError(error instanceof Error ? error.message : '匯入備份失敗');
+    } finally {
+      setIsImportingBackup(false);
+    }
   };
 
   return (
@@ -299,6 +353,46 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
             </div>
           </label>
         </section>
+
+        {isAdmin && (
+          <section className="graph-settings-panel graph-backup-panel">
+            <h2>節點資料備份（Admin）</h2>
+            <p className="graph-backup-hint">可匯出/匯入節點資料。匯入時會覆蓋目前資料，建議先匯出一份再操作。</p>
+            <div className="graph-backup-actions">
+              <button
+                type="button"
+                className="graph-settings-btn secondary"
+                onClick={handleExportBackup}
+                disabled={isExportingBackup || isImportingBackup}
+              >
+                {isExportingBackup ? '匯出中...' : '匯出備份 JSON'}
+              </button>
+              <input
+                className="graph-backup-file-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => {
+                  const nextFile = event.target.files?.[0] ?? null;
+                  setBackupFile(nextFile);
+                  setBackupError(null);
+                  setBackupMessage(null);
+                }}
+                disabled={isExportingBackup || isImportingBackup}
+              />
+              <button
+                type="button"
+                className="graph-settings-btn primary"
+                onClick={handleImportBackup}
+                disabled={!backupFile || isExportingBackup || isImportingBackup}
+              >
+                {isImportingBackup ? '匯入中...' : '匯入備份'}
+              </button>
+            </div>
+            {backupFile && <small className="graph-backup-file-name">已選擇：{backupFile.name}</small>}
+            {backupError && <div className="graph-backup-error">{backupError}</div>}
+            {backupMessage && <div className="graph-backup-success">{backupMessage}</div>}
+          </section>
+        )}
 
         <section className="graph-settings-actions">
           <button type="button" className="graph-settings-btn secondary" onClick={handleReset}>
