@@ -1705,6 +1705,20 @@ button:disabled:hover {
   transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
   overflow-x: hidden;
   overflow-y: visible;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.person-node::-webkit-scrollbar,
+.react-flow__node-person::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.react-flow__node-person {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .person-node:hover {
