@@ -54,7 +54,7 @@ const normalizeAvatars = (avatars: any): Avatar[] => {
     });
 };
 
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 const formatSaveError = (error: unknown) => {
@@ -63,7 +63,7 @@ const formatSaveError = (error: unknown) => {
     return '圖片格式不支援，請使用 JPG、PNG、WebP 或 GIF。';
   }
   if (raw.includes('file is too large') || raw.includes('HTTP 413')) {
-    return '圖片大小超過 5MB，請壓縮後再上傳。';
+    return '圖片大小超過 20MB，請壓縮後再上傳。';
   }
   if (raw.includes('HTTP 400')) {
     return '資料格式有誤，請確認欄位後再試。';
@@ -485,7 +485,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
     if (file.size > MAX_AVATAR_BYTES) {
-      setSaveError('圖片大小超過 5MB，請壓縮後再上傳。');
+      setSaveError('圖片大小超過 20MB，請壓縮後再上傳。');
       return;
     }
     if (!ACCEPTED_AVATAR_TYPES.has(file.type)) {

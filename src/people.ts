@@ -63,7 +63,7 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
 }
 
 export function registerPeopleRoutes(app: Hono<AppBindings>) {
-  const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+  const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
   const ALLOWED_AVATAR_TYPES: Record<string, string> = {
     'image/jpeg': 'jpg',
     'image/png': 'png',

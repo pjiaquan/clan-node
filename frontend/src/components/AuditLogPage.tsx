@@ -61,6 +61,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
   const [limit, setLimit] = useState(200);
   const [actionFilter, setActionFilter] = useState('all');
   const [resourceFilter, setResourceFilter] = useState('all');
+  const [keyword, setKeyword] = useState('');
 
   const loadLogs = useCallback(async (silent = false) => {
     try {
@@ -96,9 +97,23 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
     logs.filter((log) => {
       if (actionFilter !== 'all' && log.action !== actionFilter) return false;
       if (resourceFilter !== 'all' && log.resource_type !== resourceFilter) return false;
+      const query = keyword.trim().toLowerCase();
+      if (!query) return true;
+      const details = serializeDetails(log.details);
+      const searchText = [
+        log.actor_username || '',
+        log.actor_role || '',
+        prettyAction(log.action),
+        prettyResource(log.resource_type),
+        log.resource_id || '',
+        log.summary || '',
+        details,
+        log.created_at || '',
+      ].join(' ').toLowerCase();
+      if (!searchText.includes(query)) return false;
       return true;
     })
-  ), [logs, actionFilter, resourceFilter]);
+  ), [logs, actionFilter, resourceFilter, keyword]);
 
   return (
     <div className="notice-page">
@@ -152,6 +167,13 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
               <option value="200">最近 200 筆</option>
               <option value="500">最近 500 筆</option>
             </select>
+            <input
+              type="search"
+              className="notice-filter-select audit-log-search-input"
+              placeholder="搜尋操作者、摘要、資源 ID、詳細內容"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+            />
             <button
               type="button"
               className="notice-btn secondary"
@@ -167,7 +189,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
           {loading ? (
             <div className="notice-loading">載入修改記錄中...</div>
           ) : (
-            <div className="notice-table-wrap">
+            <div className="notice-table-wrap audit-log-table-wrap">
               <table className="notice-table">
                 <thead>
                   <tr>
