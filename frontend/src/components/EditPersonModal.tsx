@@ -11,6 +11,7 @@ export type EditPersonAvatarActions = {
 
 interface EditPersonModalProps {
   person: Person;
+  showBirthTimeField?: boolean;
   onClose: () => void;
   onUnsavedClose?: () => void;
   onSubmit: (
@@ -53,7 +54,30 @@ const normalizeAvatars = (avatars: any): Avatar[] => {
     });
 };
 
-export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClose, onUnsavedClose, onSubmit }) => {
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+const formatSaveError = (error: unknown) => {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes('unsupported file type')) {
+    return '圖片格式不支援，請使用 JPG、PNG、WebP 或 GIF。';
+  }
+  if (raw.includes('file is too large') || raw.includes('HTTP 413')) {
+    return '圖片大小超過 5MB，請壓縮後再上傳。';
+  }
+  if (raw.includes('HTTP 400')) {
+    return '資料格式有誤，請確認欄位後再試。';
+  }
+  return raw || '儲存失敗，請稍後再試。';
+};
+
+export const EditPersonModal: React.FC<EditPersonModalProps> = ({
+  person,
+  showBirthTimeField = true,
+  onClose,
+  onUnsavedClose,
+  onSubmit,
+}) => {
   const [name, setName] = useState(person.name);
   const [englishName, setEnglishName] = useState(person.english_name || '');
   const [gender, setGender] = useState(person.gender);
@@ -77,6 +101,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const [removeAvatar, setRemoveAvatar] = useState(false);
   const [avatarImage, setAvatarImage] = useState<HTMLImageElement | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -116,6 +141,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
     setRemoveAvatar(false);
     setAvatarImage(null);
     setIsSaving(false);
+    setSaveError(null);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
     setCustomFields(normalizeCustomFields(person.metadata?.customFields));
@@ -303,7 +329,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   };
 
   const saveChanges = useCallback(async () => {
-    const croppedAvatar = await createCroppedAvatar();
+    const croppedAvatar = avatarFile
+      ? ((await createCroppedAvatar()) || avatarFile)
+      : null;
     const normalizedEnglish = englishName.trim();
     const nextUpdates: Partial<Person> = {
       name,
@@ -423,11 +451,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
+    setSaveError(null);
     setIsSaving(true);
     try {
       await saveChanges();
     } catch (error) {
       console.error('Failed to save person changes:', error);
+      setSaveError(formatSaveError(error));
     } finally {
       setIsSaving(false);
     }
@@ -445,6 +475,15 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
 
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
+    if (file.size > MAX_AVATAR_BYTES) {
+      setSaveError('圖片大小超過 5MB，請壓縮後再上傳。');
+      return;
+    }
+    if (!ACCEPTED_AVATAR_TYPES.has(file.type)) {
+      setSaveError('圖片格式不支援，請使用 JPG、PNG、WebP 或 GIF。');
+      return;
+    }
+    setSaveError(null);
     setAvatarFile(file);
     setRemoveAvatar(false);
     setSelectedPrimaryAvatarId(null);
@@ -545,6 +584,21 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
   const westernAge = calculateWesternAge();
   const traditionalAge = calculateTraditionalAge();
   const canRemoveAvatar = Boolean(avatarPreview || activePrimaryAvatarUrl || avatarFile);
+  const avatarStatusTone = removeAvatar
+    ? 'warning'
+    : avatarFile
+      ? 'accent'
+      : activePrimaryAvatarId
+        ? 'stable'
+        : 'muted';
+  const avatarStatusLabel = removeAvatar
+    ? '已標記清除主頭像'
+    : avatarFile
+      ? '新照片待儲存'
+      : activePrimaryAvatarId
+        ? '使用既有照片'
+        : '尚未設定主頭像';
+  const zoomPercent = Math.round(zoom * 100);
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
@@ -570,155 +624,200 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
           <div className="form-group">
             <label>頭像</label>
             <div className="avatar-picker">
-              <div
-                ref={cropperRef}
-                className={`avatar-cropper ${avatarPreview ? 'has-image' : ''} ${isDragging ? 'dragging' : ''}`}
-                onPointerDown={(event) => {
-                  if (!avatarImage || event.button !== 0) return;
-                  event.preventDefault();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  dragStateRef.current = {
-                    pointerId: event.pointerId,
-                    x: event.clientX,
-                    y: event.clientY,
-                    offsetX: offset.x,
-                    offsetY: offset.y
-                  };
-                }}
-                onPointerMove={(event) => {
-                  const dragState = dragStateRef.current;
-                  if (!dragState || dragState.pointerId !== event.pointerId) return;
-                  event.preventDefault();
-                  const deltaX = event.clientX - dragState.x;
-                  const deltaY = event.clientY - dragState.y;
-                  setOffset(clampOffset({
-                    x: dragState.offsetX + deltaX,
-                    y: dragState.offsetY + deltaY
-                  }));
-                }}
-                onPointerUp={stopAvatarDrag}
-                onPointerCancel={stopAvatarDrag}
-                onLostPointerCapture={stopAvatarDrag}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setIsDragging(true);
-                  skipClickRef.current = true;
-                }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setIsDragging(false);
-                  skipClickRef.current = true;
-                  window.setTimeout(() => {
-                    skipClickRef.current = false;
-                  }, 250);
-                  const file = event.dataTransfer.files?.[0] || null;
-                  handleFileSelect(file);
-                }}
-                style={{
-                  width: cropSize,
-                  height: cropSize,
-                }}
-              >
-                {avatarPreview && avatarImage ? (
-                  <img
-                    src={avatarPreview}
-                    alt={`${name} avatar`}
-                    style={{
-                      width: avatarImage.width * effectiveZoom,
-                      height: avatarImage.height * effectiveZoom,
-                      left: `calc(50% + ${offset.x}px)`,
-                      top: `calc(50% + ${offset.y}px)`,
-                    }}
-                  />
-                ) : (
-                  <span>拖拉圖片</span>
-                )}
-              </div>
-              <div className="avatar-actions">
-                <label className="btn-secondary avatar-upload">
-                  選擇圖片
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      handleFileSelect(e.target.files?.[0] || null);
-                    }}
-                  />
-                </label>
-                {avatarPreview && (
-                  <input
-                    className="avatar-zoom"
-                    type="range"
-                    min="1"
-                    max="3"
-                    step="0.05"
-                    value={zoom}
-                    onChange={(e) => setZoom(Number(e.target.value))}
-                  />
-                )}
-                {canRemoveAvatar && (
-                  <button
-                    type="button"
-                    className="btn-danger"
-                    onClick={() => {
-                      const confirmed = window.confirm('確定要移除目前主頭像嗎？');
-                      if (!confirmed) return;
-                      setAvatarFile(null);
-                      setSelectedPrimaryAvatarId(null);
-                      setRemoveAvatar(true);
-                    }}
-                  >
-                    移除主頭像
-                  </button>
-                )}
+              <div className="avatar-editor-main">
+                <div
+                  ref={cropperRef}
+                  className={`avatar-cropper ${avatarPreview ? 'has-image' : ''} ${isDragging ? 'dragging' : ''}`}
+                  onPointerDown={(event) => {
+                    if (!avatarImage || event.button !== 0) return;
+                    event.preventDefault();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    dragStateRef.current = {
+                      pointerId: event.pointerId,
+                      x: event.clientX,
+                      y: event.clientY,
+                      offsetX: offset.x,
+                      offsetY: offset.y
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const dragState = dragStateRef.current;
+                    if (!dragState || dragState.pointerId !== event.pointerId) return;
+                    event.preventDefault();
+                    const deltaX = event.clientX - dragState.x;
+                    const deltaY = event.clientY - dragState.y;
+                    setOffset(clampOffset({
+                      x: dragState.offsetX + deltaX,
+                      y: dragState.offsetY + deltaY
+                    }));
+                  }}
+                  onPointerUp={stopAvatarDrag}
+                  onPointerCancel={stopAvatarDrag}
+                  onLostPointerCapture={stopAvatarDrag}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setIsDragging(true);
+                    skipClickRef.current = true;
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setIsDragging(false);
+                    skipClickRef.current = true;
+                    window.setTimeout(() => {
+                      skipClickRef.current = false;
+                    }, 250);
+                    const file = event.dataTransfer.files?.[0] || null;
+                    handleFileSelect(file);
+                  }}
+                  style={{
+                    width: cropSize,
+                    height: cropSize,
+                  }}
+                >
+                  {avatarPreview && avatarImage ? (
+                    <img
+                      src={avatarPreview}
+                      alt={`${name} avatar`}
+                      style={{
+                        width: avatarImage.width * effectiveZoom,
+                        height: avatarImage.height * effectiveZoom,
+                        left: `calc(50% + ${offset.x}px)`,
+                        top: `calc(50% + ${offset.y}px)`,
+                      }}
+                    />
+                  ) : (
+                    <span>拖曳照片到這裡</span>
+                  )}
+                </div>
+                <div className="avatar-editor-meta">
+                  <div className="avatar-status-row">
+                    <span className={`avatar-status-badge tone-${avatarStatusTone}`}>
+                      {avatarStatusLabel}
+                    </span>
+                    <span className="avatar-status-chip">
+                      目前可用 {availableAvatars.length} 張
+                    </span>
+                  </div>
+                  <p className="avatar-editor-hint">
+                    選擇照片後可直接拖曳調整構圖，儲存時會套用裁切結果。
+                  </p>
+                  <div className="avatar-actions-row">
+                    <label className="btn-secondary avatar-upload">
+                      選擇照片
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        onChange={(e) => {
+                          handleFileSelect(e.target.files?.[0] || null);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                    {canRemoveAvatar && (
+                      <button
+                        type="button"
+                        className="btn-danger avatar-danger-btn"
+                        onClick={() => {
+                          const confirmed = window.confirm('確定要移除目前主頭像嗎？');
+                          if (!confirmed) return;
+                          setAvatarFile(null);
+                          setSelectedPrimaryAvatarId(null);
+                          setRemoveAvatar(true);
+                        }}
+                      >
+                        移除主頭像
+                      </button>
+                    )}
+                  </div>
+                  {avatarPreview && (
+                    <div className="avatar-zoom-wrap">
+                      <div className="avatar-zoom-head">
+                        <span>縮放</span>
+                        <span>{zoomPercent}%</span>
+                      </div>
+                      <input
+                        className="avatar-zoom"
+                        type="range"
+                        min="1"
+                        max="3"
+                        step="0.05"
+                        value={zoom}
+                        onChange={(e) => setZoom(Number(e.target.value))}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               {initialAvatars.length > 0 && (
-                <div className="avatar-gallery">
-                  {initialAvatars.map((avatar) => {
-                    const deleted = deleteAvatarIds.includes(avatar.id);
-                    const isPrimary = !deleted && avatar.id === activePrimaryAvatarId;
-                    const previewUrl = api.resolveAvatarUrl(avatar.avatar_url) || avatar.avatar_url;
-                    return (
-                      <div
-                        key={avatar.id}
-                        className={`avatar-gallery-item ${isPrimary ? 'is-primary' : ''} ${deleted ? 'is-deleted' : ''}`}
-                      >
-                        <img src={previewUrl} alt={`${name} avatar`} />
-                        <div className="avatar-gallery-actions">
+                <div className="avatar-library">
+                  <div className="avatar-library-head">
+                    <span>照片庫</span>
+                    <span>{initialAvatars.length} 張</span>
+                  </div>
+                  <div className="avatar-gallery">
+                    {initialAvatars.map((avatar) => {
+                      const deleted = deleteAvatarIds.includes(avatar.id);
+                      const isPrimary = !deleted && avatar.id === activePrimaryAvatarId;
+                      const previewUrl = api.resolveAvatarUrl(avatar.avatar_url) || avatar.avatar_url;
+                      return (
+                        <div
+                          key={avatar.id}
+                          className={`avatar-gallery-item ${isPrimary ? 'is-primary' : ''} ${deleted ? 'is-deleted' : ''}`}
+                        >
                           <button
                             type="button"
-                            className="btn-secondary"
-                            disabled={deleted || isPrimary}
+                            className="avatar-gallery-preview"
+                            disabled={deleted}
                             onClick={() => {
                               setSelectedPrimaryAvatarId(avatar.id);
                               setRemoveAvatar(false);
                             }}
                           >
-                            {isPrimary ? '主頭像' : '設主頭像'}
+                            <img src={previewUrl} alt={`${name} avatar`} />
+                            {isPrimary && <span className="avatar-badge is-primary">主頭像</span>}
+                            {deleted && <span className="avatar-badge is-deleted">待刪除</span>}
                           </button>
-                          {!deleted ? (
-                            <button
-                              type="button"
-                              className="btn-danger"
-                              onClick={() => markAvatarForDelete(avatar.id)}
-                            >
-                              刪除
-                            </button>
-                          ) : (
+                          <div className="avatar-gallery-actions">
                             <button
                               type="button"
                               className="btn-secondary"
-                              onClick={() => undoDeleteAvatar(avatar.id)}
+                              disabled={deleted || isPrimary}
+                              onClick={() => {
+                                setSelectedPrimaryAvatarId(avatar.id);
+                                setRemoveAvatar(false);
+                              }}
                             >
-                              還原
+                              {isPrimary ? '目前主頭像' : '設為主頭像'}
                             </button>
-                          )}
+                            {!deleted ? (
+                              <button
+                                type="button"
+                                className="btn-danger avatar-gallery-danger"
+                                onClick={() => markAvatarForDelete(avatar.id)}
+                              >
+                                刪除
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => undoDeleteAvatar(avatar.id)}
+                              >
+                                還原
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {saveError && (
+                <div className="report-issue-error" style={{ marginTop: '0.55rem' }}>
+                  {saveError}
                 </div>
               )}
             </div>
@@ -857,19 +956,21 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({ person, onClos
               </div>
             )}
           </div>
-          <div className="form-group">
-            <label>
-              出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
-            </label>
-            <select value={tob} onChange={(e) => setTob(e.target.value)}>
-              <option value="">--</option>
-              {TRADITIONAL_HOURS.map((hour) => (
-                <option key={hour.name} value={hour.name}>
-                  {hour.name} ({hour.range})
-                </option>
-              ))}
-            </select>
-          </div>
+          {showBirthTimeField && (
+            <div className="form-group">
+              <label>
+                出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
+              </label>
+              <select value={tob} onChange={(e) => setTob(e.target.value)}>
+                <option value="">--</option>
+                {TRADITIONAL_HOURS.map((hour) => (
+                  <option key={hour.name} value={hour.name}>
+                    {hour.name} ({hour.range})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {showDeathFields && (
             <>
               <div className="form-group">

@@ -3099,6 +3099,7 @@ export function ClanGraph({
 
       {!isReadOnly && showAddModal && (
         <AddPersonModal
+          showBirthTimeField={graphSettings.showBirthTimeOnNode}
           onClose={() => setShowAddModal(false)}
           onSubmit={async (name, englishName, gender, dob, dod, tob, tod, bloodType) => {
             const person = await createPerson(name, englishName, gender, dob, dod, tob, tod, bloodType);
@@ -3165,6 +3166,7 @@ export function ClanGraph({
       {!isReadOnly && editingPersonId && graphData && (
         <EditPersonModal
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
+          showBirthTimeField={graphSettings.showBirthTimeOnNode}
           onClose={() => setEditingPersonId(null)}
           onUnsavedClose={() => showToast('未儲存變更', 'warning')}
           onSubmit={async (id, updates, avatarFile, removeAvatar, avatarActions?: EditPersonAvatarActions) => {
@@ -3203,19 +3205,16 @@ export function ClanGraph({
 
             if (avatarFile) {
               const nextHash = await hashAvatarFile(avatarFile);
-              const existingHash = (existingMetadata as any).avatarHash as string | undefined;
-              if (!nextHash || nextHash !== existingHash) {
-                const { avatar_url } = await api.uploadPersonAvatar(id, avatarFile, { setPrimary: true });
-                nextUpdates.avatar_url = avatar_url;
-                avatarOperationApplied = true;
-                if (!mergedMetadata) {
-                  mergedMetadata = { ...existingMetadata };
-                }
-                if (nextHash) {
-                  (mergedMetadata as any).avatarHash = nextHash;
-                } else {
-                  delete (mergedMetadata as any).avatarHash;
-                }
+              const { avatar_url } = await api.uploadPersonAvatar(id, avatarFile, { setPrimary: true });
+              nextUpdates.avatar_url = avatar_url;
+              avatarOperationApplied = true;
+              if (!mergedMetadata) {
+                mergedMetadata = { ...existingMetadata };
+              }
+              if (nextHash) {
+                (mergedMetadata as any).avatarHash = nextHash;
+              } else {
+                delete (mergedMetadata as any).avatarHash;
               }
             }
 

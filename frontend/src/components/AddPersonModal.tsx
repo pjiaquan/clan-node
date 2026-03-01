@@ -3,6 +3,7 @@ import { getGanzhiYear, getModernTimeRange, getZodiacAnimal, normalizeTraditiona
 import { clampDay, composePartialDate } from '../utils/partialDate';
 
 interface AddPersonModalProps {
+  showBirthTimeField?: boolean;
   onClose: () => void;
   onSubmit: (
     name: string,
@@ -16,7 +17,11 @@ interface AddPersonModalProps {
   ) => void;
 }
 
-export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmit }) => {
+export const AddPersonModal: React.FC<AddPersonModalProps> = ({
+  showBirthTimeField = true,
+  onClose,
+  onSubmit,
+}) => {
   const [dobYear, setDobYear] = useState('');
   const [dobMonth, setDobMonth] = useState('');
   const [dobDay, setDobDay] = useState('');
@@ -212,19 +217,21 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({ onClose, onSubmi
               </div>
             )}
           </div>
-          <div className="form-group">
-            <label>
-              出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
-            </label>
-            <select name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
-              <option value="">--</option>
-              {TRADITIONAL_HOURS.map((hour) => (
-                <option key={hour.name} value={hour.name}>
-                  {hour.name} ({hour.range})
-                </option>
-              ))}
-            </select>
-          </div>
+          {showBirthTimeField && (
+            <div className="form-group">
+              <label>
+                出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
+              </label>
+              <select name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
+                <option value="">--</option>
+                {TRADITIONAL_HOURS.map((hour) => (
+                  <option key={hour.name} value={hour.name}>
+                    {hour.name} ({hour.range})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {showDeathFields && (
             <>
               <div className="form-group">

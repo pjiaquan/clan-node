@@ -9,7 +9,7 @@ import {
 type GraphSettingsPageProps = {
   currentUser: AuthUser;
   settings: GraphSettings;
-  onSave: (settings: GraphSettings) => void;
+  onSave: (settings: GraphSettings, options?: { navigate?: boolean }) => void;
   onBack: () => void;
   onLogout: () => Promise<void> | void;
 };
@@ -215,7 +215,17 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   };
 
   const handleSave = () => {
-    onSave(normalizeGraphSettings(draft));
+    onSave(normalizeGraphSettings(draft), { navigate: true });
+  };
+
+  const handleBack = () => {
+    const normalizedDraft = normalizeGraphSettings(draft);
+    const normalizedSettings = normalizeGraphSettings(settings);
+    if (JSON.stringify(normalizedDraft) !== JSON.stringify(normalizedSettings)) {
+      onSave(normalizedDraft, { navigate: true });
+      return;
+    }
+    onBack();
   };
 
   const handleReset = () => {
@@ -226,7 +236,7 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     <div className="graph-settings-page">
       <header className="graph-settings-header">
         <div className="graph-settings-header-left">
-          <button type="button" className="graph-settings-btn ghost" onClick={onBack}>
+          <button type="button" className="graph-settings-btn ghost" onClick={handleBack}>
             返回族谱
           </button>
           <div>
@@ -272,15 +282,20 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
               checked={draft.showBirthTimeOnNode}
               onChange={(event) => {
                 const nextChecked = event.target.checked;
+                const nextDraft = {
+                  ...draft,
+                  showBirthTimeOnNode: nextChecked,
+                };
                 setDraft((prev) => ({
                   ...prev,
                   showBirthTimeOnNode: nextChecked,
                 }));
+                onSave(normalizeGraphSettings(nextDraft), { navigate: false });
               }}
             />
             <div>
               <span className="graph-settings-field-label">顯示出生時辰</span>
-              <small>關閉時節點不顯示出生時辰，開啟後才會顯示</small>
+              <small>關閉時「新增/編輯節點」不顯示出生時辰欄位，開啟後才會顯示</small>
             </div>
           </label>
         </section>

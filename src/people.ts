@@ -137,20 +137,23 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       : null;
     const primary = preferred || resolvePrimaryAvatar(avatars) || avatars[0];
 
+    // Use two-step updates to avoid partial unique-index conflicts while switching primary avatar.
     await db.prepare(
-      `UPDATE person_avatars
-       SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END,
-           updated_at = CASE WHEN id = ? THEN ? ELSE updated_at END
-       WHERE person_id = ?`
-    ).bind(primary.id, primary.id, now, personId).run();
+      'UPDATE person_avatars SET is_primary = 0, updated_at = ? WHERE person_id = ? AND is_primary = 1'
+    ).bind(now, personId).run();
 
     await db.prepare(
-      'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-    ).bind(primary.avatar_url, now, personId).run();
+      'UPDATE person_avatars SET is_primary = 1, updated_at = ? WHERE person_id = ? AND id = ?'
+    ).bind(now, personId, primary.id).run();
 
     const synced = await loadPersonAvatars(db, personId);
+    const syncedPrimary = resolvePrimaryAvatar(synced);
+    await db.prepare(
+      'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
+    ).bind(syncedPrimary?.avatar_url || null, now, personId).run();
+
     return {
-      primary: resolvePrimaryAvatar(synced),
+      primary: syncedPrimary,
       avatars: synced
     };
   };
@@ -183,7 +186,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       personId,
       avatarUrl,
       storageKey,
-      isPrimary ? 1 : 0,
+      0,
       sortOrder,
       now,
       now

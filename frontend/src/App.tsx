@@ -165,10 +165,15 @@ function App() {
     navigateTo('graph');
   }, [navigateTo]);
 
-  const handleSaveGraphSettings = useCallback((nextSettings: GraphSettings) => {
+  const handleSaveGraphSettings = useCallback((
+    nextSettings: GraphSettings,
+    options?: { navigate?: boolean },
+  ) => {
     const saved = saveGraphSettings(nextSettings, authUser?.username ?? null);
     setGraphSettings(saved);
-    navigateTo('graph');
+    if (options?.navigate ?? true) {
+      navigateTo('graph');
+    }
   }, [authUser, navigateTo]);
 
   useEffect(() => {
@@ -358,7 +363,7 @@ function App() {
     toggleTheme,
   ]);
 
-  const hideFloatingThemeToggle = isAuthed && view === 'graph' && isMobileViewport;
+  const hideFloatingThemeToggle = isMobileViewport;
 
   return (
     <>
