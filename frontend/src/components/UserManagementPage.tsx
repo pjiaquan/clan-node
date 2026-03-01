@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser, ManagedUser, UserRole } from '../types';
 import { CreateUserModal } from './CreateUserModal';
+import { PageHeaderMenu } from './PageHeaderMenu';
 
 type UserManagementPageProps = {
   currentUser: AuthUser;
@@ -99,22 +100,15 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
     <div className="user-admin-page">
       <header className="user-admin-header">
         <div className="user-admin-header-left">
-          <button type="button" className="user-admin-btn ghost page-header-icon-btn" onClick={onBack} aria-label="返回族譜" title="返回族譜">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
           <h1>帳號管理</h1>
         </div>
         <div className="user-admin-header-right">
           <span className="user-admin-current-user">{currentUser.username}</span>
-          <button type="button" className="user-admin-btn ghost page-header-icon-btn" onClick={onLogout} aria-label="登出" title="登出">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M14 7h-4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M16 12H9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M13 9l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <PageHeaderMenu
+            username={currentUser.username}
+            onBack={onBack}
+            onLogout={onLogout}
+          />
         </div>
       </header>
 

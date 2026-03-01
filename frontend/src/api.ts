@@ -22,8 +22,17 @@ export type CreateRelationshipResponse = Relationship & {
 };
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
-const API_BASE = import.meta.env.VITE_API_BASE
-  || (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev');
+const normalizeApiBase = (value: string) => {
+  let next = value.trim().replace(/\/+$/, '');
+  if (next.endsWith('/api')) {
+    next = next.slice(0, -4);
+  }
+  return next;
+};
+const API_BASE = normalizeApiBase(
+  import.meta.env.VITE_API_BASE
+    || (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev')
+);
 
 const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;

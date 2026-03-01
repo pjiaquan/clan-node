@@ -905,6 +905,20 @@
   flex: 0 0 auto;
 }
 
+.page-header-menu {
+  margin-left: 0;
+}
+
+.page-header-menu-trigger {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  color: #ffffff !important;
+}
+
+.page-header-menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
 .graph-settings-main {
   width: min(1180px, calc(100vw - 2rem));
   margin: 1.2rem auto 1.5rem;
@@ -2911,6 +2925,10 @@ button:disabled:hover {
     display: none;
   }
 
+  .page-header-menu {
+    display: inline-flex;
+  }
+
   .react-flow__panel.react-flow__controls {
     display: none;
   }
@@ -3057,6 +3075,10 @@ button:disabled:hover {
 
   .header-action-menu {
     display: none;
+  }
+
+  .page-header-menu {
+    display: inline-flex;
   }
 
   .mobile-search-results {
