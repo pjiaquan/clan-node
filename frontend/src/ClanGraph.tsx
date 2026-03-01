@@ -71,6 +71,8 @@ const CTRL_HOVER_DIM_NODE_OPACITY = 0.18;
 const CTRL_HOVER_DIM_EDGE_OPACITY = 0.12;
 const CTRL_HOVER_EDGE_WIDTH_BOOST = 2;
 const CTRL_HOVER_MIN_EDGE_WIDTH = 4;
+const EDGE_FOCUS_DIM_NODE_OPACITY = 0.2;
+const EDGE_FOCUS_DIM_EDGE_OPACITY = 0.2;
 const COARSE_MIN_DRAG_DISTANCE_BONUS = 6;
 const COARSE_Y_SNAP_BONUS = 4;
 const COARSE_Y_RELEASE_BONUS = 6;
@@ -1852,6 +1854,33 @@ export function ClanGraph({
     return { connectedNodeIds, connectedEdgeIds };
   }, [graphData, collapsedNodeIds, ctrlHoverFocusId]);
   const isCtrlHoverActive = Boolean(ctrlHoverFocusId);
+  const { selectedEdgeFocusNodeIds, selectedEdgeFocusEdgeIds } = useMemo(() => {
+    const focusNodeIds = new Set<string>();
+    const focusEdgeIds = new Set<string>();
+    if (!graphData || !selectedEdge) {
+      return { selectedEdgeFocusNodeIds: focusNodeIds, selectedEdgeFocusEdgeIds: focusEdgeIds };
+    }
+    const selected = graphData.edges.find((edge) => `e${edge.id}` === selectedEdge);
+    if (!selected) {
+      return { selectedEdgeFocusNodeIds: focusNodeIds, selectedEdgeFocusEdgeIds: focusEdgeIds };
+    }
+    focusNodeIds.add(selected.from_person_id);
+    focusNodeIds.add(selected.to_person_id);
+
+    graphData.edges.forEach((edge) => {
+      const sameForward = edge.from_person_id === selected.from_person_id && edge.to_person_id === selected.to_person_id;
+      const sameReverse = edge.from_person_id === selected.to_person_id && edge.to_person_id === selected.from_person_id;
+      if (sameForward || sameReverse) {
+        focusEdgeIds.add(`e${edge.id}`);
+      }
+    });
+
+    if (focusEdgeIds.size === 0) {
+      focusEdgeIds.add(selectedEdge);
+    }
+    return { selectedEdgeFocusNodeIds: focusNodeIds, selectedEdgeFocusEdgeIds: focusEdgeIds };
+  }, [graphData, selectedEdge]);
+  const isSelectedEdgeFocusActive = selectedEdgeFocusEdgeIds.size > 0;
 
   const initialNodes: Node[] = useMemo(() => {
     if (!graphData) return [];
@@ -1868,7 +1897,10 @@ export function ClanGraph({
       const title = person.title || '';
       const formalTitle = person.formal_title || '';
       const avatarUrl = person.avatar_url ? avatarBlobs[person.avatar_url] : null;
-      const baseOpacity = dimIds.has(person.id) ? 0.35 : 1;
+      let baseOpacity = dimIds.has(person.id) ? 0.35 : 1;
+      if (isSelectedEdgeFocusActive && !selectedEdgeFocusNodeIds.has(person.id)) {
+        baseOpacity = Math.min(baseOpacity, EDGE_FOCUS_DIM_NODE_OPACITY);
+      }
       const isConnectedToHoverNode = ctrlHoverConnectedNodeIds.has(person.id);
       const opacity = isCtrlHoverActive && !isConnectedToHoverNode
         ? Math.min(baseOpacity, CTRL_HOVER_DIM_NODE_OPACITY)
@@ -1956,7 +1988,7 @@ export function ClanGraph({
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
+  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, selectedEdgeFocusNodeIds, isSelectedEdgeFocusActive, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -1966,7 +1998,9 @@ export function ClanGraph({
       .map((edge) => {
         const edgeId = `e${edge.id}`;
         const isSelected = selectedEdge === edgeId;
-        const isDimmed = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
+        const isDimmedByNode = dimIds.has(edge.from_person_id) || dimIds.has(edge.to_person_id);
+        const isDimmedBySelectedEdgeFocus = isSelectedEdgeFocusActive && !selectedEdgeFocusEdgeIds.has(edgeId);
+        const isDimmed = isDimmedByNode || isDimmedBySelectedEdgeFocus;
         const isConnectedToHoverNode = ctrlHoverConnectedEdgeIds.has(edgeId);
 
         const getEdgeStyle = (type: string, selected: boolean) => {
@@ -2001,7 +2035,8 @@ export function ClanGraph({
           markerEnd: { type: MarkerType.ArrowClosed },
           style: (() => {
             const baseStyle = getEdgeStyle(edge.type, isSelected);
-            const baseOpacity = isSelected ? 1 : (isDimmed ? 0.35 : 1);
+            const dimOpacity = isDimmedBySelectedEdgeFocus ? EDGE_FOCUS_DIM_EDGE_OPACITY : 0.35;
+            const baseOpacity = isSelected ? 1 : (isDimmed ? dimOpacity : 1);
             if (!isCtrlHoverActive) {
               return { ...baseStyle, opacity: baseOpacity };
             }
@@ -2018,11 +2053,19 @@ export function ClanGraph({
             };
           })(),
           label: getLabel(edge.type),
+          labelStyle: (() => {
+            const dimOpacity = isDimmedBySelectedEdgeFocus ? EDGE_FOCUS_DIM_EDGE_OPACITY : 0.35;
+            const baseOpacity = isSelected ? 1 : (isDimmed ? dimOpacity : 1);
+            const finalOpacity = isCtrlHoverActive && !isConnectedToHoverNode
+              ? Math.min(baseOpacity, CTRL_HOVER_DIM_EDGE_OPACITY)
+              : baseOpacity;
+            return { opacity: finalOpacity };
+          })(),
           zIndex: isSelected ? 1000 : (isConnectedToHoverNode ? 800 : 0),
           interactionWidth: isCoarsePointer ? 56 : 24,
         };
       });
-  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer]);
+  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
