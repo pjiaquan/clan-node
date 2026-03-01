@@ -27,7 +27,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
   const rawTitle = typeof data.title === 'string' ? data.title : '';
   const isLongTitle = rawTitle.length > 4;
   const displayTitle = isLongTitle ? `${rawTitle.slice(0, 4)}...` : rawTitle;
-  const bloodType = typeof data.bloodType === 'string' ? data.bloodType.trim() : '';
+  const englishName = typeof data.englishName === 'string' ? data.englishName.trim() : '';
   const birthTime = typeof data.birthTime === 'string' ? data.birthTime.trim() : '';
 
   const clearTouchLongPressTimer = () => {
@@ -282,9 +282,9 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           <span ref={nameTextRef} className="node-name-text">{data.name}</span>
           {nameOverflow && <span className="node-name-tooltip">{data.name}</span>}
         </div>
-        {(bloodType || birthTime) && (
+        {(englishName || birthTime) && (
           <div className="node-meta">
-            {bloodType && <span className="node-meta-chip">血型 {bloodType}</span>}
+            {englishName && <span className="node-meta-chip">{englishName}</span>}
             {birthTime && <span className="node-meta-chip">生 {birthTime}</span>}
           </div>
         )}

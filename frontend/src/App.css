@@ -1690,8 +1690,9 @@ button:disabled:hover {
 .person-node {
   padding: 0;
   width: 132px;
-  min-height: 124px;
-  height: auto;
+  min-height: 132px;
+  height: 132px;
+  max-height: 132px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1869,12 +1870,14 @@ button:disabled:hover {
 
 .node-meta {
   min-height: 1.05rem;
+  height: 1.15rem;
   padding: 0 0.48rem 0.1rem;
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 0.28rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .node-meta-chip {
@@ -1884,6 +1887,10 @@ button:disabled:hover {
   border-radius: 999px;
   color: #334155;
   background: #e2e8f0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .node-name-text {

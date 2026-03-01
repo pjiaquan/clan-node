@@ -2012,7 +2012,7 @@ export function ClanGraph({
           initial: person.name.charAt(0),
           title: title,
           formalTitle,
-          bloodType: person.blood_type || '',
+          englishName: person.english_name || '',
           birthTime: graphSettings.showBirthTimeOnNode ? (person.tob || '') : '',
           genderColor: genderColor,
           avatarUrl,
