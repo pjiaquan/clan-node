@@ -87,7 +87,9 @@ export const Header: React.FC<HeaderProps> = ({
   const [searchText, setSearchText] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const desktopMenuRef = useRef<HTMLDivElement | null>(null);
   const searchBoxRef = useRef<HTMLFormElement | null>(null);
   const editDisabled = Boolean(readOnly);
 
@@ -133,6 +135,7 @@ export const Header: React.FC<HeaderProps> = ({
   useEffect(() => {
     setActionMenuOpen(false);
     setMobileMenuOpen(false);
+    setDesktopMenuOpen(false);
   }, [selectedNode, selectedEdge]);
 
   useEffect(() => {
@@ -151,6 +154,23 @@ export const Header: React.FC<HeaderProps> = ({
       document.removeEventListener('touchstart', handleOutsideClick);
     };
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    if (!desktopMenuOpen) return;
+    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!desktopMenuRef.current || !target) return;
+      if (!desktopMenuRef.current.contains(target)) {
+        setDesktopMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [desktopMenuOpen]);
 
   useEffect(() => {
     if (!mobileOptions.length) return;
@@ -498,43 +518,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </div>
-        <button onClick={onUndo} className="btn-secondary btn-icon" disabled={!canUndo || editDisabled} title="Ctrl+Z" aria-label="復原">
-          <span className="btn-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 7H4v5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M4 12a8 8 0 0 1 13.66-4.66" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </span>
-          <span className="btn-label">復原</span>
-        </button>
-        <button
-          onClick={onClearAllDim}
-          className="btn-secondary btn-icon"
-          disabled={!hasActiveDimming}
-          aria-label="取消全部淡化"
-          title="取消全部淡化 (Shift+D)"
-        >
-          <span className="btn-label">取消淡化</span>
-        </button>
-        <button
-          onClick={onExpandAllCollapsed}
-          className="btn-secondary btn-icon"
-          disabled={!hasCollapsedNodes}
-          aria-label="展開全部折疊"
-          title="展開全部折疊"
-        >
-          <span className="btn-label">展開全部</span>
-        </button>
-        <button onClick={onFocusMe} className="btn-secondary btn-icon focus-me-btn" aria-label="我的位置">
-          <span className="btn-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className="btn-label">我的位置</span>
-        </button>
-        <button onClick={onAddMember} className="btn-primary btn-icon" aria-label="新增成員" disabled={editDisabled}>
+        <button onClick={onAddMember} className="btn-primary btn-icon desktop-visible" aria-label="新增成員" disabled={editDisabled}>
           <span className="btn-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -543,11 +527,14 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="btn-label">新增成員</span>
         </button>
         {hasSelection && (
-          <div className="header-action-menu">
+          <div className="header-action-menu desktop-visible">
             <button
               className="btn-secondary btn-icon"
               type="button"
-              onClick={() => setActionMenuOpen((prev) => !prev)}
+              onClick={() => {
+                setDesktopMenuOpen(false);
+                setActionMenuOpen((prev) => !prev);
+              }}
               aria-label="節點操作"
             >
               <span className="btn-label">操作</span>
@@ -653,85 +640,177 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
         )}
-        <ul className="header-user header-menu">
-          {username && (
-            <li className="header-menu-item">
-              {onManageSessions ? (
+        <div className="header-action-menu header-overflow-menu desktop-visible" ref={desktopMenuRef}>
+          <button
+            className="btn-secondary btn-icon"
+            type="button"
+            onClick={() => {
+              setActionMenuOpen(false);
+              setDesktopMenuOpen((prev) => !prev);
+            }}
+            aria-label="更多功能"
+          >
+            <span className="btn-label">更多</span>
+          </button>
+          {desktopMenuOpen && (
+            <div className="header-action-panel header-overflow-panel">
+              {username && <div className="header-mobile-label">{username}</div>}
+              {editDisabled && <div className="header-mobile-label">只讀</div>}
+              {onManageSessions && (
                 <button
-                  onClick={onManageSessions}
-                  className="header-profile-btn"
-                  aria-label="Session 管理"
-                  title="Session 管理"
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageSessions();
+                    setDesktopMenuOpen(false);
+                  }}
                 >
-                  {username}
+                  Session 管理
                 </button>
-              ) : (
-                <span>{username}</span>
               )}
-            </li>
-          )}
-          {onOpenSettings && (
-            <li className="header-menu-item">
-              <button onClick={onOpenSettings} className="btn-secondary btn-icon" aria-label="图形设置">
-                <span className="btn-label">图形设置</span>
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onOpenSettings();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  图形设置
+                </button>
+              )}
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onFocusMe();
+                  setDesktopMenuOpen(false);
+                }}
+              >
+                我的位置
               </button>
-            </li>
-          )}
-          {editDisabled && (
-            <li className="header-menu-item">
-              <span className="readonly-badge">只讀</span>
-            </li>
-          )}
-          {isAdmin && onCreateUser && (
-            <li className="header-menu-item">
-              <button onClick={onCreateUser} className="btn-secondary btn-icon" aria-label="新增帳號">
-                <span className="btn-label">新增帳號</span>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onUndo();
+                  setDesktopMenuOpen(false);
+                }}
+                disabled={!canUndo || editDisabled}
+              >
+                復原
               </button>
-            </li>
-          )}
-          {isAdmin && onManageUsers && (
-            <li className="header-menu-item">
-              <button onClick={onManageUsers} className="btn-secondary btn-icon" aria-label="帳號管理">
-                <span className="btn-label">帳號管理</span>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onClearAllDim();
+                  setDesktopMenuOpen(false);
+                }}
+                disabled={!hasActiveDimming}
+              >
+                取消全部淡化
               </button>
-            </li>
-          )}
-          {isAdmin && onManageNotifications && (
-            <li className="header-menu-item">
-              <button onClick={onManageNotifications} className="btn-secondary btn-icon header-notice-btn" aria-label="通知管理">
-                <span className="btn-label">通知管理</span>
-                {hasPendingNotifications && (
-                  <span className="header-notice-badge">{pendingLabel}</span>
-                )}
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onExpandAllCollapsed();
+                  setDesktopMenuOpen(false);
+                }}
+                disabled={!hasCollapsedNodes}
+              >
+                展開全部折疊
               </button>
-            </li>
-          )}
-          {isAdmin && onManageAuditLogs && (
-            <li className="header-menu-item">
-              <button onClick={onManageAuditLogs} className="btn-secondary btn-icon" aria-label="修改記錄">
-                <span className="btn-label">修改記錄</span>
+              {isAdmin && onCreateUser && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onCreateUser();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  新增帳號
+                </button>
+              )}
+              {isAdmin && onManageUsers && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageUsers();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  帳號管理
+                </button>
+              )}
+              {isAdmin && onManageNotifications && (
+                <button
+                  type="button"
+                  className="header-action-item header-action-item-with-badge"
+                  onClick={() => {
+                    onManageNotifications();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  <span>通知管理</span>
+                  {hasPendingNotifications && (
+                    <span className="header-notice-badge">{pendingLabel}</span>
+                  )}
+                </button>
+              )}
+              {isAdmin && onManageAuditLogs && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageAuditLogs();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  修改記錄
+                </button>
+              )}
+              {isAdmin && onManageRelationshipNames && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageRelationshipNames();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  稱呼管理
+                </button>
+              )}
+              {onToggleTheme && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onToggleTheme();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  {themeToggleLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onLogout();
+                  setDesktopMenuOpen(false);
+                }}
+              >
+                登出
               </button>
-            </li>
+            </div>
           )}
-          {isAdmin && onManageRelationshipNames && (
-            <li className="header-menu-item">
-              <button onClick={onManageRelationshipNames} className="btn-secondary btn-icon" aria-label="稱呼管理">
-                <span className="btn-label">稱呼管理</span>
-              </button>
-            </li>
-          )}
-          <li className="header-menu-item">
-            <button onClick={onLogout} className="btn-secondary btn-icon" aria-label="登出">
-              <span className="btn-icon">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M10 17l-1.5 1.5A3.5 3.5 0 0 1 3 16V8a3.5 3.5 0 0 1 5.5-2.5L10 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  <path d="M13 12h8M18 9l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-              <span className="btn-label">登出</span>
-            </button>
-          </li>
-        </ul>
+        </div>
       </div>
     </header>
   );

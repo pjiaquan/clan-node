@@ -1366,12 +1366,19 @@
 .controls {
   display: flex;
   gap: 0.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .mobile-visible {
   display: none;
+}
+
+.desktop-visible {
+  display: inline-flex;
+  flex: 0 0 auto;
 }
 
 .header-mobile-menu {
@@ -1416,6 +1423,16 @@
   z-index: 20;
 }
 
+.header-overflow-menu {
+  margin-left: auto;
+}
+
+.header-overflow-panel {
+  min-width: 220px;
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+}
+
 .header-action-item {
   width: 100%;
   border: none;
@@ -1448,6 +1465,8 @@
   align-items: center;
   gap: 0.5rem;
   position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .search-input {
@@ -1457,7 +1476,8 @@
   border: 1px solid rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.2);
   color: white;
-  min-width: 160px;
+  min-width: 0;
+  width: 100%;
 }
 
 .search-input::placeholder {
@@ -2692,7 +2712,11 @@ button:disabled:hover {
     gap: 0.5rem;
   }
 
-  .controls> :not(.search-box):not(.mobile-visible):not(.focus-me-btn) {
+  .controls> :not(.search-box):not(.mobile-visible) {
+    display: none;
+  }
+
+  .desktop-visible {
     display: none;
   }
 
@@ -2839,6 +2863,10 @@ button:disabled:hover {
   }
 
   .controls > :not(.search-box):not(.mobile-visible) {
+    display: none;
+  }
+
+  .desktop-visible {
     display: none;
   }
 
