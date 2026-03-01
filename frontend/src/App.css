@@ -1693,16 +1693,18 @@ button:disabled:hover {
   min-height: 132px;
   height: 132px;
   max-height: 132px;
+  box-sizing: border-box;
   position: relative;
   display: flex;
   flex-direction: column;
   border-radius: 12px;
   background: white;
-  border: 3px solid #e2e8f0;
+  border: 2px solid #e2e8f0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   cursor: pointer;
-  transition: all 0.2s;
-  overflow: visible;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .person-node:hover {
@@ -1714,21 +1716,8 @@ button:disabled:hover {
   border-color: var(--highlight-color, #2563eb);
   box-shadow:
     0 0 0 3px var(--highlight-color-35, rgba(37, 99, 235, 0.35)),
-    0 0 0 8px var(--highlight-color-15, rgba(37, 99, 235, 0.15)),
     0 10px 24px var(--highlight-color-18, rgba(37, 99, 235, 0.18));
   transform: translateY(-2px);
-}
-
-.person-node.selected::after {
-  content: '';
-  position: absolute;
-  top: -4px;
-  left: -4px;
-  right: -4px;
-  bottom: -4px;
-  border: 2px dashed var(--highlight-color, #2563eb);
-  border-radius: 14px;
-  pointer-events: none;
 }
 
 .person-node.floating {
@@ -1877,6 +1866,8 @@ button:disabled:hover {
   align-items: center;
   gap: 0.28rem;
   flex-wrap: nowrap;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -1887,10 +1878,17 @@ button:disabled:hover {
   border-radius: 999px;
   color: #334155;
   background: #e2e8f0;
+  min-width: 0;
+  flex: 1 1 0;
   max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;
+}
+
+.node-meta-chip:only-child {
+  flex: 0 1 100%;
 }
 
 .node-name-text {
