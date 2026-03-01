@@ -11,6 +11,23 @@ const DEFAULT_RELATIONSHIP_TYPE_LABELS: Record<RelationshipTypeKey, string> = {
   in_law: '姻親',
 };
 
+const ActionLabel: React.FC<{ text: string; badge?: React.ReactNode }> = ({ text, badge }) => (
+  <>
+    <span className="header-action-main">
+      <span className="header-action-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M8 7h11M8 12h11M8 17h11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="5" cy="7" r="1.2" fill="currentColor" />
+          <circle cx="5" cy="12" r="1.2" fill="currentColor" />
+          <circle cx="5" cy="17" r="1.2" fill="currentColor" />
+        </svg>
+      </span>
+      <span className="header-action-text">{text}</span>
+    </span>
+    {badge}
+  </>
+);
+
 interface HeaderProps {
   onAddMember: () => void;
   onFocusMe: () => void;
@@ -212,14 +229,13 @@ export const Header: React.FC<HeaderProps> = ({
               void preloadNameSearchConverters();
             }}
           />
-          <button className="btn-secondary btn-icon" type="submit" aria-label="搜尋">
+          <button className="btn-secondary btn-icon icon-only-btn" type="submit" aria-label="搜尋" title="搜尋">
             <span className="btn-icon">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
                 <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </span>
-            <span className="btn-label">搜尋</span>
           </button>
           {mobileOptions.length > 0 && (
             <div className="mobile-search-results">
@@ -243,8 +259,9 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="header-mobile-menu mobile-visible" ref={mobileMenuRef}>
           <button
             type="button"
-            className="btn-secondary btn-icon"
+            className="btn-secondary btn-icon icon-only-btn"
             aria-label="選單"
+            title="選單"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
           >
             <span className="btn-icon">
@@ -266,7 +283,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  Session 管理
+                  <ActionLabel text="Session 管理" />
                 </button>
               )}
               {onOpenSettings && (
@@ -278,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  图形设置
+                  <ActionLabel text="图形设置" />
                 </button>
               )}
               <button
@@ -290,7 +307,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasActiveDimming}
               >
-                取消全部淡化
+                <ActionLabel text="取消全部淡化" />
               </button>
               <button
                 type="button"
@@ -301,7 +318,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasCollapsedNodes}
               >
-                展開全部折疊
+                <ActionLabel text="展開全部折疊" />
               </button>
               <button
                 type="button"
@@ -312,7 +329,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!canUndo || editDisabled}
               >
-                復原
+                <ActionLabel text="復原" />
               </button>
               <button
                 type="button"
@@ -323,7 +340,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={editDisabled}
               >
-                新增成員
+                <ActionLabel text="新增成員" />
               </button>
               <button
                 type="button"
@@ -333,7 +350,7 @@ export const Header: React.FC<HeaderProps> = ({
                   closeMobileMenu();
                 }}
               >
-                我的位置
+                <ActionLabel text="我的位置" />
               </button>
               {selectedNode && (
                 <>
@@ -346,7 +363,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    {linkMode ? '選擇目標...' : '建立關係'}
+                    <ActionLabel text={linkMode ? '選擇目標...' : '建立關係'} />
                   </button>
                   <button
                     type="button"
@@ -356,7 +373,7 @@ export const Header: React.FC<HeaderProps> = ({
                       closeMobileMenu();
                     }}
                   >
-                    設為中心
+                    <ActionLabel text="設為中心" />
                   </button>
                 </>
               )}
@@ -371,7 +388,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    {spouseToggleLabel}
+                    <ActionLabel text={spouseToggleLabel} />
                   </button>
                   <button
                     type="button"
@@ -382,7 +399,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    {parentChildLabel}
+                    <ActionLabel text={parentChildLabel} />
                   </button>
                   <button
                     type="button"
@@ -393,7 +410,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    {siblingLabel}
+                    <ActionLabel text={siblingLabel} />
                   </button>
                   <button
                     type="button"
@@ -404,7 +421,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    {inLawLabel}
+                    <ActionLabel text={inLawLabel} />
                   </button>
                   <button
                     type="button"
@@ -415,7 +432,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    反轉方向
+                    <ActionLabel text="反轉方向" />
                   </button>
                   <button
                     type="button"
@@ -426,7 +443,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    刪除關係
+                    <ActionLabel text="刪除關係" />
                   </button>
                 </>
               )}
@@ -439,7 +456,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  新增帳號
+                  <ActionLabel text="新增帳號" />
                 </button>
               )}
               {isAdmin && onManageUsers && (
@@ -451,7 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  帳號管理
+                  <ActionLabel text="帳號管理" />
                 </button>
               )}
               {isAdmin && onManageNotifications && (
@@ -463,10 +480,10 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <span>通知管理</span>
-                  {hasPendingNotifications && (
-                    <span className="header-notice-badge">{pendingLabel}</span>
-                  )}
+                  <ActionLabel
+                    text="通知管理"
+                    badge={hasPendingNotifications ? <span className="header-notice-badge">{pendingLabel}</span> : undefined}
+                  />
                 </button>
               )}
               {isAdmin && onManageAuditLogs && (
@@ -478,7 +495,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  修改記錄
+                  <ActionLabel text="修改記錄" />
                 </button>
               )}
               {isAdmin && onManageRelationshipNames && (
@@ -490,7 +507,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  稱呼管理
+                  <ActionLabel text="稱呼管理" />
                 </button>
               )}
               {onToggleTheme && (
@@ -502,7 +519,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  {themeToggleLabel}
+                  <ActionLabel text={themeToggleLabel} />
                 </button>
               )}
               <button
@@ -513,31 +530,35 @@ export const Header: React.FC<HeaderProps> = ({
                   closeMobileMenu();
                 }}
               >
-                登出
+                <ActionLabel text="登出" />
               </button>
             </div>
           )}
         </div>
-        <button onClick={onAddMember} className="btn-primary btn-icon desktop-visible" aria-label="新增成員" disabled={editDisabled}>
+        <button onClick={onAddMember} className="btn-primary btn-icon icon-only-btn desktop-visible" aria-label="新增成員" title="新增成員" disabled={editDisabled}>
           <span className="btn-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="btn-label">新增成員</span>
         </button>
         {hasSelection && (
           <div className="header-action-menu desktop-visible">
             <button
-              className="btn-secondary btn-icon"
+              className="btn-secondary btn-icon icon-only-btn"
               type="button"
               onClick={() => {
                 setDesktopMenuOpen(false);
                 setActionMenuOpen((prev) => !prev);
               }}
               aria-label="節點操作"
+              title="節點操作"
             >
-              <span className="btn-label">操作</span>
+              <span className="btn-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 4v4M17 4v4M4 8h16M7 12h10M7 16h7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
             </button>
             {actionMenuOpen && (
               <div className="header-action-panel">
@@ -552,7 +573,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      {linkMode ? '選擇目標...' : '建立關係'}
+                      <ActionLabel text={linkMode ? '選擇目標...' : '建立關係'} />
                     </button>
                     <button
                       type="button"
@@ -562,7 +583,7 @@ export const Header: React.FC<HeaderProps> = ({
                         closeActionMenu();
                       }}
                     >
-                      設為中心
+                      <ActionLabel text="設為中心" />
                     </button>
                   </>
                 )}
@@ -577,7 +598,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      {spouseToggleLabel}
+                      <ActionLabel text={spouseToggleLabel} />
                     </button>
                     <button
                       type="button"
@@ -588,7 +609,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      {parentChildLabel}
+                      <ActionLabel text={parentChildLabel} />
                     </button>
                     <button
                       type="button"
@@ -599,7 +620,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      {siblingLabel}
+                      <ActionLabel text={siblingLabel} />
                     </button>
                     <button
                       type="button"
@@ -610,7 +631,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      {inLawLabel}
+                      <ActionLabel text={inLawLabel} />
                     </button>
                     <button
                       type="button"
@@ -621,7 +642,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      反轉方向
+                      <ActionLabel text="反轉方向" />
                     </button>
                     <button
                       type="button"
@@ -632,7 +653,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      刪除關係
+                      <ActionLabel text="刪除關係" />
                     </button>
                   </>
                 )}
@@ -642,15 +663,22 @@ export const Header: React.FC<HeaderProps> = ({
         )}
         <div className="header-action-menu header-overflow-menu desktop-visible" ref={desktopMenuRef}>
           <button
-            className="btn-secondary btn-icon"
+            className="btn-secondary btn-icon icon-only-btn"
             type="button"
             onClick={() => {
               setActionMenuOpen(false);
               setDesktopMenuOpen((prev) => !prev);
             }}
             aria-label="更多功能"
+            title="更多功能"
           >
-            <span className="btn-label">更多</span>
+            <span className="btn-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="6" cy="12" r="1.8" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+                <circle cx="18" cy="12" r="1.8" fill="currentColor" />
+              </svg>
+            </span>
           </button>
           {desktopMenuOpen && (
             <div className="header-action-panel header-overflow-panel">
@@ -665,7 +693,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  Session 管理
+                  <ActionLabel text="Session 管理" />
                 </button>
               )}
               {onOpenSettings && (
@@ -677,7 +705,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  图形设置
+                  <ActionLabel text="图形设置" />
                 </button>
               )}
               <button
@@ -688,7 +716,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDesktopMenuOpen(false);
                 }}
               >
-                我的位置
+                <ActionLabel text="我的位置" />
               </button>
               <button
                 type="button"
@@ -699,7 +727,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!canUndo || editDisabled}
               >
-                復原
+                <ActionLabel text="復原" />
               </button>
               <button
                 type="button"
@@ -710,7 +738,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasActiveDimming}
               >
-                取消全部淡化
+                <ActionLabel text="取消全部淡化" />
               </button>
               <button
                 type="button"
@@ -721,7 +749,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasCollapsedNodes}
               >
-                展開全部折疊
+                <ActionLabel text="展開全部折疊" />
               </button>
               {isAdmin && onCreateUser && (
                 <button
@@ -732,7 +760,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  新增帳號
+                  <ActionLabel text="新增帳號" />
                 </button>
               )}
               {isAdmin && onManageUsers && (
@@ -744,7 +772,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  帳號管理
+                  <ActionLabel text="帳號管理" />
                 </button>
               )}
               {isAdmin && onManageNotifications && (
@@ -756,10 +784,10 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <span>通知管理</span>
-                  {hasPendingNotifications && (
-                    <span className="header-notice-badge">{pendingLabel}</span>
-                  )}
+                  <ActionLabel
+                    text="通知管理"
+                    badge={hasPendingNotifications ? <span className="header-notice-badge">{pendingLabel}</span> : undefined}
+                  />
                 </button>
               )}
               {isAdmin && onManageAuditLogs && (
@@ -771,7 +799,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  修改記錄
+                  <ActionLabel text="修改記錄" />
                 </button>
               )}
               {isAdmin && onManageRelationshipNames && (
@@ -783,7 +811,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  稱呼管理
+                  <ActionLabel text="稱呼管理" />
                 </button>
               )}
               {onToggleTheme && (
@@ -795,7 +823,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  {themeToggleLabel}
+                  <ActionLabel text={themeToggleLabel} />
                 </button>
               )}
               <button
@@ -806,7 +834,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDesktopMenuOpen(false);
                 }}
               >
-                登出
+                <ActionLabel text="登出" />
               </button>
             </div>
           )}

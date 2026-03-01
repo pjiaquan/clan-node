@@ -1495,13 +1495,49 @@
   color: #1e293b;
   font-size: 0.85rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
 }
 
 .header-action-item-with-badge {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+}
+
+.header-action-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.header-action-icon {
+  display: inline-flex;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
+.header-action-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.header-action-text {
+  line-height: 1.2;
+}
+
+.icon-only-btn {
+  width: var(--header-control-height);
+  min-width: var(--header-control-height);
+  height: var(--header-control-height);
+  padding: 0;
+  justify-content: center;
+}
+
+.icon-only-btn .btn-icon {
+  gap: 0;
 }
 
 .header-action-item:hover {
