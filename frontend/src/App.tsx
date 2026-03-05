@@ -376,7 +376,7 @@ function App() {
       <button
         type="button"
         className="theme-toggle"
-        style={{ right: hideFloatingThemeToggle ? '0.75rem' : '4.75rem' }}
+        style={{ right: hideFloatingThemeToggle ? '0.75rem' : '6.7rem' }}
         onClick={toggleLanguage}
         aria-label={languageToggleLabel}
         title={languageToggleLabel}
