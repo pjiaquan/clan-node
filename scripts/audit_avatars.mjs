@@ -49,7 +49,8 @@ const login = async (baseUrl, username, password) => {
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
-    throw new Error(`Login failed ${res.status} ${res.statusText}`);
+    const text = await res.text().catch(() => '');
+    throw new Error(`Login failed ${res.status} ${res.statusText}: ${text}`);
   }
   const setCookie = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie')].filter(Boolean);
   return parseSetCookie(setCookie);

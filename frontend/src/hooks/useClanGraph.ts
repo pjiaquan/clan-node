@@ -45,7 +45,6 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     try {
       setLoading(true);
       setError(null);
-      console.log('Fetching graph for center:', centerId);
       const data = await api.fetchGraph(centerId);
       setGraphData(data);
     } catch (err) {

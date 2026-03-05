@@ -17,6 +17,7 @@
     "d1:pull": "bash scripts/pull_remote_d1.sh",
     "avatars:sync": "node scripts/sync_avatars.mjs",
     "avatars:audit": "node scripts/audit_avatars.mjs",
+    "avatars:cleanup": "node scripts/cleanup_missing_avatars.mjs",
     "siblings:fix": "node scripts/fix_siblings.mjs",
     "d1:merge": "node scripts/merge_d1_via_api.mjs",
     "type-check": "tsc --noEmit"
