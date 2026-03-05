@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser, NotificationItem, NotificationStatus, NotificationType } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 
 type NotificationManagementPageProps = {
   currentUser: AuthUser;
@@ -11,25 +12,11 @@ type NotificationManagementPageProps = {
 
 type NotificationFilterStatus = 'all' | NotificationStatus;
 
-const STATUS_LABEL: Record<NotificationStatus, string> = {
-  pending: '待處理',
-  in_progress: '處理中',
-  resolved: '已完成',
-  rejected: '已拒絕',
-};
-
-const TYPE_LABEL: Record<NotificationType, string> = {
-  rename: '修改名稱',
-  avatar: '修改頭像',
-  relationship: '修改關係',
-  other: '其他',
-};
-
-const formatDate = (value?: string | null) => {
+const formatDate = (value: string | null | undefined, locale: string) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-TW', {
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -39,6 +26,7 @@ const formatDate = (value?: string | null) => {
 };
 
 export const NotificationManagementPage: React.FC<NotificationManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+  const { t, locale } = useI18n();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,12 +45,12 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
       const data = await api.fetchNotifications(filterStatus === 'all' ? undefined : filterStatus);
       setNotifications(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入通知失敗');
+      setError(err instanceof Error ? err.message : t('notification.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [filterStatus]);
+  }, [filterStatus, t]);
 
   useEffect(() => {
     void loadNotifications(false);
@@ -120,14 +108,14 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
       });
       await loadNotifications(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新狀態失敗');
+      setError(err instanceof Error ? err.message : t('notification.updateFailed'));
     } finally {
       setBusyNotificationId(null);
     }
-  }, [filterStatus, loadNotifications]);
+  }, [filterStatus, loadNotifications, t]);
 
   const handleDelete = useCallback(async (notification: NotificationItem) => {
-    const confirmed = window.confirm('確定刪除這筆提報？');
+    const confirmed = window.confirm(t('notification.deleteConfirm'));
     if (!confirmed) return;
 
     setBusyNotificationId(notification.id);
@@ -137,17 +125,30 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
       setNotifications((prev) => prev.filter((item) => item.id !== notification.id));
       await loadNotifications(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '刪除提報失敗');
+      setError(err instanceof Error ? err.message : t('notification.deleteFailed'));
     } finally {
       setBusyNotificationId(null);
     }
-  }, [loadNotifications]);
+  }, [loadNotifications, t]);
+
+  const statusLabel: Record<NotificationStatus, string> = {
+    pending: t('notification.pending'),
+    in_progress: t('notification.in_progress'),
+    resolved: t('notification.resolved'),
+    rejected: t('notification.rejected'),
+  };
+  const typeLabel: Record<NotificationType, string> = {
+    rename: t('notification.type.rename'),
+    avatar: t('notification.type.avatar'),
+    relationship: t('notification.type.relationship'),
+    other: t('notification.type.other'),
+  };
 
   return (
     <div className="notice-page">
       <header className="notice-header">
         <div className="notice-header-left">
-          <h1>通知管理</h1>
+          <h1>{t('notification.title')}</h1>
         </div>
         <div className="notice-header-right">
           <span className="notice-user-chip">{currentUser.username}</span>
@@ -162,23 +163,23 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
       <main className="notice-main">
         <section className="notice-stats">
           <article className="notice-stat-card">
-            <span>總提報</span>
+            <span>{t('notification.total')}</span>
             <strong>{stats.total}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>待處理</span>
+            <span>{statusLabel.pending}</span>
             <strong>{stats.pending}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>處理中</span>
+            <span>{statusLabel.in_progress}</span>
             <strong>{stats.inProgress}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>已完成</span>
+            <span>{statusLabel.resolved}</span>
             <strong>{stats.resolved}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>已拒絕</span>
+            <span>{statusLabel.rejected}</span>
             <strong>{stats.rejected}</strong>
           </article>
         </section>
@@ -190,11 +191,11 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
               value={filterStatus}
               onChange={(event) => setFilterStatus(event.target.value as NotificationFilterStatus)}
             >
-              <option value="all">全部狀態</option>
-              <option value="pending">{STATUS_LABEL.pending}</option>
-              <option value="in_progress">{STATUS_LABEL.in_progress}</option>
-              <option value="resolved">{STATUS_LABEL.resolved}</option>
-              <option value="rejected">{STATUS_LABEL.rejected}</option>
+              <option value="all">{t('notification.allStatuses')}</option>
+              <option value="pending">{statusLabel.pending}</option>
+              <option value="in_progress">{statusLabel.in_progress}</option>
+              <option value="resolved">{statusLabel.resolved}</option>
+              <option value="rejected">{statusLabel.rejected}</option>
             </select>
             <button
               type="button"
@@ -202,28 +203,28 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
               onClick={() => loadNotifications(true)}
               disabled={refreshing}
             >
-              {refreshing ? '更新中...' : '重新整理'}
+              {refreshing ? t('common.refreshing') : t('common.refresh')}
             </button>
           </div>
 
           {error && <div className="notice-error">{error}</div>}
 
           {loading ? (
-            <div className="notice-loading">載入通知中...</div>
+            <div className="notice-loading">{t('notification.loading')}</div>
           ) : (
             <div className="notice-table-wrap">
               <table className="notice-table">
                 <thead>
                   <tr>
-                    <th>建立時間</th>
-                    <th>狀態</th>
-                    <th>問題類型</th>
-                    <th>目標人物</th>
-                    <th>提出者</th>
-                    <th>內容</th>
-                    <th>處理者</th>
-                    <th>處理時間</th>
-                    <th>操作</th>
+                    <th>{t('notification.createdAt')}</th>
+                    <th>{t('notification.status')}</th>
+                    <th>{t('notification.type')}</th>
+                    <th>{t('notification.targetPerson')}</th>
+                    <th>{t('notification.reporter')}</th>
+                    <th>{t('notification.message')}</th>
+                    <th>{t('notification.handledBy')}</th>
+                    <th>{t('notification.handledAt')}</th>
+                    <th>{t('notification.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -231,7 +232,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
                     const rowBusy = busyNotificationId === notification.id;
                     return (
                       <tr key={notification.id}>
-                        <td>{formatDate(notification.created_at)}</td>
+                        <td>{formatDate(notification.created_at, locale)}</td>
                         <td>
                           <select
                             className="notice-status-select"
@@ -239,20 +240,20 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
                             onChange={(event) => handleStatusChange(notification, event.target.value as NotificationStatus)}
                             disabled={rowBusy}
                           >
-                            <option value="pending">{STATUS_LABEL.pending}</option>
-                            <option value="in_progress">{STATUS_LABEL.in_progress}</option>
-                            <option value="resolved">{STATUS_LABEL.resolved}</option>
-                            <option value="rejected">{STATUS_LABEL.rejected}</option>
+                            <option value="pending">{statusLabel.pending}</option>
+                            <option value="in_progress">{statusLabel.in_progress}</option>
+                            <option value="resolved">{statusLabel.resolved}</option>
+                            <option value="rejected">{statusLabel.rejected}</option>
                           </select>
                         </td>
-                        <td>{TYPE_LABEL[notification.type]}</td>
+                        <td>{typeLabel[notification.type]}</td>
                         <td>{notification.target_person_name || notification.target_person_id || '-'}</td>
                         <td>{notification.created_by_username}</td>
                         <td>
                           <div className="notice-message" title={notification.message}>{notification.message}</div>
                         </td>
                         <td>{notification.resolved_by_username || '-'}</td>
-                        <td>{formatDate(notification.resolved_at)}</td>
+                        <td>{formatDate(notification.resolved_at, locale)}</td>
                         <td>
                           <button
                             type="button"
@@ -260,7 +261,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
                             disabled={rowBusy}
                             onClick={() => handleDelete(notification)}
                           >
-                            刪除
+                            {t('common.delete')}
                           </button>
                         </td>
                       </tr>
@@ -268,7 +269,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
                   })}
                   {notifications.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="notice-empty">沒有符合條件的提報</td>
+                      <td colSpan={9} className="notice-empty">{t('notification.noMatch')}</td>
                     </tr>
                   )}
                 </tbody>

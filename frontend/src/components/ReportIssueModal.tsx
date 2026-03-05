@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { NotificationType } from '../types';
+import { useI18n } from '../i18n';
 
 type ReportIssueModalProps = {
   personName: string;
@@ -7,33 +8,35 @@ type ReportIssueModalProps = {
   onSubmit: (payload: { type: NotificationType; message: string }) => Promise<void>;
 };
 
-const ISSUE_TYPE_OPTIONS: Array<{ value: NotificationType; label: string }> = [
-  { value: 'rename', label: '修改名稱' },
-  { value: 'avatar', label: '修改頭像' },
-  { value: 'relationship', label: '修改關係' },
-  { value: 'other', label: '其他' },
-];
-
-const ISSUE_HINTS: Record<NotificationType, string> = {
-  rename: '例如：建議改成正確姓名，並附上理由。',
-  avatar: '例如：請更換頭像，並描述原因。',
-  relationship: '例如：請調整父子／夫妻／手足關係。',
-  other: '請描述你希望管理員處理的內容。',
-};
-
 export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, onClose, onSubmit }) => {
+  const { t } = useI18n();
   const [type, setType] = useState<NotificationType>('rename');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hint = useMemo(() => ISSUE_HINTS[type], [type]);
+  const issueTypeOptions: Array<{ value: NotificationType; label: string }> = useMemo(() => ([
+    { value: 'rename', label: t('notification.type.rename') },
+    { value: 'avatar', label: t('notification.type.avatar') },
+    { value: 'relationship', label: t('notification.type.relationship') },
+    { value: 'other', label: t('notification.type.other') },
+  ]), [t]);
+
+  const hint = useMemo(() => {
+    const hints: Record<NotificationType, string> = {
+      rename: t('report.hint.rename'),
+      avatar: t('report.hint.avatar'),
+      relationship: t('report.hint.relationship'),
+      other: t('report.hint.other'),
+    };
+    return hints[type];
+  }, [t, type]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = message.trim();
     if (!trimmed) {
-      setError('請填寫問題內容');
+      setError(t('report.emptyDetails'));
       return;
     }
 
@@ -43,7 +46,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
       await onSubmit({ type, message: trimmed });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '送出失敗');
+      setError(err instanceof Error ? err.message : t('report.submitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -52,19 +55,19 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(event) => event.stopPropagation()}>
-        <h2>提出問題</h2>
-        <p className="report-issue-person">目標人物：{personName}</p>
+        <h2>{t('report.title')}</h2>
+        <p className="report-issue-person">{t('report.targetPerson', { name: personName })}</p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>問題類型</label>
+            <label>{t('report.issueType')}</label>
             <select value={type} onChange={(event) => setType(event.target.value as NotificationType)}>
-              {ISSUE_TYPE_OPTIONS.map((option) => (
+              {issueTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </div>
           <div className="form-group">
-            <label>內容</label>
+            <label>{t('report.details')}</label>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
@@ -78,9 +81,9 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
           {error && <div className="report-issue-error">{error}</div>}
 
           <div className="form-actions">
-            <button type="button" onClick={onClose} disabled={submitting}>取消</button>
+            <button type="button" onClick={onClose} disabled={submitting}>{t('common.cancel')}</button>
             <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? '送出中...' : '送出'}
+              {submitting ? t('report.submitting') : t('report.submit')}
             </button>
           </div>
         </form>

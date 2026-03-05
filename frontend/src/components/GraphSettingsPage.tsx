@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 import {
   DEFAULT_GRAPH_SETTINGS,
   normalizeGraphSettings,
@@ -22,8 +23,6 @@ type NumericGraphSettingsKey = {
 
 type FieldSpec = {
   key: NumericGraphSettingsKey;
-  label: string;
-  hint: string;
   min: number;
   max: number;
   step: number;
@@ -32,48 +31,36 @@ type FieldSpec = {
 const SPACING_FIELDS: FieldSpec[] = [
   {
     key: 'repelGap',
-    label: '防重叠间距',
-    hint: '拖拽后自动避让的节点最小间距（px）',
     min: 0,
     max: 240,
     step: 1,
   },
   {
     key: 'spouseGap',
-    label: '配偶吸附间距',
-    hint: '夫妻节点吸附时保留的水平间距（px）',
     min: 0,
     max: 240,
     step: 1,
   },
   {
     key: 'expandShiftStepX',
-    label: '展开偏移 X',
-    hint: '展开折叠分支时，避开重叠的 X 方向步长（px）',
     min: 20,
     max: 1200,
     step: 5,
   },
   {
     key: 'expandShiftStepY',
-    label: '展开偏移 Y',
-    hint: '展开折叠分支时，避开重叠的 Y 方向步长（px）',
     min: 20,
     max: 1200,
     step: 5,
   },
   {
     key: 'initialOrbitBaseRadius',
-    label: '初始半径',
-    hint: '没有历史坐标时，围绕中心的初始半径（px）',
     min: 40,
     max: 1600,
     step: 10,
   },
   {
     key: 'initialOrbitStepRadius',
-    label: '半径增量',
-    hint: '初始摆放时，每个节点递增的半径（px）',
     min: 0,
     max: 500,
     step: 2,
@@ -83,48 +70,36 @@ const SPACING_FIELDS: FieldSpec[] = [
 const SNAP_FIELDS: FieldSpec[] = [
   {
     key: 'ySnapThreshold',
-    label: 'Y 吸附阈值',
-    hint: '拖拽时进入水平对齐吸附的阈值（px）',
     min: 4,
     max: 200,
     step: 1,
   },
   {
     key: 'yReleaseThreshold',
-    label: 'Y 释放阈值',
-    hint: '拖拽离开水平吸附状态需要的阈值（px）',
     min: 4,
     max: 220,
     step: 1,
   },
   {
     key: 'xSnapThreshold',
-    label: 'X 吸附阈值',
-    hint: '拖拽时进入垂直对齐吸附的阈值（px）',
     min: 4,
     max: 200,
     step: 1,
   },
   {
     key: 'xReleaseThreshold',
-    label: 'X 释放阈值',
-    hint: '拖拽离开垂直吸附状态需要的阈值（px）',
     min: 4,
     max: 220,
     step: 1,
   },
   {
     key: 'spouseSnapThreshold',
-    label: '夫妻吸附阈值',
-    hint: '拖拽到配偶附近时自动对齐的阈值（px）',
     min: 0,
     max: 240,
     step: 1,
   },
   {
     key: 'spouseReleaseThreshold',
-    label: '夫妻释放阈值',
-    hint: '离开夫妻吸附状态需要的阈值（px）',
     min: 0,
     max: 260,
     step: 1,
@@ -134,40 +109,30 @@ const SNAP_FIELDS: FieldSpec[] = [
 const AUTO_LINK_FIELDS: FieldSpec[] = [
   {
     key: 'minDragDistanceForAutoLink',
-    label: '最小拖拽距离',
-    hint: '超过该距离才触发自动连线判断（px）',
     min: 0,
     max: 200,
     step: 1,
   },
   {
     key: 'nearGapXThreshold',
-    label: '近距离 X 阈值',
-    hint: '自动连线时横向邻近判定阈值（px）',
     min: 0,
     max: 200,
     step: 1,
   },
   {
     key: 'nearCenterYThreshold',
-    label: '中心 Y 阈值',
-    hint: '自动连线时纵向中心对齐判定阈值（px）',
     min: 0,
     max: 200,
     step: 1,
   },
   {
     key: 'autoSpouseMinOverlapRatio',
-    label: '最小重叠比例',
-    hint: '自动配偶连线的最小重叠面积比例（0~1）',
     min: 0.05,
     max: 1,
     step: 0.01,
   },
   {
     key: 'autoSpouseMinVerticalOverlapRatio',
-    label: '最小纵向重叠比例',
-    hint: '自动配偶连线的最小纵向重叠比例（0~1）',
     min: 0.05,
     max: 1,
     step: 0.01,
@@ -176,11 +141,12 @@ const AUTO_LINK_FIELDS: FieldSpec[] = [
 
 const renderField = (
   field: FieldSpec,
+  t: (key: string, vars?: Record<string, string | number>) => string,
   draft: GraphSettings,
   onNumberChange: (key: NumericGraphSettingsKey, value: string) => void
 ) => (
   <label className="graph-settings-field" key={field.key}>
-    <span className="graph-settings-field-label">{field.label}</span>
+    <span className="graph-settings-field-label">{t(`settings.field.${field.key}.label`)}</span>
     <input
       className="graph-settings-input"
       type="number"
@@ -190,7 +156,7 @@ const renderField = (
       value={draft[field.key]}
       onChange={(event) => onNumberChange(field.key, event.target.value)}
     />
-    <small>{field.hint}</small>
+    <small>{t(`settings.field.${field.key}.hint`)}</small>
   </label>
 );
 
@@ -201,6 +167,7 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   onBack,
   onLogout,
 }) => {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<GraphSettings>(() => normalizeGraphSettings(settings));
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
@@ -258,9 +225,9 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setBackupMessage('備份已下載');
+      setBackupMessage(t('settings.backupDownloaded'));
     } catch (error) {
-      setBackupError(error instanceof Error ? error.message : '匯出備份失敗');
+      setBackupError(error instanceof Error ? error.message : t('settings.exportFailed'));
     } finally {
       setIsExportingBackup(false);
     }
@@ -268,7 +235,9 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
 
   const handleImportBackup = async () => {
     if (!backupFile) return;
-    const confirmed = window.confirm('匯入將覆蓋目前所有節點、關係、頭像索引與自訂欄位，確定繼續？');
+    const confirmed = window.confirm(
+      t('settings.importConfirm')
+    );
     if (!confirmed) return;
 
     setBackupError(null);
@@ -278,10 +247,15 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
       const text = await backupFile.text();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const result = await api.importNodeBackup(parsed);
-      setBackupMessage(`匯入完成：${result.counts.people || 0} 個節點，${result.counts.relationships || 0} 條關係`);
+      setBackupMessage(
+        t('settings.importDone', {
+          people: result.counts.people || 0,
+          relationships: result.counts.relationships || 0,
+        })
+      );
       setBackupFile(null);
     } catch (error) {
-      setBackupError(error instanceof Error ? error.message : '匯入備份失敗');
+      setBackupError(error instanceof Error ? error.message : t('settings.importFailed'));
     } finally {
       setIsImportingBackup(false);
     }
@@ -291,7 +265,7 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     <div className="graph-settings-page">
       <header className="graph-settings-header">
         <div className="graph-settings-header-left">
-          <h1>图形设置</h1>
+          <h1>{t('settings.title')}</h1>
         </div>
         <div className="graph-settings-header-right">
           <span className="graph-settings-user-chip">{currentUser.username}</span>
@@ -305,28 +279,28 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
 
       <main className="graph-settings-main">
         <section className="graph-settings-panel">
-          <h2>节点间距</h2>
+          <h2>{t('settings.nodeSpacing')}</h2>
           <div className="graph-settings-grid">
-            {SPACING_FIELDS.map((field) => renderField(field, draft, onNumberChange))}
+            {SPACING_FIELDS.map((field) => renderField(field, t, draft, onNumberChange))}
           </div>
         </section>
 
         <section className="graph-settings-panel">
-          <h2>粘性参数</h2>
+          <h2>{t('settings.snapParams')}</h2>
           <div className="graph-settings-grid">
-            {SNAP_FIELDS.map((field) => renderField(field, draft, onNumberChange))}
+            {SNAP_FIELDS.map((field) => renderField(field, t, draft, onNumberChange))}
           </div>
         </section>
 
         <section className="graph-settings-panel">
-          <h2>自动连线</h2>
+          <h2>{t('settings.autoLink')}</h2>
           <div className="graph-settings-grid">
-            {AUTO_LINK_FIELDS.map((field) => renderField(field, draft, onNumberChange))}
+            {AUTO_LINK_FIELDS.map((field) => renderField(field, t, draft, onNumberChange))}
           </div>
         </section>
 
         <section className="graph-settings-panel">
-          <h2>節點顯示</h2>
+          <h2>{t('settings.nodeDisplay')}</h2>
           <label className="graph-settings-toggle">
             <input
               type="checkbox"
@@ -345,16 +319,16 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
               }}
             />
             <div>
-              <span className="graph-settings-field-label">顯示出生時辰</span>
-              <small>關閉時「新增/編輯節點」不顯示出生時辰欄位，開啟後才會顯示</small>
+              <span className="graph-settings-field-label">{t('settings.showBirthHour')}</span>
+              <small>{t('settings.showBirthHourHint')}</small>
             </div>
           </label>
         </section>
 
         {isAdmin && (
           <section className="graph-settings-panel graph-backup-panel">
-            <h2>節點資料備份（Admin）</h2>
-            <p className="graph-backup-hint">可匯出/匯入節點資料。匯入時會覆蓋目前資料，建議先匯出一份再操作。</p>
+            <h2>{t('settings.backupTitle')}</h2>
+            <p className="graph-backup-hint">{t('settings.backupHint')}</p>
             <div className="graph-backup-actions">
               <button
                 type="button"
@@ -362,7 +336,7 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
                 onClick={handleExportBackup}
                 disabled={isExportingBackup || isImportingBackup}
               >
-                {isExportingBackup ? '匯出中...' : '匯出備份 JSON'}
+                {isExportingBackup ? t('settings.exporting') : t('settings.export')}
               </button>
               <input
                 className="graph-backup-file-input"
@@ -382,10 +356,10 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
                 onClick={handleImportBackup}
                 disabled={!backupFile || isExportingBackup || isImportingBackup}
               >
-                {isImportingBackup ? '匯入中...' : '匯入備份'}
+                {isImportingBackup ? t('settings.importing') : t('settings.import')}
               </button>
             </div>
-            {backupFile && <small className="graph-backup-file-name">已選擇：{backupFile.name}</small>}
+            {backupFile && <small className="graph-backup-file-name">{t('settings.selectedFile', { filename: backupFile.name })}</small>}
             {backupError && <div className="graph-backup-error">{backupError}</div>}
             {backupMessage && <div className="graph-backup-success">{backupMessage}</div>}
           </section>
@@ -393,10 +367,10 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
 
         <section className="graph-settings-actions">
           <button type="button" className="graph-settings-btn secondary" onClick={handleReset}>
-            恢复默认
+            {t('settings.reset')}
           </button>
           <button type="button" className="graph-settings-btn primary" onClick={handleSave}>
-            保存并应用
+            {t('settings.saveApply')}
           </button>
         </section>
       </main>

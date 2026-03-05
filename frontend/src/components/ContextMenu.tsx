@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useI18n } from '../i18n';
 
 interface ContextMenuProps {
   id: string;
@@ -74,6 +75,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   siblingsCollapsed,
   onClose 
 }) => {
+  const { t } = useI18n();
   const [collapseOpen, setCollapseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -111,7 +113,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
           onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          編輯成員...
+          {t('context.editMember')}
         </button>
       )}
       <button
@@ -123,7 +125,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        提出問題...
+        {t('context.reportIssue')}
       </button>
       <button 
         onClick={() => {
@@ -134,7 +136,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        設為中心
+        {t('context.setCenter')}
       </button>
       {canEdit && selectedCount > 1 && (
         <button
@@ -146,7 +148,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
           onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          水平對齊（平均間距）
+          {t('context.alignHorizontal')}
         </button>
       )}
       {canEdit && selectedCount > 1 && (
@@ -159,7 +161,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
           onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          垂直對齊（平均間距）
+          {t('context.alignVertical')}
         </button>
       )}
       {canEdit && (
@@ -172,7 +174,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
           onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          建立關係...
+          {t('context.createRelationship')}
         </button>
       )}
       <button
@@ -181,7 +183,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        複製 {copyOpen ? '▾' : '▸'}
+        {t('context.copy')} {copyOpen ? '▾' : '▸'}
       </button>
       {copyOpen && (
         <>
@@ -196,9 +198,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             disabled={!title}
-            title={title ? '' : '沒有稱呼可複製'}
+            title={title ? '' : t('context.noTitleToCopy')}
           >
-            複製稱呼
+            {t('context.copyTitle')}
           </button>
           {canEdit && (
             <button
@@ -210,7 +212,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
               onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             >
-              複製到右下
+              {t('context.duplicateBottomRight')}
             </button>
           )}
         </>
@@ -221,7 +223,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        摺疊 {collapseOpen ? '▾' : '▸'}
+        {t('context.collapse')} {collapseOpen ? '▾' : '▸'}
       </button>
       {collapseOpen && (
         <>
@@ -234,7 +236,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {maternalCollapsed ? '展開女方家族' : '折疊女方家族'}
+            {maternalCollapsed ? t('context.expandMaternal') : t('context.collapseMaternal')}
           </button>
           <button
             onClick={() => {
@@ -245,7 +247,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {paternalCollapsed ? '展開男方家族' : '折疊男方家族'}
+            {paternalCollapsed ? t('context.expandPaternal') : t('context.collapsePaternal')}
           </button>
           <button
             onClick={() => {
@@ -256,7 +258,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {childrenCollapsed ? '展開兒女' : '折疊兒女'}
+            {childrenCollapsed ? t('context.expandChildren') : t('context.collapseChildren')}
           </button>
           <button
             onClick={() => {
@@ -267,7 +269,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {siblingsCollapsed ? '展開手足' : '折疊手足'}
+            {siblingsCollapsed ? t('context.expandSiblings') : t('context.collapseSiblings')}
           </button>
         </>
       )}
@@ -277,7 +279,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        淡化 {dimOpen ? '▾' : '▸'}
+        {t('context.dimming')} {dimOpen ? '▾' : '▸'}
       </button>
       {dimOpen && (
         <>
@@ -290,7 +292,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {dimSingleActive ? '取消單一淡化' : '淡化此節點'}
+            {dimSingleActive ? t('context.clearSingleDim') : t('context.dimThisNode')}
           </button>
           <button 
             onClick={() => {
@@ -301,7 +303,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {dimRelativesActive ? '取消淡化手足/父母' : '淡化手足/父母'}
+            {dimRelativesActive ? t('context.clearDimRelatives') : t('context.dimRelatives')}
           </button>
           <button 
             onClick={() => {
@@ -312,7 +314,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            {dimNonRelativesActive ? '取消淡化非手足/父母' : '淡化非手足/父母'}
+            {dimNonRelativesActive ? t('context.clearDimNonRelatives') : t('context.dimNonRelatives')}
           </button>
         </>
       )}
@@ -324,7 +326,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            刪除 {deleteOpen ? '▾' : '▸'}
+            {t('context.delete')} {deleteOpen ? '▾' : '▸'}
           </button>
           {deleteOpen && (
             <>
@@ -337,7 +339,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
                 onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                刪除成員
+                {t('context.deleteMember')}
               </button>
               <button
                 onClick={() => {
@@ -348,7 +350,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
                 onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                刪除所有關係
+                {t('context.deleteAllRelationships')}
               </button>
               <button
                 onClick={() => {
@@ -359,7 +361,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
                 onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                刪除所有手足關係
+                {t('context.deleteSiblingRelationships')}
               </button>
               <button
                 onClick={() => {
@@ -370,7 +372,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
                 onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                刪除所有子女關係
+                {t('context.deleteChildRelationships')}
               </button>
             </>
           )}

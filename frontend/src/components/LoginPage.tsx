@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useI18n } from '../i18n';
 
 interface LoginPageProps {
   error?: string | null;
@@ -6,6 +7,7 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
+  const { t } = useI18n();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -24,10 +26,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
     <div className="login-page">
       <div className="login-card">
         <h1>Family Tree</h1>
-        <p>請先登入以查看家族譜圖</p>
+        <p>{t('login.prompt')}</p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>帳號</label>
+            <label>{t('login.username')}</label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -36,7 +38,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
             />
           </div>
           <div className="form-group">
-            <label>密碼</label>
+            <label>{t('login.password')}</label>
             <input
               type="password"
               value={password}
@@ -46,7 +48,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
           </div>
           {error && <div className="login-error">{error}</div>}
           <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? '登入中...' : '登入'}
+            {submitting ? t('login.signingIn') : t('login.signIn')}
           </button>
         </form>
       </div>

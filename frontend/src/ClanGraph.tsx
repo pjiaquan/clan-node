@@ -40,6 +40,7 @@ import {
 import { getSurname, isEditableTarget } from './clanGraph/utils';
 import type { GraphSettings } from './graphSettings';
 import { createPersonSearchMatcher } from './utils/personSearch';
+import { useI18n } from './i18n';
 import 'reactflow/dist/style.css';
 
 const nodeTypes = {
@@ -108,6 +109,7 @@ export function ClanGraph({
   onOpenSettings,
   onLogout
 }: ClanGraphProps) {
+  const { t } = useI18n();
   const isReadOnly = Boolean(readOnly);
   const canManageUsers = Boolean(isAdmin);
   const {
@@ -716,9 +718,9 @@ export function ClanGraph({
 
   const ensureEditable = useCallback(() => {
     if (!isReadOnly) return true;
-    showToast('只讀模式，無法編輯', 'warning');
+    showToast(t('graph.readOnlyCannotEdit'), 'warning');
     return false;
-  }, [isReadOnly, showToast]);
+  }, [isReadOnly, showToast, t]);
 
   const createRelationshipWithUndo = useCallback(async (
     from: string,
@@ -774,14 +776,14 @@ export function ClanGraph({
   const handleCreateUser = useCallback(async (username: string, password: string, role: 'admin' | 'readonly') => {
     try {
       await api.createUser(username, password, role);
-      showToast('帳號已建立', 'success');
+      showToast(t('graph.userCreated'), 'success');
       setShowCreateUserModal(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '建立帳號失敗';
+      const message = error instanceof Error ? error.message : t('graph.userCreateFailed');
       showToast(message, 'warning');
       throw error;
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => {
     if (!graphData) return;
@@ -1576,7 +1578,7 @@ export function ClanGraph({
     const matchesQuery = createPersonSearchMatcher(trimmed);
     const match = graphData.nodes.find((person) => matchesQuery(person));
     if (!match) {
-      showToast('找不到成員', 'warning');
+      showToast(t('graph.memberNotFound'), 'warning');
       return;
     }
     const wasCollapsed = collapsedNodeIds.has(match.id);
@@ -1612,7 +1614,7 @@ export function ClanGraph({
     searchFlashTimer.current = window.setTimeout(() => {
       setSearchFlashId(null);
     }, 1400);
-  }, [graphData, collapsedNodeIds, persistPendingViewport, revealCollapsedNodeBySearch]);
+  }, [graphData, collapsedNodeIds, persistPendingViewport, revealCollapsedNodeBySearch, showToast, t]);
 
   const focusNodeById = useCallback((id: string, zoom = 1.0) => {
     if (!reactFlowInstance) return false;
@@ -1684,7 +1686,7 @@ export function ClanGraph({
     const syncCenter = options?.syncCenter ?? true;
     if (!graphData) return;
     const meId = graphData.center
-      || graphData.nodes.find((person) => person.title === '我')?.id
+      || graphData.nodes.find((person) => person.title === '我' || person.title === 'Me')?.id
       || centerId;
     if (!meId) return;
 
@@ -2079,11 +2081,11 @@ export function ClanGraph({
 
         const getLabel = (type: string) => {
           switch (type) {
-            case 'spouse': return '夫妻';
-            case 'ex_spouse': return '前配偶';
-            case 'sibling': return '手足';
-            case 'in_law': return '姻親';
-            default: return '親子';
+            case 'spouse': return t('relationship.spouse');
+            case 'ex_spouse': return t('relationship.ex_spouse');
+            case 'sibling': return t('relationship.sibling');
+            case 'in_law': return t('relationship.in_law');
+            default: return t('relationship.parent_child');
           }
         };
 
@@ -2128,7 +2130,7 @@ export function ClanGraph({
           interactionWidth: isCoarsePointer ? 56 : 24,
         };
       });
-  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer]);
+  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, t]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -2756,7 +2758,7 @@ export function ClanGraph({
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditableTarget(e.target)) {
         if (isReadOnly) {
-          showToast('只讀模式，無法編輯', 'warning');
+          showToast(t('graph.readOnlyCannotEdit'), 'warning');
           return;
         }
         if (selectedEdge) {
@@ -2772,13 +2774,13 @@ export function ClanGraph({
         if (person) {
           console.log('Copied person:', person.name);
           setCopiedPerson(person);
-          showToast('已複製節點', 'success');
+          showToast(t('graph.nodeCopied'), 'success');
         }
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'v' && copiedPerson) {
         if (isReadOnly) {
-          showToast('只讀模式，無法編輯', 'warning');
+          showToast(t('graph.readOnlyCannotEdit'), 'warning');
           return;
         }
         console.log('Pasting person:', copiedPerson.name);
@@ -2811,7 +2813,7 @@ export function ClanGraph({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !isEditableTarget(e.target)) {
         e.preventDefault();
         if (isReadOnly) {
-          showToast('只讀模式，無法編輯', 'warning');
+          showToast(t('graph.readOnlyCannotEdit'), 'warning');
           return;
         }
         handleUndo();
@@ -2828,20 +2830,20 @@ export function ClanGraph({
         e.preventDefault();
         if (hasActiveDimming) {
           clearAllDimming();
-          showToast('已取消全部淡化', 'success');
+          showToast(t('graph.clearAllDimmingDone'), 'success');
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming]);
+  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming, t]);
 
   if (loading) {
     return (
       <div className="app">
         <div className="loading">
           <div className="spinner"></div>
-          <p>載入中...</p>
+          <p>{t('graph.loading')}</p>
         </div>
       </div>
     );
@@ -2851,9 +2853,9 @@ export function ClanGraph({
     return (
       <div className="app">
         <div className="loading">
-          <p style={{ color: '#ef4444' }}>錯誤: {error}</p>
+          <p style={{ color: '#ef4444' }}>{t('graph.errorPrefix', { error })}</p>
           <button onClick={fetchGraph} className="btn-primary" style={{ marginTop: '1rem' }}>
-            重試
+            {t('common.retry')}
           </button>
         </div>
       </div>
@@ -3035,9 +3037,9 @@ export function ClanGraph({
                 ? copyViaClipboard()
                 : copyViaFallback();
               copyPromise.then(() => {
-                showToast('已複製稱呼', 'success');
+                showToast(t('graph.copyTitleDone'), 'success');
               }).catch(() => {
-                showToast('複製失敗', 'warning');
+                showToast(t('graph.copyFailed'), 'warning');
               });
             }}
             onDuplicateBottomRight={handleDuplicateBottomRight}
@@ -3230,8 +3232,8 @@ export function ClanGraph({
 
       {linkMode && (
         <div className="link-indicator">
-          點擊另一個節點以建立關係
-          <button onClick={() => setLinkMode(null)}>取消</button>
+          {t('graph.linkIndicator')}
+          <button onClick={() => setLinkMode(null)}>{t('common.cancel')}</button>
         </div>
       )}
 
@@ -3246,7 +3248,7 @@ export function ClanGraph({
               target_person_id: reportIssuePerson.id,
               target_person_name: reportIssuePerson.name
             });
-            showToast('已送出問題提報', 'success');
+            showToast(t('graph.issueSubmitted'), 'success');
           }}
         />
       )}
@@ -3273,7 +3275,7 @@ export function ClanGraph({
       {pendingRelationshipChoice && (
         <div className="modal-overlay" onClick={() => setPendingRelationshipChoice(null)}>
           <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
-            <h3>請選擇關係類型</h3>
+            <h3>{t('graph.selectRelationshipType')}</h3>
             <p>
               {
                 `${graphData?.nodes.find((node) => node.id === pendingRelationshipChoice.from)?.name || pendingRelationshipChoice.from}`
@@ -3288,23 +3290,23 @@ export function ClanGraph({
                 className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'sibling' ? 'is-suggested' : ''}`}
                 onClick={() => confirmRelationshipChoice('sibling')}
               >
-                手足
+                {t('relationship.sibling')}
               </button>
               <button
                 className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'parent_child' ? 'is-suggested' : ''}`}
                 onClick={() => confirmRelationshipChoice('parent_child')}
               >
-                親子
+                {t('relationship.parent_child')}
               </button>
               <button
                 className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'spouse' ? 'is-suggested' : ''}`}
                 onClick={() => confirmRelationshipChoice('spouse')}
               >
-                夫妻
+                {t('relationship.spouse')}
               </button>
             </div>
             <button className="relationship-choice-cancel" onClick={() => setPendingRelationshipChoice(null)}>
-              取消
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -3322,7 +3324,7 @@ export function ClanGraph({
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
           showBirthTimeField={graphSettings.showBirthTimeOnNode}
           onClose={() => setEditingPersonId(null)}
-          onUnsavedClose={() => showToast('未儲存變更', 'warning')}
+          onUnsavedClose={() => showToast(t('graph.unsavedChanges'), 'warning')}
           onSubmit={async (id, updates, avatarFile, removeAvatar, avatarActions?: EditPersonAvatarActions) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const person = graphData.nodes.find(p => p.id === id);
@@ -3407,7 +3409,7 @@ export function ClanGraph({
               if (avatarOperationApplied) {
                 await fetchGraph();
                 setEditingPersonId(null);
-                showToast('已儲存', 'success');
+                showToast(t('graph.saved'), 'success');
                 const viewport = getViewportForNode(id, 1.0);
                 if (viewport && reactFlowInstance?.setViewport) {
                   reactFlowInstance.setViewport(viewport);
@@ -3417,7 +3419,7 @@ export function ClanGraph({
                 return;
               }
               setEditingPersonId(null);
-              showToast('沒有變更', 'warning');
+              showToast(t('graph.noChanges'), 'warning');
               return;
             }
 
@@ -3431,7 +3433,7 @@ export function ClanGraph({
             try {
               await updatePerson(id, filteredUpdates);
               setEditingPersonId(null);
-              showToast('已儲存', 'success');
+              showToast(t('graph.saved'), 'success');
               const viewport = getViewportForNode(id, 1.0);
               if (viewport && reactFlowInstance?.setViewport) {
                 reactFlowInstance.setViewport(viewport);
@@ -3439,7 +3441,7 @@ export function ClanGraph({
               }
               focusNodeById(id, 1.0);
             } catch (error) {
-              const message = error instanceof Error ? error.message : '儲存失敗';
+              const message = error instanceof Error ? error.message : t('graph.saveFailed');
               showToast(message, 'warning');
               throw error;
             }

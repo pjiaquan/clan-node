@@ -3,6 +3,7 @@ import type { Avatar, Person } from '../types';
 import { getGanzhiYear, getZodiacAnimal, getModernTimeRange, normalizeTraditionalHour, TRADITIONAL_HOURS } from '../utils/chineseTime';
 import { api } from '../api';
 import { clampDay, composePartialDate, parsePartialDate } from '../utils/partialDate';
+import { useI18n } from '../i18n';
 
 export type EditPersonAvatarActions = {
   setPrimaryAvatarId?: string | null;
@@ -57,18 +58,21 @@ const normalizeAvatars = (avatars: any): Avatar[] => {
 const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
-const formatSaveError = (error: unknown) => {
+const formatSaveError = (
+  error: unknown,
+  t: (key: string, vars?: Record<string, string | number>) => string
+) => {
   const raw = error instanceof Error ? error.message : String(error);
   if (raw.includes('unsupported file type')) {
-    return '圖片格式不支援，請使用 JPG、PNG、WebP 或 GIF。';
+    return t('editPerson.errorUnsupportedImage');
   }
   if (raw.includes('file is too large') || raw.includes('HTTP 413')) {
-    return '圖片大小超過 20MB，請壓縮後再上傳。';
+    return t('editPerson.errorImageTooLarge');
   }
   if (raw.includes('HTTP 400')) {
-    return '資料格式有誤，請確認欄位後再試。';
+    return t('editPerson.errorBadRequest');
   }
-  return raw || '儲存失敗，請稍後再試。';
+  return raw || t('editPerson.errorSaveFailed');
 };
 
 export const EditPersonModal: React.FC<EditPersonModalProps> = ({
@@ -78,6 +82,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   onUnsavedClose,
   onSubmit,
 }) => {
+  const { t } = useI18n();
   const [name, setName] = useState(person.name);
   const [isNameEditable, setIsNameEditable] = useState(false);
   const [englishName, setEnglishName] = useState(person.english_name || '');
@@ -459,7 +464,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       await saveChanges();
     } catch (error) {
       console.error('Failed to save person changes:', error);
-      setSaveError(formatSaveError(error));
+      setSaveError(formatSaveError(error, t));
     } finally {
       setIsSaving(false);
     }
@@ -467,10 +472,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
 
   const handleUnlockNameEdit = useCallback(() => {
     if (isNameEditable) return;
-    const confirmed = window.confirm('姓名會影響搜尋與識別，確定要解鎖姓名編輯嗎？');
+    const confirmed = window.confirm(t('editPerson.unlockConfirm'));
     if (!confirmed) return;
     setIsNameEditable(true);
-  }, [isNameEditable]);
+  }, [isNameEditable, t]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -485,11 +490,11 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
     if (file.size > MAX_AVATAR_BYTES) {
-      setSaveError('圖片大小超過 20MB，請壓縮後再上傳。');
+      setSaveError(t('editPerson.errorImageTooLarge'));
       return;
     }
     if (!ACCEPTED_AVATAR_TYPES.has(file.type)) {
-      setSaveError('圖片格式不支援，請使用 JPG、PNG、WebP 或 GIF。');
+      setSaveError(t('editPerson.errorUnsupportedImage'));
       return;
     }
     setSaveError(null);
@@ -601,22 +606,22 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
         ? 'stable'
         : 'muted';
   const avatarStatusLabel = removeAvatar
-    ? '已標記清除主頭像'
+    ? t('editPerson.avatarStatusMarkedRemove')
     : avatarFile
-      ? '新照片待儲存'
+      ? t('editPerson.avatarStatusPendingNew')
       : activePrimaryAvatarId
-        ? '使用既有照片'
-        : '尚未設定主頭像';
+        ? t('editPerson.avatarStatusUsingExisting')
+        : t('editPerson.avatarStatusNone');
   const zoomPercent = Math.round(zoom * 100);
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
       <div className="modal modal-edit-person" onClick={(e) => e.stopPropagation()}>
-        <h2>編輯成員</h2>
+        <h2>{t('editPerson.title')}</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <div className="name-lock-row">
-              <label>姓名</label>
+              <label>{t('personForm.name')}</label>
               {!isNameEditable ? (
                 <button
                   type="button"
@@ -624,10 +629,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   onClick={handleUnlockNameEdit}
                   disabled={isSaving}
                 >
-                  解鎖姓名編輯
+                  {t('editPerson.unlockName')}
                 </button>
               ) : (
-                <span className="name-lock-chip">姓名已解鎖</span>
+                <span className="name-lock-chip">{t('editPerson.nameUnlocked')}</span>
               )}
             </div>
             <input
@@ -639,18 +644,18 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               autoFocus={isNameEditable}
             />
             {!isNameEditable && (
-              <small className="name-lock-hint">為避免誤改，姓名欄位預設鎖定。</small>
+              <small className="name-lock-hint">{t('editPerson.nameLockHint')}</small>
             )}
           </div>
           <div className="form-group">
-            <label>英文名</label>
+            <label>{t('personForm.englishName')}</label>
             <input
               value={englishName}
               onChange={(e) => setEnglishName(e.target.value)}
             />
           </div>
           <div className="form-group">
-            <label>頭像</label>
+            <label>{t('editPerson.avatar')}</label>
             <div className="avatar-picker">
               <div className="avatar-editor-main">
                 <div
@@ -715,7 +720,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                       }}
                     />
                   ) : (
-                    <span>拖曳照片到這裡</span>
+                    <span>{t('editPerson.dragPhotoHere')}</span>
                   )}
                 </div>
                 <div className="avatar-editor-meta">
@@ -724,15 +729,15 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                       {avatarStatusLabel}
                     </span>
                     <span className="avatar-status-chip">
-                      目前可用 {availableAvatars.length} 張
+                      {t('editPerson.availableCount', { count: availableAvatars.length })}
                     </span>
                   </div>
                   <p className="avatar-editor-hint">
-                    選擇照片後可直接拖曳調整構圖，儲存時會套用裁切結果。
+                    {t('editPerson.avatarHint')}
                   </p>
                   <div className="avatar-actions-row">
                     <label className="btn-secondary avatar-upload">
-                      選擇照片
+                      {t('editPerson.choosePhoto')}
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -748,21 +753,21 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                         type="button"
                         className="btn-danger avatar-danger-btn"
                         onClick={() => {
-                          const confirmed = window.confirm('確定要移除目前主頭像嗎？');
+                          const confirmed = window.confirm(t('editPerson.removePrimaryConfirm'));
                           if (!confirmed) return;
                           setAvatarFile(null);
                           setSelectedPrimaryAvatarId(null);
                           setRemoveAvatar(true);
                         }}
                       >
-                        移除主頭像
+                        {t('editPerson.removePrimary')}
                       </button>
                     )}
                   </div>
                   {avatarPreview && (
                     <div className="avatar-zoom-wrap">
                       <div className="avatar-zoom-head">
-                        <span>縮放</span>
+                        <span>{t('editPerson.zoom')}</span>
                         <span>{zoomPercent}%</span>
                       </div>
                       <input
@@ -781,8 +786,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               {initialAvatars.length > 0 && (
                 <div className="avatar-library">
                   <div className="avatar-library-head">
-                    <span>照片庫</span>
-                    <span>{initialAvatars.length} 張</span>
+                    <span>{t('editPerson.photoLibrary')}</span>
+                    <span>{t('editPerson.libraryCount', { count: initialAvatars.length })}</span>
                   </div>
                   <div className="avatar-gallery">
                     {initialAvatars.map((avatar) => {
@@ -804,8 +809,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                             }}
                           >
                             <img src={previewUrl} alt={`${name} avatar`} />
-                            {isPrimary && <span className="avatar-badge is-primary">主頭像</span>}
-                            {deleted && <span className="avatar-badge is-deleted">待刪除</span>}
+                            {isPrimary && <span className="avatar-badge is-primary">{t('editPerson.primary')}</span>}
+                            {deleted && <span className="avatar-badge is-deleted">{t('editPerson.pendingDelete')}</span>}
                           </button>
                           <div className="avatar-gallery-actions">
                             <button
@@ -817,7 +822,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                                 setRemoveAvatar(false);
                               }}
                             >
-                              {isPrimary ? '目前主頭像' : '設為主頭像'}
+                              {isPrimary ? t('editPerson.currentPrimary') : t('editPerson.setPrimary')}
                             </button>
                             {!deleted ? (
                               <button
@@ -825,7 +830,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                                 className="btn-danger avatar-gallery-danger"
                                 onClick={() => markAvatarForDelete(avatar.id)}
                               >
-                                刪除
+                                {t('common.delete')}
                               </button>
                             ) : (
                               <button
@@ -833,7 +838,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                                 className="btn-secondary"
                                 onClick={() => undoDeleteAvatar(avatar.id)}
                               >
-                                還原
+                                {t('editPerson.undo')}
                               </button>
                             )}
                           </div>
@@ -851,23 +856,23 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             </div>
           </div>
           <div className="form-group">
-            <label>性別</label>
+            <label>{t('personForm.gender')}</label>
             <select
               value={gender}
               onChange={(e) => setGender(e.target.value as 'M' | 'F' | 'O')}
             >
-              <option value="M">男</option>
-              <option value="F">女</option>
-              <option value="O">其他</option>
+              <option value="M">{t('personForm.genderMale')}</option>
+              <option value="F">{t('personForm.genderFemale')}</option>
+              <option value="O">{t('personForm.genderOther')}</option>
             </select>
           </div>
           <div className="form-group">
-            <label>血型</label>
+            <label>{t('personForm.bloodType')}</label>
             <select
               value={bloodType}
               onChange={(event) => setBloodType(event.target.value)}
             >
-              <option value="">未知</option>
+              <option value="">{t('common.unknown')}</option>
               <option value="A">A</option>
               <option value="B">B</option>
               <option value="O">O</option>
@@ -884,14 +889,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               }}
               style={{ cursor: 'pointer' }}
             >
-              出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
+              {t('personForm.birthDate')} {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({t('personForm.zodiacInfo', { ganzhi, zodiac })})</span>}
             </label>
             <div className="date-input-row">
               <div className="date-input-main">
                 <input
                   type="text"
                   inputMode="numeric"
-                  placeholder="年"
+                  placeholder={t('personForm.yearPlaceholder')}
                   value={dobYear}
                   onChange={(e) => {
                     const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -916,12 +921,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   disabled={dobUnknown || !dobYear}
                   className="date-month-select"
                 >
-                  <option value="">月(選填)</option>
+                  <option value="">{t('personForm.monthOptional')}</option>
                   {Array.from({ length: 12 }, (_, idx) => {
                     const value = String(idx + 1);
                     return (
                       <option key={value} value={value}>
-                        {value}月
+                        {t('personForm.monthValue', { value })}
                       </option>
                     );
                   })}
@@ -932,12 +937,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   disabled={dobUnknown || !dobYear || !dobMonth}
                   className="date-day-select"
                 >
-                  <option value="">日(選填)</option>
+                  <option value="">{t('personForm.dayOptional')}</option>
                   {Array.from({ length: maxDobDay }, (_, idx) => {
                     const value = String(idx + 1);
                     return (
                       <option key={value} value={value}>
-                        {value}日
+                        {t('personForm.dayValue', { value })}
                       </option>
                     );
                   })}
@@ -947,18 +952,18 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   className="date-year-btn"
                   onClick={() => adjustDobYear(-1)}
                   disabled={dobUnknown || !dobYear}
-                  title="年份減一"
+                  title={t('editPerson.decreaseYear')}
                 >
-                  -年
+                  {t('editPerson.decreaseYearShort')}
                 </button>
                 <button
                   type="button"
                   className="date-year-btn"
                   onClick={() => adjustDobYear(1)}
                   disabled={dobUnknown || !dobYear}
-                  title="年份加一"
+                  title={t('editPerson.increaseYear')}
                 >
-                  +年
+                  {t('editPerson.increaseYearShort')}
                 </button>
               </div>
               <label className="date-unknown-toggle">
@@ -975,19 +980,19 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                     }
                   }}
                 />
-                未知
+                {t('common.unknown')}
               </label>
             </div>
             {!showDeathFields && (
               <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: '#64748b' }}>
-                連點出生日期標籤 6 次可顯示歿日欄位
+                {t('personForm.revealDeathHint')}
               </div>
             )}
           </div>
           {showBirthTimeField && (
             <div className="form-group">
               <label>
-                出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
+                {t('personForm.birthHour')} {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
               </label>
               <select value={tob} onChange={(e) => setTob(e.target.value)}>
                 <option value="">--</option>
@@ -1003,14 +1008,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             <>
               <div className="form-group">
                 <label>
-                  歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
+                  {t('personForm.deathDate')} {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({t('personForm.zodiacInfo', { ganzhi: deathGanzhi, zodiac: deathZodiac })})</span>}
                 </label>
                 <div className="date-input-row">
                   <div className="date-input-main">
                     <input
                       type="text"
                       inputMode="numeric"
-                      placeholder="年"
+                      placeholder={t('personForm.yearPlaceholder')}
                       value={dodYear}
                       onChange={(e) => {
                         const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -1036,12 +1041,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                       disabled={dodUnknown || !dodYear}
                       className="date-month-select"
                     >
-                      <option value="">月(選填)</option>
+                      <option value="">{t('personForm.monthOptional')}</option>
                       {Array.from({ length: 12 }, (_, idx) => {
                         const value = String(idx + 1);
                         return (
                           <option key={value} value={value}>
-                            {value}月
+                            {t('personForm.monthValue', { value })}
                           </option>
                         );
                       })}
@@ -1052,12 +1057,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                       disabled={dodUnknown || !dodYear || !dodMonth}
                       className="date-day-select"
                     >
-                      <option value="">日(選填)</option>
+                      <option value="">{t('personForm.dayOptional')}</option>
                       {Array.from({ length: maxDodDay }, (_, idx) => {
                         const value = String(idx + 1);
                         return (
                           <option key={value} value={value}>
-                            {value}日
+                            {t('personForm.dayValue', { value })}
                           </option>
                         );
                       })}
@@ -1080,13 +1085,13 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                         }
                       }}
                     />
-                    未知
+                    {t('common.unknown')}
                   </label>
                 </div>
               </div>
               <div className="form-group">
                 <label>
-                  歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
+                  {t('personForm.deathHour')} {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
                 </label>
                 <select
                   value={tod}
@@ -1105,21 +1110,21 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
           )}
 
           <div className="form-group">
-            <label>自訂欄位</label>
+            <label>{t('editPerson.customFields')}</label>
             <div className="custom-fields">
               {customFields.length === 0 && (
-                <div className="custom-fields-empty">新增 Facebook、Line 等欄位</div>
+                <div className="custom-fields-empty">{t('editPerson.customFieldsEmpty')}</div>
               )}
               {customFields.map((field, index) => (
                 <div className="custom-field-row" key={`custom-field-${index}`}>
                   <input
                     value={field.label}
-                    placeholder="欄位名稱"
+                    placeholder={t('editPerson.fieldName')}
                     onChange={(e) => updateCustomField(index, 'label', e.target.value)}
                   />
                   <input
                     value={field.value}
-                    placeholder="內容"
+                    placeholder={t('editPerson.fieldValue')}
                     onChange={(e) => updateCustomField(index, 'value', e.target.value)}
                   />
                   <button
@@ -1127,30 +1132,34 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                     className="custom-field-remove"
                     onClick={() => removeCustomField(index)}
                   >
-                    移除
+                    {t('editPerson.removeField')}
                   </button>
                 </div>
               ))}
             </div>
             <button type="button" className="custom-field-add" onClick={addCustomField}>
-              新增欄位
+              {t('editPerson.addField')}
             </button>
           </div>
 
           {(westernAge !== null || traditionalAge !== null) && (
             <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: '#64748b', textAlign: 'center' }}>
               {westernAge !== null && (
-                <div>{dod ? `西元享壽 ${westernAge} 歲` : `西元目前 ${westernAge} 歲`}</div>
+                <div>{dod
+                  ? t('editPerson.ageAtDeath', { age: westernAge })
+                  : t('editPerson.currentAge', { age: westernAge })}</div>
               )}
               {traditionalAge !== null && (
-                <div>{dod ? `中華享壽(虛歲) ${traditionalAge} 歲` : `中華目前(虛歲) ${traditionalAge} 歲`}</div>
+                <div>{dod
+                  ? t('editPerson.traditionalAgeAtDeath', { age: traditionalAge })
+                  : t('editPerson.currentTraditionalAge', { age: traditionalAge })}</div>
               )}
             </div>
           )}
 
           <div className="form-actions">
             <button type="button" onClick={handleClose} disabled={isSaving}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -1160,9 +1169,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               {isSaving ? (
                 <>
                   <span className="btn-inline-spinner" aria-hidden="true" />
-                  <span>儲存中...</span>
+                  <span>{t('common.saving')}</span>
                 </>
-              ) : '儲存'}
+              ) : t('common.save')}
             </button>
           </div>
         </form>

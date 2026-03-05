@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuthSession, AuthUser } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 
 type SessionManagementPageProps = {
   currentUser: AuthUser;
@@ -9,11 +10,11 @@ type SessionManagementPageProps = {
   onLogout: () => Promise<void> | void;
 };
 
-const formatDate = (value?: string | null) => {
+const formatDate = (value: string | null | undefined, locale: string) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-TW', {
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -30,6 +31,7 @@ const platformGroup = (session: AuthSession) => {
 };
 
 export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+  const { t, locale } = useI18n();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,12 +50,12 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
       const data = await api.fetchSessions();
       setSessions(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入 session 失敗');
+      setError(err instanceof Error ? err.message : t('session.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadSessions(false);
@@ -67,7 +69,7 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
   }, [sessions]);
 
   const handleRevokeSession = useCallback(async (session: AuthSession) => {
-    const confirmed = window.confirm(`確定要下線這個裝置？\n${session.device_label}`);
+    const confirmed = window.confirm(t('session.revokeConfirm', { device: session.device_label }));
     if (!confirmed) return;
 
     setBusySessionId(session.id);
@@ -80,14 +82,14 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
       }
       setSessions((prev) => prev.filter((item) => item.id !== session.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '下線失敗');
+      setError(err instanceof Error ? err.message : t('session.revokeFailed'));
     } finally {
       setBusySessionId(null);
     }
-  }, [onLogout]);
+  }, [onLogout, t]);
 
   const handleRevokeOthers = useCallback(async () => {
-    const confirmed = window.confirm('確定下線其他所有裝置？');
+    const confirmed = window.confirm(t('session.revokeOthersConfirm'));
     if (!confirmed) return;
     setRevokingOthers(true);
     setError(null);
@@ -95,17 +97,17 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
       await api.revokeOtherSessions();
       await loadSessions(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '下線其他裝置失敗');
+      setError(err instanceof Error ? err.message : t('session.revokeOthersFailed'));
     } finally {
       setRevokingOthers(false);
     }
-  }, [loadSessions]);
+  }, [loadSessions, t]);
 
   return (
     <div className="session-page">
       <header className="session-header">
         <div className="session-header-left">
-          <h1>登入裝置 Session</h1>
+          <h1>{t('session.title')}</h1>
         </div>
         <div className="session-header-right">
           <span className="session-user-chip">{currentUser.username}</span>
@@ -120,19 +122,19 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
       <main className="session-main">
         <section className="session-stats">
           <article className="session-stat-card">
-            <span>總 Session</span>
+            <span>{t('session.total')}</span>
             <strong>{stats.total}</strong>
           </article>
           <article className="session-stat-card">
-            <span>桌面裝置</span>
+            <span>{t('session.desktop')}</span>
             <strong>{stats.desktop}</strong>
           </article>
           <article className="session-stat-card">
-            <span>行動裝置</span>
+            <span>{t('session.mobile')}</span>
             <strong>{stats.mobile}</strong>
           </article>
           <article className="session-stat-card">
-            <span>其他</span>
+            <span>{t('session.other')}</span>
             <strong>{stats.other}</strong>
           </article>
         </section>
@@ -145,7 +147,7 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
               onClick={() => loadSessions(true)}
               disabled={refreshing}
             >
-              {refreshing ? '更新中...' : '重新整理'}
+              {refreshing ? t('common.refreshing') : t('common.refresh')}
             </button>
             <button
               type="button"
@@ -153,26 +155,26 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
               onClick={handleRevokeOthers}
               disabled={revokingOthers}
             >
-              {revokingOthers ? '處理中...' : '下線其他裝置'}
+              {revokingOthers ? t('session.processing') : t('session.signOutOthers')}
             </button>
           </div>
 
           {error && <div className="session-error">{error}</div>}
 
           {loading ? (
-            <div className="session-loading">載入中...</div>
+            <div className="session-loading">{t('common.loading')}</div>
           ) : (
             <div className="session-table-wrap">
               <table className="session-table">
                 <thead>
                   <tr>
-                    <th>裝置</th>
-                    <th>瀏覽器</th>
+                    <th>{t('session.device')}</th>
+                    <th>{t('session.browser')}</th>
                     <th>IP</th>
-                    <th>最近活動</th>
-                    <th>登入時間</th>
-                    <th>到期</th>
-                    <th>操作</th>
+                    <th>{t('session.lastActive')}</th>
+                    <th>{t('session.signedInAt')}</th>
+                    <th>{t('session.expiresAt')}</th>
+                    <th>{t('session.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -183,14 +185,14 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
                         <td>
                           <div className="session-device-cell">
                             <span>{session.device_label}</span>
-                            {session.current && <span className="session-current-badge">目前裝置</span>}
+                            {session.current && <span className="session-current-badge">{t('session.currentDevice')}</span>}
                           </div>
                         </td>
                         <td>{session.browser}</td>
                         <td>{session.ip_address || '-'}</td>
-                        <td>{formatDate(session.last_seen_at || session.created_at)}</td>
-                        <td>{formatDate(session.created_at)}</td>
-                        <td>{formatDate(session.expires_at)}</td>
+                        <td>{formatDate(session.last_seen_at || session.created_at, locale)}</td>
+                        <td>{formatDate(session.created_at, locale)}</td>
+                        <td>{formatDate(session.expires_at, locale)}</td>
                         <td>
                           <button
                             type="button"
@@ -198,7 +200,7 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
                             onClick={() => handleRevokeSession(session)}
                             disabled={rowBusy || session.current}
                           >
-                            下線
+                            {t('session.revoke')}
                           </button>
                         </td>
                       </tr>

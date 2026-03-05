@@ -1,10 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
+import { useI18n } from './i18n';
 
 const MOBILE_LONG_PRESS_MS = 180;
 const MOBILE_LONG_PRESS_CANCEL_DISTANCE = 30;
 
 const PersonNode = memo(({ data, selected }: NodeProps) => {
+  const { t } = useI18n();
   const [isFloating, setIsFloating] = useState(false);
   const [nameOverflow, setNameOverflow] = useState(false);
   const highlightHandles = new Set<string>(data.highlightHandles ?? []);
@@ -285,7 +287,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         {(englishName || birthTime) && (
           <div className="node-meta">
             {englishName && <span className="node-meta-chip node-meta-chip-plain">{englishName}</span>}
-            {birthTime && <span className="node-meta-chip">生 {birthTime}</span>}
+            {birthTime && <span className="node-meta-chip">{t('personNode.born')} {birthTime}</span>}
           </div>
         )}
         {data.title && (

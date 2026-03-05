@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 
 type PageHeaderMenuProps = {
   username?: string | null;
@@ -23,12 +24,14 @@ const MenuItemLabel: React.FC<{ text: string }> = ({ text }) => (
 
 export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   username,
-  backLabel = '返回族譜',
+  backLabel,
   onBack,
   onLogout,
 }) => {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const resolvedBackLabel = backLabel || t('pageHeader.backToGraph');
 
   useEffect(() => {
     if (!open) return;
@@ -68,8 +71,8 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
       <button
         className="btn-secondary btn-icon icon-only-btn page-header-menu-trigger"
         type="button"
-        aria-label="更多功能"
-        title="更多功能"
+        aria-label={t('common.moreActions')}
+        title={t('common.moreActions')}
         onClick={() => setOpen((prev) => !prev)}
       >
         <span className="btn-icon">
@@ -91,7 +94,7 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
               setOpen(false);
             }}
           >
-            <MenuItemLabel text={backLabel} />
+            <MenuItemLabel text={resolvedBackLabel} />
           </button>
           <button
             type="button"
@@ -101,7 +104,7 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
               setOpen(false);
             }}
           >
-            <MenuItemLabel text="登出" />
+            <MenuItemLabel text={t('common.logout')} />
           </button>
         </div>
       )}

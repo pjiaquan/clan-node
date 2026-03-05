@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { AuthUser, ManagedUser, UserRole } from '../types';
 import { CreateUserModal } from './CreateUserModal';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 
 type UserManagementPageProps = {
   currentUser: AuthUser;
@@ -10,19 +11,8 @@ type UserManagementPageProps = {
   onLogout: () => Promise<void> | void;
 };
 
-const formatDate = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-TW', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-};
-
 export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+  const { t, locale } = useI18n();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,12 +31,12 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
       const data = await api.fetchUsers();
       setUsers(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入帳號失敗');
+      setError(err instanceof Error ? err.message : t('userMgmt.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadUsers(false);
@@ -75,14 +65,14 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
       const updated = await api.updateUser(user.id, { role });
       setUsers((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新角色失敗');
+      setError(err instanceof Error ? err.message : t('userMgmt.updateRoleFailed'));
     } finally {
       setBusyUserId(null);
     }
-  }, []);
+  }, [t]);
 
   const handleDeleteUser = useCallback(async (user: ManagedUser) => {
-    const confirmed = window.confirm(`確定刪除帳號「${user.username}」？`);
+    const confirmed = window.confirm(t('userMgmt.deleteConfirm', { username: user.username }));
     if (!confirmed) return;
     setBusyUserId(user.id);
     setError(null);
@@ -90,17 +80,17 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
       await api.deleteUser(user.id);
       setUsers((prev) => prev.filter((item) => item.id !== user.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '刪除帳號失敗');
+      setError(err instanceof Error ? err.message : t('userMgmt.deleteFailed'));
     } finally {
       setBusyUserId(null);
     }
-  }, []);
+  }, [t]);
 
   return (
     <div className="user-admin-page">
       <header className="user-admin-header">
         <div className="user-admin-header-left">
-          <h1>帳號管理</h1>
+          <h1>{t('userMgmt.title')}</h1>
         </div>
         <div className="user-admin-header-right">
           <span className="user-admin-current-user">{currentUser.username}</span>
@@ -115,15 +105,15 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
       <main className="user-admin-main">
         <section className="user-admin-stats">
           <article className="user-admin-stat-card">
-            <span>總帳號</span>
+            <span>{t('userMgmt.total')}</span>
             <strong>{stats.total}</strong>
           </article>
           <article className="user-admin-stat-card">
-            <span>管理員</span>
+            <span>{t('userMgmt.admins')}</span>
             <strong>{stats.admin}</strong>
           </article>
           <article className="user-admin-stat-card">
-            <span>只讀帳號</span>
+            <span>{t('userMgmt.readonlyUsers')}</span>
             <strong>{stats.readonly}</strong>
           </article>
         </section>
@@ -136,31 +126,31 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
               onClick={() => loadUsers(true)}
               disabled={refreshing}
             >
-              {refreshing ? '更新中...' : '重新整理'}
+              {refreshing ? t('common.refreshing') : t('common.refresh')}
             </button>
             <button
               type="button"
               className="user-admin-btn primary"
               onClick={() => setShowCreateModal(true)}
             >
-              新增帳號
+              {t('userMgmt.createUser')}
             </button>
           </div>
 
           {error && <div className="user-admin-error">{error}</div>}
 
           {loading ? (
-            <div className="user-admin-loading">載入帳號中...</div>
+            <div className="user-admin-loading">{t('userMgmt.loading')}</div>
           ) : (
             <div className="user-admin-table-wrap">
               <table className="user-admin-table">
                 <thead>
                   <tr>
-                    <th>帳號</th>
-                    <th>角色</th>
-                    <th>建立時間</th>
-                    <th>更新時間</th>
-                    <th>操作</th>
+                    <th>{t('userMgmt.username')}</th>
+                    <th>{t('userMgmt.role')}</th>
+                    <th>{t('userMgmt.createdAt')}</th>
+                    <th>{t('userMgmt.updatedAt')}</th>
+                    <th>{t('userMgmt.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -172,7 +162,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                         <td>
                           <div className="user-admin-username">
                             <span>{user.username}</span>
-                            {isSelf && <span className="user-admin-self-badge">目前登入</span>}
+                            {isSelf && <span className="user-admin-self-badge">{t('userMgmt.currentUser')}</span>}
                           </div>
                         </td>
                         <td>
@@ -182,12 +172,24 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                             onChange={(event) => handleRoleChange(user, event.target.value === 'admin' ? 'admin' : 'readonly')}
                             disabled={rowBusy}
                           >
-                            <option value="admin">管理員</option>
-                            <option value="readonly">只讀</option>
+                            <option value="admin">{t('userMgmt.roleAdmin')}</option>
+                            <option value="readonly">{t('userMgmt.roleReadonly')}</option>
                           </select>
                         </td>
-                        <td>{formatDate(user.created_at)}</td>
-                        <td>{formatDate(user.updated_at)}</td>
+                        <td>{new Intl.DateTimeFormat(locale, {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }).format(new Date(user.created_at))}</td>
+                        <td>{new Intl.DateTimeFormat(locale, {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }).format(new Date(user.updated_at))}</td>
                         <td>
                           <button
                             type="button"
@@ -195,7 +197,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                             disabled={rowBusy || isSelf}
                             onClick={() => handleDeleteUser(user)}
                           >
-                            刪除
+                            {t('common.delete')}
                           </button>
                         </td>
                       </tr>

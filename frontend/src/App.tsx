@@ -15,6 +15,7 @@ import {
   saveGraphSettings,
   type GraphSettings,
 } from './graphSettings';
+import { useI18n } from './i18n';
 import './App.css';
 
 type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
@@ -49,6 +50,7 @@ const getInitialTheme = (): ThemeMode => {
 };
 
 function App() {
+  const { isZh, toggleLanguage, t } = useI18n();
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -94,12 +96,12 @@ function App() {
     const onUnauthorized = () => {
       setIsAuthed(false);
       setAuthUser(null);
-      setAuthError('登入已過期，請重新登入');
+      setAuthError(t('app.authExpired'));
       navigateTo('graph');
     };
     window.addEventListener('clan:unauthorized', onUnauthorized as EventListener);
     return () => window.removeEventListener('clan:unauthorized', onUnauthorized as EventListener);
-  }, [navigateTo]);
+  }, [isZh, navigateTo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,12 +153,12 @@ function App() {
         console.warn('Failed to persist pending focus:', error);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '登入失敗';
+      const message = err instanceof Error ? err.message : t('app.signInFailed');
       setAuthError(message);
       setIsAuthed(false);
       setAuthUser(null);
     }
-  }, []);
+  }, [isZh]);
 
   const handleLogout = useCallback(async () => {
     await api.logout();
@@ -195,7 +197,7 @@ function App() {
         if (cancelled) return;
         setIsAuthed(false);
         setAuthUser(null);
-        setAuthError('登入已過期，請重新登入');
+        setAuthError(t('app.authExpired'));
         navigateTo('graph');
       }
     };
@@ -204,7 +206,7 @@ function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isAuthed, navigateTo]);
+  }, [isAuthed, isZh, navigateTo]);
 
   useEffect(() => {
     if (!isAuthed || !authUser) return;
@@ -238,8 +240,10 @@ function App() {
   }, []);
 
   const themeToggleLabel = useMemo(
-    () => (themeMode === 'light' ? '切換深色' : '切換淺色'),
-    [themeMode],
+    () => (themeMode === 'light'
+      ? t('app.switchToDark')
+      : t('app.switchToLight')),
+    [t, themeMode],
   );
 
   const pageContent = useMemo(() => {
@@ -248,7 +252,7 @@ function App() {
         <div className="app">
           <div className="loading">
             <div className="spinner"></div>
-            <p>驗證中...</p>
+            <p>{t('app.verifying')}</p>
           </div>
         </div>
       );
@@ -263,7 +267,7 @@ function App() {
         <div className="app">
           <div className="loading">
             <div className="spinner"></div>
-            <p>載入使用者資訊...</p>
+            <p>{t('app.loadingProfile')}</p>
           </div>
         </div>
       );
@@ -361,12 +365,24 @@ function App() {
     navigateTo,
     themeMode,
     toggleTheme,
+    isZh,
   ]);
 
   const hideFloatingThemeToggle = isMobileViewport;
+  const languageToggleLabel = isZh ? t('app.switchToEnglish') : t('app.switchToChinese');
 
   return (
     <>
+      <button
+        type="button"
+        className="theme-toggle"
+        style={{ right: hideFloatingThemeToggle ? '0.75rem' : '4.75rem' }}
+        onClick={toggleLanguage}
+        aria-label={languageToggleLabel}
+        title={languageToggleLabel}
+      >
+        {isZh ? t('app.langButtonEn') : t('app.langButtonZh')}
+      </button>
       {!hideFloatingThemeToggle && (
         <button
           type="button"
@@ -375,7 +391,7 @@ function App() {
           aria-label={themeToggleLabel}
           title={themeToggleLabel}
         >
-          {themeMode === 'light' ? 'Dark' : 'Light'}
+          {themeMode === 'light' ? t('app.dark') : t('app.light')}
         </button>
       )}
       {pageContent}

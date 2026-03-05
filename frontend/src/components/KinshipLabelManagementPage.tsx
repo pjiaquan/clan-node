@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser, KinshipLabel } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 
 type KinshipLabelManagementPageProps = {
   currentUser: AuthUser;
@@ -15,11 +16,11 @@ type RowDraft = {
   description: string;
 };
 
-const formatDate = (value?: string | null) => {
+const formatDate = (value: string | null | undefined, locale: string) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-TW', {
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -47,6 +48,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
   onBack,
   onLogout,
 }) => {
+  const { t, locale } = useI18n();
   const [items, setItems] = useState<KinshipLabel[]>([]);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [loading, setLoading] = useState(true);
@@ -84,12 +86,12 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
       setItems(rows);
       hydrateDrafts(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入稱呼表失敗');
+      setError(err instanceof Error ? err.message : t('kinship.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [hydrateDrafts]);
+  }, [hydrateDrafts, t]);
 
   useEffect(() => {
     void loadItems(false);
@@ -124,11 +126,11 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
     try {
       await saveRow(row, draft);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '儲存失敗');
+      setError(err instanceof Error ? err.message : t('kinship.saveFailed'));
     } finally {
       setBusyKey(null);
     }
-  }, [drafts, makeKey, saveRow]);
+  }, [drafts, makeKey, saveRow, t]);
 
   const handleSaveAll = useCallback(async () => {
     const dirtyRows = items.filter((row) => {
@@ -146,14 +148,14 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
         await saveRow(row, draft);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '批次儲存失敗');
+      setError(err instanceof Error ? err.message : t('kinship.bulkSaveFailed'));
     } finally {
       setSavingAll(false);
     }
-  }, [drafts, items, makeKey, saveRow]);
+  }, [drafts, items, makeKey, saveRow, t]);
 
   const handleResetRow = useCallback(async (row: KinshipLabel) => {
-    const confirmed = window.confirm(`確定重設「${row.default_title}」這筆稱呼？`);
+    const confirmed = window.confirm(t('kinship.resetConfirm', { title: row.default_title }));
     if (!confirmed) return;
     const rowKey = makeKey(row);
     setBusyKey(rowKey);
@@ -165,14 +167,14 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
         description: row.description,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重設失敗');
+      setError(err instanceof Error ? err.message : t('kinship.resetFailed'));
     } finally {
       setBusyKey(null);
     }
-  }, [makeKey, saveRow]);
+  }, [makeKey, saveRow, t]);
 
   const handleResetAll = useCallback(async () => {
-    const confirmed = window.confirm('確定將全部稱呼重設為預設值？');
+    const confirmed = window.confirm(t('kinship.resetAllConfirm'));
     if (!confirmed) return;
     setSavingAll(true);
     setError(null);
@@ -181,11 +183,11 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
       setItems(result.items);
       hydrateDrafts(result.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重設全部失敗');
+      setError(err instanceof Error ? err.message : t('kinship.resetAllFailed'));
     } finally {
       setSavingAll(false);
     }
-  }, [hydrateDrafts]);
+  }, [hydrateDrafts, t]);
 
   const stats = useMemo(() => {
     const customized = items.filter((row) => (
@@ -224,7 +226,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
     <div className="notice-page relationship-name-page">
       <header className="notice-header relationship-name-header">
         <div className="notice-header-left">
-          <h1>稱呼管理表</h1>
+          <h1>{t('kinship.title')}</h1>
         </div>
         <div className="notice-header-right">
           <span className="notice-user-chip">{currentUser.username}</span>
@@ -239,15 +241,15 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
       <main className="notice-main relationship-name-main">
         <section className="notice-stats">
           <article className="notice-stat-card">
-            <span>總稱呼條目</span>
+            <span>{t('kinship.total')}</span>
             <strong>{stats.total}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>已自訂</span>
+            <span>{t('kinship.customized')}</span>
             <strong>{stats.customized}</strong>
           </article>
           <article className="notice-stat-card">
-            <span>未儲存變更</span>
+            <span>{t('kinship.unsaved')}</span>
             <strong>{stats.dirty}</strong>
           </article>
         </section>
@@ -257,7 +259,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
             <input
               type="search"
               className="relationship-name-search"
-              placeholder="搜尋稱呼、正式稱呼或說明"
+              placeholder={t('kinship.searchPlaceholder')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -267,7 +269,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
               onClick={() => loadItems(true)}
               disabled={refreshing || savingAll}
             >
-              {refreshing ? '更新中...' : '重新整理'}
+              {refreshing ? t('common.refreshing') : t('common.refresh')}
             </button>
             <button
               type="button"
@@ -275,7 +277,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
               onClick={handleSaveAll}
               disabled={savingAll || stats.dirty === 0}
             >
-              {savingAll ? '儲存中...' : `儲存全部 (${stats.dirty})`}
+              {savingAll ? t('kinship.saving') : t('kinship.saveAll', { count: stats.dirty })}
             </button>
             <button
               type="button"
@@ -283,28 +285,28 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
               onClick={handleResetAll}
               disabled={savingAll}
             >
-              重設全部
+              {t('kinship.resetAll')}
             </button>
           </div>
 
           {error && <div className="notice-error">{error}</div>}
 
           {loading ? (
-            <div className="notice-loading">載入稱呼中...</div>
+            <div className="notice-loading">{t('kinship.loading')}</div>
           ) : (
             <div className="notice-table-wrap">
               <table className="notice-table relationship-name-table">
                 <thead>
                   <tr>
-                    <th>預設稱呼</th>
-                    <th>預設正式稱呼</th>
-                    <th>目前稱呼</th>
-                    <th>目前正式稱呼</th>
-                    <th>自訂稱呼</th>
-                    <th>自訂正式稱呼</th>
-                    <th>說明</th>
-                    <th>更新時間</th>
-                    <th>操作</th>
+                    <th>{t('kinship.defaultTitle')}</th>
+                    <th>{t('kinship.defaultFormalTitle')}</th>
+                    <th>{t('kinship.currentTitle')}</th>
+                    <th>{t('kinship.currentFormalTitle')}</th>
+                    <th>{t('kinship.customTitle')}</th>
+                    <th>{t('kinship.customFormalTitle')}</th>
+                    <th>{t('kinship.description')}</th>
+                    <th>{t('kinship.updatedAt')}</th>
+                    <th>{t('kinship.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -343,7 +345,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                               }));
                             }}
                             disabled={rowBusy}
-                            placeholder="留白即使用預設"
+                            placeholder={t('kinship.emptyUsesDefault')}
                           />
                         </td>
                         <td>
@@ -366,7 +368,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                               }));
                             }}
                             disabled={rowBusy}
-                            placeholder="留白即使用預設"
+                            placeholder={t('kinship.emptyUsesDefault')}
                           />
                         </td>
                         <td>
@@ -391,7 +393,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                             disabled={rowBusy}
                           />
                         </td>
-                        <td>{formatDate(row.updated_at)}</td>
+                        <td>{formatDate(row.updated_at, locale)}</td>
                         <td>
                           <div className="relationship-name-actions">
                             <button
@@ -400,7 +402,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                               disabled={!rowDirty || rowBusy}
                               onClick={() => handleSaveOne(row)}
                             >
-                              儲存
+                              {t('common.save')}
                             </button>
                             <button
                               type="button"
@@ -408,7 +410,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                               disabled={rowBusy}
                               onClick={() => handleResetRow(row)}
                             >
-                              重設
+                              {t('kinship.resetOne')}
                             </button>
                           </div>
                         </td>
@@ -417,7 +419,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
                   })}
                   {filteredItems.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="notice-empty">沒有符合條件的稱呼</td>
+                      <td colSpan={9} className="notice-empty">{t('kinship.noMatch')}</td>
                     </tr>
                   )}
                 </tbody>

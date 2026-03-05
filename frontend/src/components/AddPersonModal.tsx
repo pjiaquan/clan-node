@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getGanzhiYear, getModernTimeRange, getZodiacAnimal, normalizeTraditionalHour, TRADITIONAL_HOURS } from '../utils/chineseTime';
 import { clampDay, composePartialDate } from '../utils/partialDate';
+import { useI18n } from '../i18n';
 
 interface AddPersonModalProps {
   showBirthTimeField?: boolean;
@@ -22,6 +23,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   onClose,
   onSubmit,
 }) => {
+  const { t } = useI18n();
   const [dobYear, setDobYear] = useState('');
   const [dobMonth, setDobMonth] = useState('');
   const [dobDay, setDobDay] = useState('');
@@ -80,7 +82,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>新增成員</h2>
+        <h2>{t('addPerson.title')}</h2>
         <form onSubmit={(e) => {
           e.preventDefault();
           const formData = new FormData(e.currentTarget);
@@ -96,29 +98,29 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           );
         }}>
           <div className="form-group">
-            <label>姓名</label>
+            <label>{t('personForm.name')}</label>
             <input name="name" required autoFocus />
           </div>
           <div className="form-group">
-            <label>英文名</label>
+            <label>{t('personForm.englishName')}</label>
             <input name="english_name" />
           </div>
           <div className="form-group">
-            <label>性別</label>
+            <label>{t('personForm.gender')}</label>
             <select name="gender" defaultValue="O">
-              <option value="M">男</option>
-              <option value="F">女</option>
-              <option value="O">其他</option>
+              <option value="M">{t('personForm.genderMale')}</option>
+              <option value="F">{t('personForm.genderFemale')}</option>
+              <option value="O">{t('personForm.genderOther')}</option>
             </select>
           </div>
           <div className="form-group">
-            <label>血型</label>
+            <label>{t('personForm.bloodType')}</label>
             <select
               name="blood_type"
               value={bloodType}
               onChange={(event) => setBloodType(event.target.value)}
             >
-              <option value="">未知</option>
+              <option value="">{t('common.unknown')}</option>
               <option value="A">A</option>
               <option value="B">B</option>
               <option value="O">O</option>
@@ -135,14 +137,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               }}
               style={{ cursor: 'pointer' }}
             >
-              出生日期 {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({ganzhi}年・{zodiac})</span>}
+              {t('personForm.birthDate')} {zodiac && ganzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({t('personForm.zodiacInfo', { ganzhi, zodiac })})</span>}
             </label>
             <div className="date-input-row">
               <div className="date-input-main">
                 <input
                   type="text"
                   inputMode="numeric"
-                  placeholder="年"
+                  placeholder={t('personForm.yearPlaceholder')}
                   value={dobYear}
                   onChange={(e) => {
                     const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -167,12 +169,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   disabled={dobUnknown || !dobYear}
                   className="date-month-select"
                 >
-                  <option value="">月(選填)</option>
+                  <option value="">{t('personForm.monthOptional')}</option>
                   {Array.from({ length: 12 }, (_, idx) => {
                     const value = String(idx + 1);
                     return (
                       <option key={value} value={value}>
-                        {value}月
+                        {t('personForm.monthValue', { value })}
                       </option>
                     );
                   })}
@@ -183,12 +185,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                   disabled={dobUnknown || !dobYear || !dobMonth}
                   className="date-day-select"
                 >
-                  <option value="">日(選填)</option>
+                  <option value="">{t('personForm.dayOptional')}</option>
                   {Array.from({ length: maxDobDay }, (_, idx) => {
                     const value = String(idx + 1);
                     return (
                       <option key={value} value={value}>
-                        {value}日
+                        {t('personForm.dayValue', { value })}
                       </option>
                     );
                   })}
@@ -208,19 +210,19 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                     }
                   }}
                 />
-                未知
+                {t('common.unknown')}
               </label>
             </div>
             {!showDeathFields && (
               <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: '#64748b' }}>
-                連點出生日期標籤 6 次可顯示歿日欄位
+                {t('personForm.revealDeathHint')}
               </div>
             )}
           </div>
           {showBirthTimeField && (
             <div className="form-group">
               <label>
-                出生時辰 {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
+                {t('personForm.birthHour')} {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
               </label>
               <select name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
                 <option value="">--</option>
@@ -236,14 +238,14 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             <>
               <div className="form-group">
                 <label>
-                  歿日 {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({deathGanzhi}年・{deathZodiac})</span>}
+                  {t('personForm.deathDate')} {deathZodiac && deathGanzhi && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({t('personForm.zodiacInfo', { ganzhi: deathGanzhi, zodiac: deathZodiac })})</span>}
                 </label>
                 <div className="date-input-row">
                   <div className="date-input-main">
                     <input
                       type="text"
                       inputMode="numeric"
-                      placeholder="年"
+                      placeholder={t('personForm.yearPlaceholder')}
                       value={dodYear}
                       onChange={(e) => {
                         const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
@@ -269,12 +271,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       disabled={dodUnknown || !dodYear}
                       className="date-month-select"
                     >
-                      <option value="">月(選填)</option>
+                      <option value="">{t('personForm.monthOptional')}</option>
                       {Array.from({ length: 12 }, (_, idx) => {
                         const value = String(idx + 1);
                         return (
                           <option key={value} value={value}>
-                            {value}月
+                            {t('personForm.monthValue', { value })}
                           </option>
                         );
                       })}
@@ -285,12 +287,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                       disabled={dodUnknown || !dodYear || !dodMonth}
                       className="date-day-select"
                     >
-                      <option value="">日(選填)</option>
+                      <option value="">{t('personForm.dayOptional')}</option>
                       {Array.from({ length: maxDodDay }, (_, idx) => {
                         const value = String(idx + 1);
                         return (
                           <option key={value} value={value}>
-                            {value}日
+                            {t('personForm.dayValue', { value })}
                           </option>
                         );
                       })}
@@ -313,13 +315,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                         }
                       }}
                     />
-                    未知
+                    {t('common.unknown')}
                   </label>
                 </div>
               </div>
               <div className="form-group">
                 <label>
-                  歿時辰 {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
+                  {t('personForm.deathHour')} {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
                 </label>
                 <select
                   name="tod"
@@ -339,10 +341,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           )}
           <div className="form-actions">
             <button type="button" onClick={onClose}>
-              取消
+              {t('common.cancel')}
             </button>
             <button type="submit" className="btn-primary">
-              新增
+              {t('addPerson.submit')}
             </button>
           </div>
         </form>

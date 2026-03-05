@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuditLogItem, AuthUser } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { useI18n } from '../i18n';
 
 type AuditLogPageProps = {
   currentUser: AuthUser;
@@ -9,11 +10,11 @@ type AuditLogPageProps = {
   onLogout: () => Promise<void> | void;
 };
 
-const formatDate = (value?: string | null) => {
+const formatDate = (value: string | null | undefined, locale: string) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-TW', {
+  return new Intl.DateTimeFormat(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -21,28 +22,6 @@ const formatDate = (value?: string | null) => {
     minute: '2-digit',
   }).format(date);
 };
-
-const ACTION_LABELS: Record<string, string> = {
-  create: '新增',
-  update: '修改',
-  delete: '刪除',
-  setup: '初始化',
-  status_change: '狀態變更',
-  revoke: '撤銷',
-  revoke_others: '全部撤銷',
-  update_avatar: '修改頭像',
-};
-
-const RESOURCE_LABELS: Record<string, string> = {
-  people: '人物',
-  relationships: '關係',
-  users: '帳號',
-  notifications: '通知',
-  sessions: 'Session',
-};
-
-const prettyAction = (value: string) => ACTION_LABELS[value] || value;
-const prettyResource = (value: string) => RESOURCE_LABELS[value] || value;
 
 const serializeDetails = (details: AuditLogItem['details']) => {
   if (!details) return '-';
@@ -54,6 +33,7 @@ const serializeDetails = (details: AuditLogItem['details']) => {
 };
 
 export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack, onLogout }) => {
+  const { t, locale } = useI18n();
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,12 +54,22 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
       const data = await api.fetchAuditLogs(limit);
       setLogs(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '載入修改記錄失敗');
+      setError(err instanceof Error ? err.message : t('audit.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [limit]);
+  }, [limit, t]);
+
+  const prettyAction = useCallback((value: string) => {
+    const mapped = t(`audit.action.${value}`);
+    return mapped === `audit.action.${value}` ? value : mapped;
+  }, [t]);
+
+  const prettyResource = useCallback((value: string) => {
+    const mapped = t(`audit.resource.${value}`);
+    return mapped === `audit.resource.${value}` ? value : mapped;
+  }, [t]);
 
   useEffect(() => {
     void loadLogs(false);
@@ -119,7 +109,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
     <div className="notice-page">
       <header className="notice-header">
         <div className="notice-header-left">
-          <h1>修改記錄</h1>
+          <h1>{t('audit.title')}</h1>
         </div>
         <div className="notice-header-right">
           <span className="notice-user-chip">{currentUser.username}</span>
@@ -139,7 +129,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
               value={actionFilter}
               onChange={(event) => setActionFilter(event.target.value)}
             >
-              <option value="all">全部動作</option>
+              <option value="all">{t('audit.allActions')}</option>
               {actionOptions.map((action) => (
                 <option key={action} value={action}>
                   {prettyAction(action)}
@@ -151,7 +141,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
               value={resourceFilter}
               onChange={(event) => setResourceFilter(event.target.value)}
             >
-              <option value="all">全部資源</option>
+              <option value="all">{t('audit.allResources')}</option>
               {resourceOptions.map((resourceType) => (
                 <option key={resourceType} value={resourceType}>
                   {prettyResource(resourceType)}
@@ -163,14 +153,14 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
               value={String(limit)}
               onChange={(event) => setLimit(Number(event.target.value))}
             >
-              <option value="100">最近 100 筆</option>
-              <option value="200">最近 200 筆</option>
-              <option value="500">最近 500 筆</option>
+              <option value="100">{t('audit.last100')}</option>
+              <option value="200">{t('audit.last200')}</option>
+              <option value="500">{t('audit.last500')}</option>
             </select>
             <input
               type="search"
               className="notice-filter-select audit-log-search-input"
-              placeholder="搜尋操作者、摘要、資源 ID、詳細內容"
+              placeholder={t('audit.searchPlaceholder')}
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
             />
@@ -180,26 +170,26 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
               onClick={() => loadLogs(true)}
               disabled={refreshing}
             >
-              {refreshing ? '更新中...' : '重新整理'}
+              {refreshing ? t('common.refreshing') : t('common.refresh')}
             </button>
           </div>
 
           {error && <div className="notice-error">{error}</div>}
 
           {loading ? (
-            <div className="notice-loading">載入修改記錄中...</div>
+            <div className="notice-loading">{t('audit.loading')}</div>
           ) : (
             <div className="notice-table-wrap audit-log-table-wrap">
               <table className="notice-table">
                 <thead>
                   <tr>
-                    <th>時間</th>
-                    <th>操作者</th>
-                    <th>動作</th>
-                    <th>資源</th>
-                    <th>資源 ID</th>
-                    <th>摘要</th>
-                    <th>詳細</th>
+                    <th>{t('audit.time')}</th>
+                    <th>{t('audit.actor')}</th>
+                    <th>{t('audit.action')}</th>
+                    <th>{t('audit.resource')}</th>
+                    <th>{t('audit.resourceId')}</th>
+                    <th>{t('audit.summary')}</th>
+                    <th>{t('audit.details')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -207,7 +197,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
                     const details = serializeDetails(log.details);
                     return (
                       <tr key={log.id}>
-                        <td>{formatDate(log.created_at)}</td>
+                        <td>{formatDate(log.created_at, locale)}</td>
                         <td>{log.actor_username ? `${log.actor_username}${log.actor_role ? ` (${log.actor_role})` : ''}` : '-'}</td>
                         <td>{prettyAction(log.action)}</td>
                         <td>{prettyResource(log.resource_type)}</td>
@@ -223,7 +213,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
                   })}
                   {filteredLogs.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="notice-empty">沒有符合條件的修改記錄</td>
+                      <td colSpan={7} className="notice-empty">{t('audit.noMatch')}</td>
                     </tr>
                   )}
                 </tbody>
