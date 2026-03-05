@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { notifyUpdate } from './notify';
 import { recordAuditLog } from './audit';
+import { readJsonObjectBody } from './http';
 
 type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
 type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
@@ -64,7 +65,7 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const body = await c.req.json().catch(() => ({}));
+    const body = await readJsonObjectBody(c.req);
     const message = typeof (body as any).message === 'string' ? (body as any).message.trim() : '';
     if (!message) {
       return c.json({ error: 'message is required' }, 400);
@@ -234,7 +235,7 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Notification not found' }, 404);
     }
 
-    const body = await c.req.json().catch(() => ({}));
+    const body = await readJsonObjectBody(c.req);
     const nextStatus = parseStatus((body as any).status);
     if (!nextStatus) {
       return c.json({ error: 'status is required' }, 400);

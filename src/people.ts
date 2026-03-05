@@ -4,6 +4,7 @@ import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 import { queueRemoteFormData, queueRemoteJson } from './dual_write';
 import { recordAuditLog } from './audit';
+import { buildSiblingLinkMeta } from './relationship_utils';
 
 type UploadFile = Blob & {
   name?: string;
@@ -52,13 +53,11 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
     const otherDob = other && (other as any).dob ? new Date((other as any).dob).getTime() : 0;
     if (!otherDob || otherDob === personDob) continue;
 
-    const olderId = personDob < otherDob ? personId : otherId;
-    const youngerId = olderId === personId ? otherId : personId;
-    const metadata = JSON.stringify({ sourceHandle: 'right-s', targetHandle: 'left-t' });
+    const link = buildSiblingLinkMeta(personId, otherId, personDob, otherDob);
 
     await db.prepare(
       'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
-    ).bind(olderId, youngerId, metadata, relAny.id).run();
+    ).bind(link.fromId, link.toId, link.metadata, relAny.id).run();
   }
 }
 

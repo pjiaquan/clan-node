@@ -11,16 +11,33 @@ import ReactFlow, {
   useNodesState,
   MarkerType,
 } from 'reactflow';
-import type { Person, Relationship, RelationshipTypeKey } from './types';
+import type { Person, Relationship } from './types';
 import { api } from './api';
 import PersonNode from './PersonNode';
 import { useClanGraph } from './hooks/useClanGraph';
+import { useGraphAmbientState } from './hooks/useGraphAmbientState';
 import { ContextMenu } from './components/ContextMenu';
 import { AddPersonModal } from './components/AddPersonModal';
 import { Header } from './components/Header';
 import { EditPersonModal, type EditPersonAvatarActions } from './components/EditPersonModal';
 import { CreateUserModal } from './components/CreateUserModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
+import {
+  COARSE_MIN_DRAG_DISTANCE_BONUS,
+  COARSE_SPOUSE_RELEASE_BONUS,
+  COARSE_SPOUSE_SNAP_BONUS,
+  COARSE_X_RELEASE_BONUS,
+  COARSE_X_SNAP_BONUS,
+  COARSE_Y_RELEASE_BONUS,
+  COARSE_Y_SNAP_BONUS,
+  CTRL_HOVER_DIM_EDGE_OPACITY,
+  CTRL_HOVER_DIM_NODE_OPACITY,
+  CTRL_HOVER_EDGE_WIDTH_BOOST,
+  CTRL_HOVER_MIN_EDGE_WIDTH,
+  EDGE_FOCUS_DIM_EDGE_OPACITY,
+  EDGE_FOCUS_DIM_NODE_OPACITY
+} from './clanGraph/constants';
+import { getSurname, isEditableTarget } from './clanGraph/utils';
 import type { GraphSettings } from './graphSettings';
 import { createPersonSearchMatcher } from './utils/personSearch';
 import 'reactflow/dist/style.css';
@@ -58,34 +75,6 @@ type PendingRelationshipChoice = {
   sourceHandle?: string | null;
   targetHandle?: string | null;
   suggestedType: RelationshipChoiceType;
-};
-
-const getSurname = (name?: string | null) => name?.trim().charAt(0) ?? '';
-
-const isEditableTarget = (target: EventTarget | null) => {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
-};
-const CTRL_HOVER_DIM_NODE_OPACITY = 0.18;
-const CTRL_HOVER_DIM_EDGE_OPACITY = 0.12;
-const CTRL_HOVER_EDGE_WIDTH_BOOST = 2;
-const CTRL_HOVER_MIN_EDGE_WIDTH = 4;
-const EDGE_FOCUS_DIM_NODE_OPACITY = 0.2;
-const EDGE_FOCUS_DIM_EDGE_OPACITY = 0.2;
-const COARSE_MIN_DRAG_DISTANCE_BONUS = 6;
-const COARSE_Y_SNAP_BONUS = 4;
-const COARSE_Y_RELEASE_BONUS = 6;
-const COARSE_X_SNAP_BONUS = 10;
-const COARSE_X_RELEASE_BONUS = 12;
-const COARSE_SPOUSE_SNAP_BONUS = 14;
-const COARSE_SPOUSE_RELEASE_BONUS = 20;
-const DEFAULT_RELATIONSHIP_TYPE_LABELS: Record<RelationshipTypeKey, string> = {
-  parent_child: '親子',
-  spouse: '夫妻',
-  ex_spouse: '前配偶',
-  sibling: '手足',
-  in_law: '姻親',
 };
 
 type ClanGraphProps = {
@@ -168,20 +157,25 @@ export function ClanGraph({
   const [searchFlashId, setSearchFlashId] = useState<string | null>(null);
   const [focusHoverId, setFocusHoverId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [mobileNodeDragging, setMobileNodeDragging] = useState(false);
   const [mobileConnecting, setMobileConnecting] = useState(false);
-  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [lastEditedId, setLastEditedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<{
+    personId: string;
+    name: string;
+    images: string[];
+    index: number;
+  } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
   const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
-  const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
-  const [relationshipTypeLabelMap, setRelationshipTypeLabelMap] = useState<Record<RelationshipTypeKey, string>>(
-    DEFAULT_RELATIONSHIP_TYPE_LABELS
-  );
+  const {
+    pendingNotificationCount,
+    relationshipTypeLabelMap,
+    isShiftPressed,
+    isCoarsePointer
+  } = useGraphAmbientState(canManageUsers);
   const pendingFocusRetryRef = useRef<number | null>(null);
   const initialAutoFocusDoneRef = useRef(false);
   const flowWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -210,6 +204,8 @@ export function ClanGraph({
   const avatarFailures = useRef(new Set<string>());
   const toastTimer = useRef<number | null>(null);
   const expandRelayoutTimer = useRef<number | null>(null);
+  const avatarTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const avatarPreviewRequestRef = useRef(0);
   const canUndo = undoStack.length > 0;
   const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
   const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
@@ -218,106 +214,6 @@ export function ClanGraph({
       ? graphData?.nodes.find((person) => person.id === reportIssuePersonId) ?? null
       : null
   ), [graphData, reportIssuePersonId]);
-
-  useEffect(() => {
-    if (!canManageUsers) {
-      setPendingNotificationCount(0);
-      return;
-    }
-
-    let cancelled = false;
-    const loadStats = async () => {
-      try {
-        const stats = await api.fetchNotificationStats();
-        if (!cancelled) {
-          setPendingNotificationCount(stats.unresolved);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('Failed to fetch notification stats:', error);
-        }
-      }
-    };
-
-    void loadStats();
-    const timer = window.setInterval(() => {
-      void loadStats();
-    }, 10000);
-    const handleFocus = () => {
-      void loadStats();
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [canManageUsers]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadRelationshipTypeLabels = async () => {
-      try {
-        const labels = await api.fetchRelationshipTypeLabels();
-        if (cancelled) return;
-        const next: Record<RelationshipTypeKey, string> = { ...DEFAULT_RELATIONSHIP_TYPE_LABELS };
-        for (const item of labels) {
-          if (item.label) {
-            next[item.type] = item.label;
-          }
-        }
-        setRelationshipTypeLabelMap(next);
-      } catch (error) {
-        if (!cancelled) {
-          setRelationshipTypeLabelMap(DEFAULT_RELATIONSHIP_TYPE_LABELS);
-        }
-        console.warn('Failed to fetch relationship type labels:', error);
-      }
-    };
-    void loadRelationshipTypeLabels();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!window.matchMedia) return;
-    const media = window.matchMedia('(pointer: coarse)');
-    const apply = () => setIsCoarsePointer(media.matches);
-    apply();
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', apply);
-      return () => media.removeEventListener('change', apply);
-    }
-    media.addListener(apply);
-    return () => media.removeListener(apply);
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.shiftKey) {
-        setIsShiftPressed(true);
-      }
-    };
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (!event.shiftKey) {
-        setIsShiftPressed(false);
-      }
-    };
-    const handleWindowBlur = () => {
-      setIsShiftPressed(false);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleWindowBlur);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, []);
 
   useEffect(() => {
     avatarBlobMap.current = avatarBlobs;
@@ -896,6 +792,11 @@ export function ClanGraph({
       if (person.avatar_url) {
         desired.add(person.avatar_url);
       }
+      for (const avatar of person.avatars ?? []) {
+        if (avatar.avatar_url) {
+          desired.add(avatar.avatar_url);
+        }
+      }
     }
 
     setAvatarBlobs((prev) => {
@@ -940,18 +841,47 @@ export function ClanGraph({
     return () => window.clearTimeout(timer);
   }, [centerId]);
 
+  const goToPrevAvatar = useCallback(() => {
+    setAvatarPreview((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        index: (prev.index - 1 + prev.images.length) % prev.images.length
+      };
+    });
+  }, []);
+
+  const goToNextAvatar = useCallback(() => {
+    setAvatarPreview((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        index: (prev.index + 1) % prev.images.length
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (!avatarPreview) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setAvatarPreview(null);
+        return;
+      }
+      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && avatarPreview.images.length > 1) {
+        event.preventDefault();
+        if (event.key === 'ArrowLeft') {
+          goToPrevAvatar();
+        } else {
+          goToNextAvatar();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [avatarPreview]);
+  }, [avatarPreview, goToNextAvatar, goToPrevAvatar]);
 
   const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault();
@@ -999,11 +929,58 @@ export function ClanGraph({
   }, [graphData, selectedEdge]);
 
   const handleAvatarClick = useCallback((person: Person, avatarUrl: string) => {
+    const clickedResolvedUrl = avatarBlobs[avatarUrl] ?? api.resolveAvatarUrl(avatarUrl) ?? avatarUrl;
+    const urls = (person.avatars ?? [])
+      .map((avatar) => avatar.avatar_url)
+      .filter((url): url is string => Boolean(url));
+    if (person.avatar_url) {
+      urls.unshift(person.avatar_url);
+    }
+    const resolvedImages = [...new Set(urls)]
+      .map((url) => avatarBlobs[url] ?? api.resolveAvatarUrl(url) ?? url)
+      .filter((url): url is string => Boolean(url));
+    if (!resolvedImages.length) {
+      resolvedImages.push(clickedResolvedUrl);
+    }
+    const initialIndex = Math.max(0, resolvedImages.indexOf(clickedResolvedUrl));
+
     setSelectedNode(person.id);
     setSelectedEdge(null);
     setContextMenu(null);
-    setAvatarPreview({ url: avatarUrl, name: person.name });
-  }, []);
+    setAvatarPreview({
+      personId: person.id,
+      name: person.name,
+      images: resolvedImages,
+      index: initialIndex
+    });
+
+    const requestId = avatarPreviewRequestRef.current + 1;
+    avatarPreviewRequestRef.current = requestId;
+    void api.fetchPersonAvatars(person.id).then((payload) => {
+      if (avatarPreviewRequestRef.current !== requestId) return;
+      const fetchedUrls = payload.avatars
+        .map((avatar) => avatar.avatar_url)
+        .filter((url): url is string => Boolean(url));
+      if (payload.avatar_url) {
+        fetchedUrls.unshift(payload.avatar_url);
+      }
+      const nextImages = [...new Set(fetchedUrls)]
+        .map((url) => avatarBlobMap.current[url] ?? api.resolveAvatarUrl(url) ?? url)
+        .filter((url): url is string => Boolean(url));
+      if (!nextImages.length) return;
+      const nextIndex = Math.max(0, nextImages.indexOf(clickedResolvedUrl));
+      setAvatarPreview((prev) => {
+        if (!prev || prev.personId !== person.id) return prev;
+        return {
+          ...prev,
+          images: nextImages,
+          index: nextIndex
+        };
+      });
+    }).catch(() => {
+      // Keep existing preview state if background avatar fetch fails.
+    });
+  }, [avatarBlobs]);
 
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -3197,8 +3174,56 @@ export function ClanGraph({
       {avatarPreview && (
         <div className="modal-overlay avatar-overlay" onClick={() => setAvatarPreview(null)}>
           <div className="avatar-modal" onClick={(event) => event.stopPropagation()}>
-            <img src={avatarPreview.url} alt={`${avatarPreview.name} avatar`} />
+            {avatarPreview.images.length > 1 && (
+              <button
+                type="button"
+                className="avatar-carousel-btn avatar-carousel-btn-left"
+                onClick={goToPrevAvatar}
+                aria-label="Previous avatar"
+              >
+                ‹
+              </button>
+            )}
+            <img
+              src={avatarPreview.images[avatarPreview.index]}
+              alt={`${avatarPreview.name} avatar ${avatarPreview.index + 1}`}
+              onTouchStart={(event) => {
+                const touch = event.touches[0];
+                if (!touch) return;
+                avatarTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+              }}
+              onTouchEnd={(event) => {
+                if (avatarPreview.images.length <= 1) return;
+                const start = avatarTouchStartRef.current;
+                const touch = event.changedTouches[0];
+                avatarTouchStartRef.current = null;
+                if (!start || !touch) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return;
+                if (dx > 0) {
+                  goToPrevAvatar();
+                } else {
+                  goToNextAvatar();
+                }
+              }}
+            />
+            {avatarPreview.images.length > 1 && (
+              <button
+                type="button"
+                className="avatar-carousel-btn avatar-carousel-btn-right"
+                onClick={goToNextAvatar}
+                aria-label="Next avatar"
+              >
+                ›
+              </button>
+            )}
             <div className="avatar-modal-name">{avatarPreview.name}</div>
+            {avatarPreview.images.length > 1 && (
+              <div className="avatar-modal-count">
+                {avatarPreview.index + 1} / {avatarPreview.images.length}
+              </div>
+            )}
           </div>
         </div>
       )}

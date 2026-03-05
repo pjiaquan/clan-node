@@ -3,26 +3,13 @@ import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 import { recordAuditLog } from './audit';
-
-type SiblingHandlePreference = {
-  sourceHandle?: string;
-  targetHandle?: string;
-};
-
-function trackInsertedRelationshipId(result: any, collector?: number[]) {
-  if (!collector) return;
-  const rawId = result?.meta?.last_row_id;
-  if (typeof rawId === 'number') {
-    collector.push(rawId);
-    return;
-  }
-  if (typeof rawId === 'string') {
-    const parsed = Number(rawId);
-    if (Number.isFinite(parsed)) {
-      collector.push(parsed);
-    }
-  }
-}
+import {
+  buildSiblingLinkMeta,
+  PARENT_CHILD_METADATA,
+  SPOUSE_METADATA,
+  trackInsertedRowId,
+  type SiblingHandlePreference
+} from './relationship_utils';
 
 async function getSiblingLinkMeta(
   db: D1Database,
@@ -38,33 +25,7 @@ async function getSiblingLinkMeta(
   const b = results.find(p => p.id === bId) as any | undefined;
   const aDob = a?.dob ? new Date(a.dob).getTime() : 0;
   const bDob = b?.dob ? new Date(b.dob).getTime() : 0;
-
-  if (aDob && bDob && aDob !== bDob) {
-    const olderId = aDob < bDob ? aId : bId;
-    const youngerId = olderId === aId ? bId : aId;
-    return {
-      fromId: olderId,
-      toId: youngerId,
-      metadata: JSON.stringify({ sourceHandle: 'right-s', targetHandle: 'left-t' })
-    };
-  }
-
-  if (preferredHandles?.sourceHandle && preferredHandles?.targetHandle) {
-    return {
-      fromId: aId,
-      toId: bId,
-      metadata: JSON.stringify({
-        sourceHandle: preferredHandles.sourceHandle,
-        targetHandle: preferredHandles.targetHandle
-      })
-    };
-  }
-
-  return {
-    fromId: aId,
-    toId: bId,
-    metadata: JSON.stringify({ sourceHandle: 'left-s', targetHandle: 'right-t' })
-  };
+  return buildSiblingLinkMeta(aId, bId, aDob, bDob, preferredHandles);
 }
 
 async function getSiblingIds(db: D1Database, personId: string) {
@@ -142,7 +103,7 @@ async function ensureSiblingLink(
   const result = await db.prepare(
     "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'sibling', ?, ?)"
   ).bind(link.fromId, link.toId, link.metadata, now).run();
-  trackInsertedRelationshipId(result, createdRelationshipIds);
+  trackInsertedRowId(result, createdRelationshipIds);
 }
 
 async function linkSiblingNetworks(
@@ -183,11 +144,10 @@ async function ensureParentChildLink(
   ).bind(parentId, childId).first();
   if (exists) return;
 
-  const metadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
   const result = await db.prepare(
     "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'parent_child', ?, ?)"
-  ).bind(parentId, childId, metadata, now).run();
-  trackInsertedRelationshipId(result, createdRelationshipIds);
+  ).bind(parentId, childId, PARENT_CHILD_METADATA, now).run();
+  trackInsertedRowId(result, createdRelationshipIds);
 }
 
 async function linkParentToSiblingChildren(
@@ -243,11 +203,10 @@ async function linkSpouseToChild(
     ).bind(spouseId, childId).first();
 
     if (!existingParentChild) {
-      const metadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
       const result = await db.prepare(
         "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'parent_child', ?, ?)"
-      ).bind(spouseId, childId, metadata, now).run();
-      trackInsertedRelationshipId(result, createdRelationshipIds);
+      ).bind(spouseId, childId, PARENT_CHILD_METADATA, now).run();
+      trackInsertedRowId(result, createdRelationshipIds);
     }
 
     await linkParentToSiblingChildren(db, spouseId, childId, now, createdRelationshipIds);
@@ -339,7 +298,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
       await linkSpouseToChild(c.env.DB, from_person_id, to_person_id, now, createdRelationshipIds);
       if (finalMetadata === null) {
-        finalMetadata = JSON.stringify({ sourceHandle: 'bottom-s', targetHandle: 'top-t' });
+        finalMetadata = PARENT_CHILD_METADATA;
       }
     }
 
@@ -353,7 +312,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       fromId = from_person_id;
       toId = to_person_id;
       if (finalMetadata === null) {
-        finalMetadata = JSON.stringify({ sourceHandle: 'right-s', targetHandle: 'left-t' });
+        finalMetadata = SPOUSE_METADATA;
       }
     }
 
@@ -389,7 +348,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const result = await c.env.DB.prepare(
       'INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, ?, ?)'
     ).bind(fromId, toId, type, finalMetadata, now).run();
-    trackInsertedRelationshipId(result, createdRelationshipIds);
+    trackInsertedRowId(result, createdRelationshipIds);
 
     const metadataSummary = typeof finalMetadata === 'string'
       ? safeParse(finalMetadata)
@@ -422,7 +381,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           const siblingResult = await c.env.DB.prepare(
             "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'sibling', ?, ?)"
           ).bind(link.fromId, link.toId, link.metadata, now).run();
-          trackInsertedRelationshipId(siblingResult, createdRelationshipIds);
+          trackInsertedRowId(siblingResult, createdRelationshipIds);
         }
         await linkSiblingNetworks(c.env.DB, to_person_id, siblingId, now, createdRelationshipIds);
       }

@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { AppBindings } from './types';
 import { notifyUpdate } from './notify';
 import { recordAuditLog } from './audit';
+import { readJsonObjectBody } from './http';
 
 export type KinshipLabelResolved = {
   title: string;
@@ -189,7 +190,7 @@ export function registerKinshipLabelRoutes(app: Hono<AppBindings>) {
 
   app.put('/api/kinship-labels', async (c) => {
     await ensureKinshipLabelsTable(c.env.DB);
-    const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+    const body = await readJsonObjectBody(c.req);
     const defaultTitle = normalizeText((body as any).default_title);
     const defaultFormalTitle = normalizeText((body as any).default_formal_title);
     if (!defaultTitle || !defaultFormalTitle) {

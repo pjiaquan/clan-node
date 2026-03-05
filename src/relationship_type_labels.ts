@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { AppBindings } from './types';
 import { notifyUpdate } from './notify';
 import { recordAuditLog } from './audit';
+import { readJsonObjectBody } from './http';
 
 type RelationshipType = 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law';
 
@@ -131,7 +132,7 @@ export function registerRelationshipTypeLabelRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'invalid relationship type' }, 400);
     }
 
-    const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+    const body = await readJsonObjectBody(c.req);
     const hasLabel = Object.prototype.hasOwnProperty.call(body, 'label');
     const hasDescription = Object.prototype.hasOwnProperty.call(body, 'description');
     if (!hasLabel && !hasDescription) {
