@@ -141,7 +141,7 @@ export function ClanGraph({
   const [lastMousePosition, setLastMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [fitViewEnabled] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
   const [lockLoaded, setLockLoaded] = useState(false);
   const [pendingCenterId, setPendingCenterId] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<{ id: string; zoom: number } | null>(null);
@@ -242,14 +242,14 @@ export function ClanGraph({
         }
       }
       if (stored === null) {
-        setIsLocked(true);
+        setIsLocked(false);
         setLockLoaded(true);
         return;
       }
       setIsLocked(stored === 'true');
     } catch (error) {
       console.warn('Failed to restore lock state:', error);
-      setIsLocked(true);
+      setIsLocked(false);
     } finally {
       setLockLoaded(true);
     }
