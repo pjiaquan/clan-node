@@ -61,6 +61,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   const canResend = Boolean(onResendVerification && email.trim());
+  const cardStageKey = pendingMfa ? `mfa-card-${pendingMfaMethod}` : 'login-card';
 
   const handleResend = async () => {
     if (!onResendVerification || !email.trim()) return;
@@ -69,7 +70,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
   return (
     <div className="login-page">
-      <div className="login-card">
+      <div key={cardStageKey} className="login-card">
         <h1>Family Tree</h1>
         <p>{pendingMfa
           ? pendingMfaMethod === 'totp'

@@ -53,18 +53,16 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+    const handleOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!menuRef.current || !target) return;
       if (!menuRef.current.contains(target)) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsideClick, true);
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
     };
   }, [open]);
 

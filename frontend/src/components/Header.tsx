@@ -154,52 +154,46 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+    const handleOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!mobileMenuRef.current || !target) return;
       if (!mobileMenuRef.current.contains(target)) {
         setMobileMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsideClick, true);
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
     };
   }, [mobileMenuOpen]);
 
   useEffect(() => {
     if (!desktopMenuOpen) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+    const handleOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!desktopMenuRef.current || !target) return;
       if (!desktopMenuRef.current.contains(target)) {
         setDesktopMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsideClick, true);
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
     };
   }, [desktopMenuOpen]);
 
   useEffect(() => {
     if (!actionMenuOpen) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+    const handleOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!actionMenuRef.current || !target) return;
       if (!actionMenuRef.current.contains(target)) {
         setActionMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsideClick, true);
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
     };
   }, [actionMenuOpen]);
 
@@ -224,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     if (!mobileOptions.length) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+    const handleOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!searchBoxRef.current || !target) return;
       if (!searchBoxRef.current.contains(target)) {
@@ -236,12 +230,10 @@ export const Header: React.FC<HeaderProps> = ({
         setSearchText('');
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('pointerdown', handleOutsideClick, true);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('pointerdown', handleOutsideClick, true);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [mobileOptions.length]);
