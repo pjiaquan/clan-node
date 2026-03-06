@@ -107,7 +107,11 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
     <div className="session-page">
       <header className="session-header">
         <div className="session-header-left">
-          <h1>{t('session.title')}</h1>
+          <h1>
+            <button type="button" className="header-title-button" onClick={onBack}>
+              {t('session.title')}
+            </button>
+          </h1>
         </div>
         <div className="session-header-right">
           <span className="session-user-chip">{currentUser.username}</span>

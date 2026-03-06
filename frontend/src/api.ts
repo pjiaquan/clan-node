@@ -49,6 +49,24 @@ const fetchWithAuth = (input: RequestInfo | URL, init: RequestInit = {}) => (
   })
 );
 
+const parseErrorMessage = async (res: Response): Promise<string> => {
+  try {
+    const data = await res.clone().json();
+    if (typeof (data as any)?.error === 'string' && (data as any).error.trim()) {
+      return (data as any).error.trim();
+    }
+  } catch {
+    // fall through to text parser
+  }
+  try {
+    const text = (await res.text()).trim();
+    if (text) return text;
+  } catch {
+    // ignore
+  }
+  return `HTTP ${res.status}: ${res.statusText}`;
+};
+
 export const api = {
   resolveAvatarUrl,
   fetchAvatarBlobUrl: async (avatarUrl: string): Promise<string | null> => {
@@ -243,14 +261,58 @@ export const api = {
     return res.json();
   },
 
-  login: async (username: string, password: string): Promise<{ user: AuthUser }> => {
+  getSetupStatus: async (): Promise<{ requires_setup: boolean }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/setup`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  setupAdmin: async (email: string, password: string): Promise<{ id: string; email: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  login: async (email: string, password: string): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  verifyEmail: async (token: string): Promise<{ ok: boolean; email?: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/verify-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  resendVerification: async (email: string): Promise<{ ok: boolean; delivered?: boolean; debug_verify_token?: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
     }
     return res.json();
   },
@@ -259,15 +321,14 @@ export const api = {
     await fetchWithAuth(`${API_BASE}/api/auth/logout`, { method: 'POST' });
   },
 
-  createUser: async (username: string, password: string, role: 'admin' | 'readonly'): Promise<AuthUser> => {
+  createUser: async (email: string, password: string, role: 'admin' | 'readonly'): Promise<AuthUser> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, role }),
+      body: JSON.stringify({ email, password, role }),
     });
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text}`);
+      throw new Error(await parseErrorMessage(res));
     }
     return res.json();
   },

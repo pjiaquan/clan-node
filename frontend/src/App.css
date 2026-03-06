@@ -69,6 +69,30 @@
   font-size: 1.25rem;
 }
 
+.header-title-button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.header-title-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.header-title-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 .user-admin-header-left p {
   margin: 0.1rem 0 0;
   font-size: 0.86rem;
@@ -209,7 +233,7 @@
 .user-admin-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 980px;
 }
 
 .user-admin-table th {
@@ -1167,6 +1191,13 @@
 .login-error {
   margin-top: 0.75rem;
   color: #ef4444;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.notice-info {
+  margin-top: 0.75rem;
+  color: #0f766e;
   font-size: 0.875rem;
   text-align: center;
 }
@@ -3585,6 +3616,42 @@ button:disabled:hover {
   background: var(--app-surface-soft);
   border-color: var(--app-border);
   color: var(--app-text);
+}
+
+:root[data-theme='dark'] .user-admin-btn {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .user-admin-btn.primary {
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  border-color: rgba(224, 231, 255, 0.35);
+  color: #ffffff;
+  text-shadow: 0 1px 0 rgba(15, 23, 42, 0.45);
+}
+
+:root[data-theme='dark'] .user-admin-btn.secondary {
+  background: rgba(30, 41, 59, 0.92);
+  border-color: rgba(148, 163, 184, 0.58);
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .user-admin-btn.secondary:hover {
+  background: rgba(51, 65, 85, 0.98);
+  color: #ffffff;
+}
+
+:root[data-theme='dark'] .user-admin-btn.danger {
+  background: linear-gradient(180deg, rgba(153, 27, 27, 0.82) 0%, rgba(153, 27, 27, 0.98) 100%);
+  border-color: rgba(252, 165, 165, 0.82);
+  color: #fff1f2;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='dark'] .user-admin-btn.danger:hover {
+  background: linear-gradient(180deg, rgba(185, 28, 28, 0.9) 0%, rgba(185, 28, 28, 1) 100%);
+  border-color: rgba(254, 202, 202, 0.92);
+  color: #ffffff;
 }
 
 :root[data-theme='dark'] .user-admin-role-select,

@@ -226,7 +226,11 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
     <div className="notice-page relationship-name-page">
       <header className="notice-header relationship-name-header">
         <div className="notice-header-left">
-          <h1>{t('kinship.title')}</h1>
+          <h1>
+            <button type="button" className="header-title-button" onClick={onBack}>
+              {t('kinship.title')}
+            </button>
+          </h1>
         </div>
         <div className="notice-header-right">
           <span className="notice-user-chip">{currentUser.username}</span>

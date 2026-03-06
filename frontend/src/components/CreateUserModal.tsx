@@ -3,12 +3,12 @@ import { useI18n } from '../i18n';
 
 interface CreateUserModalProps {
   onClose: () => void;
-  onSubmit: (username: string, password: string, role: 'admin' | 'readonly') => Promise<void>;
+  onSubmit: (email: string, password: string, role: 'admin' | 'readonly') => Promise<void>;
 }
 
 export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSubmit }) => {
   const { t } = useI18n();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'readonly'>('readonly');
   const [error, setError] = useState<string | null>(null);
@@ -17,14 +17,14 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
-    if (!username.trim() || !password) {
+    if (!email.trim() || !password) {
       setError(t('createUser.missing'));
       return;
     }
 
     setIsSaving(true);
     try {
-      await onSubmit(username.trim(), password, role);
+      await onSubmit(email.trim().toLowerCase(), password, role);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('createUser.failed');
       setError(message);
@@ -40,14 +40,14 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
         <h2>{t('createUser.title')}</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="new-username">{t('createUser.username')}</label>
+            <label htmlFor="new-email">{t('createUser.email')}</label>
             <input
-              id="new-username"
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder={t('createUser.usernamePlaceholder')}
-              autoComplete="off"
+              id="new-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder={t('createUser.emailPlaceholder')}
+              autoComplete="email"
             />
           </div>
           <div className="form-group">

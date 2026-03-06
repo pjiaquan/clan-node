@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { AuthUser } from './types';
 import { LoginPage } from './components/LoginPage';
+import { SetupPage } from './components/SetupPage';
 import { ClanGraph } from './ClanGraph';
 import { UserManagementPage } from './components/UserManagementPage';
 import { SessionManagementPage } from './components/SessionManagementPage';
@@ -54,6 +55,9 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [requiresSetup, setRequiresSetup] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<AppView>(() => getViewFromHash());
   const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
@@ -97,6 +101,7 @@ function App() {
       setIsAuthed(false);
       setAuthUser(null);
       setAuthError(t('app.authExpired'));
+      setAuthNotice(null);
       navigateTo('graph');
     };
     window.addEventListener('clan:unauthorized', onUnauthorized as EventListener);
@@ -105,8 +110,47 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const verifyFromUrl = async () => {
+      const url = new URL(window.location.href);
+      const token = url.searchParams.get('verify_email_token');
+      if (!token) return;
+      try {
+        await api.verifyEmail(token);
+        if (!cancelled) {
+          setAuthNotice(t('app.emailVerified'));
+          setAuthError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : t('app.emailVerifyFailed');
+          setAuthError(message);
+        }
+      } finally {
+        url.searchParams.delete('verify_email_token');
+        window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      }
+    };
+    verifyFromUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  useEffect(() => {
+    let cancelled = false;
     const checkAuth = async () => {
       try {
+        const setupStatus = await api.getSetupStatus();
+        if (!cancelled) {
+          setRequiresSetup(Boolean(setupStatus.requires_setup));
+        }
+        if (setupStatus.requires_setup) {
+          if (!cancelled) {
+            setIsAuthed(false);
+            setAuthUser(null);
+          }
+          return;
+        }
         const data = await api.authMe();
         if (cancelled) return;
         setIsAuthed(true);
@@ -136,10 +180,11 @@ function App() {
     };
   }, []);
 
-  const handleLogin = useCallback(async (username: string, password: string) => {
+  const handleLogin = useCallback(async (email: string, password: string) => {
     setAuthError(null);
+    setAuthNotice(null);
     try {
-      const data = await api.login(username, password);
+      const data = await api.login(email, password);
       setIsAuthed(true);
       setAuthUser(data.user);
       try {
@@ -159,6 +204,34 @@ function App() {
       setAuthUser(null);
     }
   }, [isZh]);
+
+  const handleSetupAdmin = useCallback(async (email: string, password: string) => {
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      await api.setupAdmin(email, password);
+      setRequiresSetup(false);
+      await handleLogin(email, password);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('setup.failed');
+      setAuthError(message);
+    }
+  }, [handleLogin, t]);
+
+  const handleResendVerification = useCallback(async (email: string) => {
+    setResendingVerification(true);
+    setAuthError(null);
+    try {
+      const result = await api.resendVerification(email);
+      const debugSuffix = result.debug_verify_token ? ` (${result.debug_verify_token})` : '';
+      setAuthNotice(`${t('login.verificationSent')}${debugSuffix}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('login.verificationFailed');
+      setAuthError(message);
+    } finally {
+      setResendingVerification(false);
+    }
+  }, [t]);
 
   const handleLogout = useCallback(async () => {
     await api.logout();
@@ -259,7 +332,18 @@ function App() {
     }
 
     if (!isAuthed) {
-      return <LoginPage error={authError} onLogin={handleLogin} />;
+      if (requiresSetup) {
+        return <SetupPage error={authError} onSetup={handleSetupAdmin} />;
+      }
+      return (
+        <LoginPage
+          error={authError}
+          notice={authNotice}
+          onLogin={handleLogin}
+          onResendVerification={handleResendVerification}
+          resendBusy={resendingVerification}
+        />
+      );
     }
 
     if (!authUser) {
@@ -356,16 +440,21 @@ function App() {
     authChecked,
     isAuthed,
     authError,
+    authNotice,
     authUser,
+    requiresSetup,
     view,
     graphSettings,
     handleLogin,
     handleLogout,
+    handleResendVerification,
+    handleSetupAdmin,
     handleSaveGraphSettings,
     navigateTo,
     themeMode,
     toggleTheme,
     isZh,
+    resendingVerification,
   ]);
 
   const hideFloatingThemeToggle = isMobileViewport;

@@ -3,12 +3,21 @@ import { useI18n } from '../i18n';
 
 interface LoginPageProps {
   error?: string | null;
-  onLogin: (username: string, password: string) => Promise<void>;
+  notice?: string | null;
+  onLogin: (email: string, password: string) => Promise<void>;
+  onResendVerification?: (email: string) => Promise<void>;
+  resendBusy?: boolean;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({
+  error,
+  notice,
+  onLogin,
+  onResendVerification,
+  resendBusy = false,
+}) => {
   const { t } = useI18n();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -16,10 +25,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await onLogin(username, password);
+      await onLogin(email.trim().toLowerCase(), password);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const canResend = Boolean(onResendVerification && email.trim());
+
+  const handleResend = async () => {
+    if (!onResendVerification || !email.trim()) return;
+    await onResendVerification(email.trim().toLowerCase());
   };
 
   return (
@@ -29,10 +45,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
         <p>{t('login.prompt')}</p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>{t('login.username')}</label>
+            <label>{t('login.email')}</label>
             <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               autoFocus
               required
             />
@@ -46,7 +64,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ error, onLogin }) => {
               required
             />
           </div>
+          {notice && <div className="notice-info">{notice}</div>}
           {error && <div className="login-error">{error}</div>}
+          {error?.toLowerCase().includes('email not verified') && (
+            <button
+              type="button"
+              className="user-admin-btn secondary"
+              disabled={!canResend || resendBusy}
+              onClick={handleResend}
+            >
+              {resendBusy ? t('login.resendingVerification') : t('login.resendVerification')}
+            </button>
+          )}
           <button type="submit" className="btn-primary" disabled={submitting}>
             {submitting ? t('login.signingIn') : t('login.signIn')}
           </button>

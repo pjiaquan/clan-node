@@ -6,6 +6,9 @@ import { recordAuditLog } from './audit';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
+const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60;
+const LOGIN_RATE_LIMIT = { windowMs: 10 * 60 * 1000, maxAttempts: 5, blockMs: 15 * 60 * 1000 };
+const RESEND_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 3, blockMs: 30 * 60 * 1000 };
 
 const toBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -38,7 +41,25 @@ async function hashPassword(password: string, salt: string) {
   return toBase64(bits);
 }
 
+async function sha256Base64(input: string) {
+  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
+  return toBase64(digest);
+}
+
 const normalizeRole = (value: unknown): UserRole => (value === 'admin' ? 'admin' : 'readonly');
+
+const normalizeIdentifier = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+};
+
+const normalizeEmail = (value: unknown): string => {
+  return normalizeIdentifier(value).toLowerCase();
+};
+
+const isValidEmail = (value: string): boolean => (
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+);
 
 type SessionSchemaSupport = {
   hasUserAgent: boolean;
@@ -46,7 +67,16 @@ type SessionSchemaSupport = {
   hasLastSeenAt: boolean;
 };
 
+type UserSchemaSupport = {
+  hasEmail: boolean;
+  hasEmailVerifiedAt: boolean;
+  hasEmailVerifyTokenHash: boolean;
+  hasEmailVerifyExpiresAt: boolean;
+};
+
 let sessionSchemaSupportCache: SessionSchemaSupport | null = null;
+let userSchemaSupportCache: UserSchemaSupport | null = null;
+let authRateLimitTableReady = false;
 
 const addSessionColumnIfMissing = async (
   db: D1Database,
@@ -86,6 +116,205 @@ const getSessionSchemaSupport = async (db: D1Database): Promise<SessionSchemaSup
     hasLastSeenAt: names.has('last_seen_at')
   };
   return sessionSchemaSupportCache;
+};
+
+const addUserColumnIfMissing = async (
+  db: D1Database,
+  existing: Set<string>,
+  column: string,
+  ddl: string
+) => {
+  if (existing.has(column)) return;
+  try {
+    await db.prepare(`ALTER TABLE users ADD COLUMN ${ddl}`).run();
+    existing.add(column);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('duplicate column name')) {
+      existing.add(column);
+      return;
+    }
+    throw error;
+  }
+};
+
+const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSupport> => {
+  if (userSchemaSupportCache) return userSchemaSupportCache;
+  const { results } = await db.prepare("PRAGMA table_info('users')").all();
+  const names = new Set(
+    results
+      .map((row) => (row as any).name as string)
+      .filter(Boolean)
+  );
+  await addUserColumnIfMissing(db, names, 'email', 'email TEXT');
+  await addUserColumnIfMissing(db, names, 'email_verified_at', 'email_verified_at TEXT');
+  await addUserColumnIfMissing(db, names, 'email_verify_token_hash', 'email_verify_token_hash TEXT');
+  await addUserColumnIfMissing(db, names, 'email_verify_expires_at', 'email_verify_expires_at TEXT');
+  if (names.has('email')) {
+    await db.prepare("UPDATE users SET email = LOWER(TRIM(username)) WHERE email IS NULL OR TRIM(email) = ''").run();
+    await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email)').run();
+  }
+  userSchemaSupportCache = {
+    hasEmail: names.has('email'),
+    hasEmailVerifiedAt: names.has('email_verified_at'),
+    hasEmailVerifyTokenHash: names.has('email_verify_token_hash'),
+    hasEmailVerifyExpiresAt: names.has('email_verify_expires_at')
+  };
+  return userSchemaSupportCache;
+};
+
+const buildVerificationUrl = (env: Env, token: string) => {
+  const base = (env.EMAIL_VERIFICATION_URL_BASE || env.FRONTEND_ORIGIN || 'http://localhost:5173')
+    .split(',')[0]
+    ?.trim()
+    .replace(/\/+$/, '');
+  return `${base}?verify_email_token=${encodeURIComponent(token)}`;
+};
+
+const sendVerificationEmail = async (env: Env, to: string, verifyUrl: string) => {
+  const apiKey = env.BREVO_API_KEY || '';
+  const fromEmail = env.BREVO_FROM_EMAIL || '';
+  const fromName = env.BREVO_FROM_NAME || 'Clan Node';
+  if (!apiKey || !fromEmail) {
+    console.warn('Email verification delivery skipped: missing BREVO_API_KEY or BREVO_FROM_EMAIL');
+    return false;
+  }
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: fromName, email: fromEmail },
+      to: [{ email: to }],
+      subject: 'Verify your email',
+      textContent: `Please verify your email by visiting: ${verifyUrl}`,
+      htmlContent: `<p>Please verify your email:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.warn('Failed to send verification email:', response.status, text);
+    return false;
+  }
+  return true;
+};
+
+const createVerificationToken = async () => {
+  const token = randomBase64(32).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const tokenHash = await sha256Base64(token);
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString();
+  return { token, tokenHash, expiresAt };
+};
+
+const hasUsableEmailAccount = async (db: D1Database) => {
+  const userSchema = await getUserSchemaSupport(db);
+  if (!userSchema.hasEmailVerifiedAt) {
+    return false;
+  }
+  const emailField = userSchema.hasEmail ? 'email' : 'username';
+  const existing = await db.prepare(
+    `SELECT id
+     FROM users
+     WHERE ${emailField} IS NOT NULL
+       AND TRIM(${emailField}) != ''
+       AND INSTR(${emailField}, '@') > 1
+       AND INSTR(SUBSTR(${emailField}, INSTR(${emailField}, '@') + 1), '.') > 0
+       AND email_verified_at IS NOT NULL
+       AND TRIM(email_verified_at) != ''
+     LIMIT 1`
+  ).first();
+  return Boolean(existing);
+};
+
+const ensureAuthRateLimitTable = async (db: D1Database) => {
+  if (authRateLimitTableReady) return;
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS auth_rate_limits (
+      action TEXT NOT NULL,
+      limiter_key TEXT NOT NULL,
+      window_start_ms INTEGER NOT NULL,
+      count INTEGER NOT NULL,
+      blocked_until_ms INTEGER,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (action, limiter_key)
+    )`
+  ).run();
+  await db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_blocked_until ON auth_rate_limits(blocked_until_ms)'
+  ).run();
+  authRateLimitTableReady = true;
+};
+
+type RateLimitInput = {
+  action: 'login' | 'resend_verification';
+  limiterKey: string;
+  windowMs: number;
+  maxAttempts: number;
+  blockMs: number;
+};
+
+const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) => {
+  await ensureAuthRateLimitTable(db);
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const existing = await db.prepare(
+    `SELECT window_start_ms, count, blocked_until_ms
+     FROM auth_rate_limits
+     WHERE action = ? AND limiter_key = ?`
+  ).bind(input.action, input.limiterKey).first();
+
+  if (!existing) {
+    await db.prepare(
+      `INSERT INTO auth_rate_limits (action, limiter_key, window_start_ms, count, blocked_until_ms, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?)`
+    ).bind(input.action, input.limiterKey, nowMs, 1, nowIso).run();
+    return { allowed: true as const };
+  }
+
+  const blockedUntilMs = Number((existing as any).blocked_until_ms ?? 0);
+  if (blockedUntilMs > nowMs) {
+    return {
+      allowed: false as const,
+      retryAfterSeconds: Math.max(1, Math.ceil((blockedUntilMs - nowMs) / 1000))
+    };
+  }
+
+  const windowStartMs = Number((existing as any).window_start_ms ?? 0);
+  const count = Number((existing as any).count ?? 0);
+  const inWindow = nowMs - windowStartMs <= input.windowMs;
+
+  if (!inWindow) {
+    await db.prepare(
+      `UPDATE auth_rate_limits
+       SET window_start_ms = ?, count = 1, blocked_until_ms = NULL, updated_at = ?
+       WHERE action = ? AND limiter_key = ?`
+    ).bind(nowMs, nowIso, input.action, input.limiterKey).run();
+    return { allowed: true as const };
+  }
+
+  if (count >= input.maxAttempts) {
+    const nextBlockedUntil = nowMs + input.blockMs;
+    await db.prepare(
+      `UPDATE auth_rate_limits
+       SET blocked_until_ms = ?, updated_at = ?
+       WHERE action = ? AND limiter_key = ?`
+    ).bind(nextBlockedUntil, nowIso, input.action, input.limiterKey).run();
+    return {
+      allowed: false as const,
+      retryAfterSeconds: Math.max(1, Math.ceil(input.blockMs / 1000))
+    };
+  }
+
+  await db.prepare(
+    `UPDATE auth_rate_limits
+     SET count = ?, updated_at = ?
+     WHERE action = ? AND limiter_key = ?`
+  ).bind(count + 1, nowIso, input.action, input.limiterKey).run();
+
+  return { allowed: true as const };
 };
 
 const getRequestUserAgent = (c: Context<AppBindings>) => (
@@ -156,7 +385,12 @@ const getSessionIdFromRequest = (c: Context<AppBindings>) => {
 
 export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
   const path = c.req.path;
-  if (path.startsWith('/api/auth/login') || path.startsWith('/api/auth/setup')) {
+  if (
+    path.startsWith('/api/auth/login')
+    || path.startsWith('/api/auth/setup')
+    || path.startsWith('/api/auth/verify-email')
+    || path.startsWith('/api/auth/resend-verification')
+  ) {
     return next();
   }
   if (path.startsWith('/api/auth/me')) {
@@ -218,6 +452,8 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
   if (
     path.startsWith('/api/auth/login')
     || path.startsWith('/api/auth/setup')
+    || path.startsWith('/api/auth/verify-email')
+    || path.startsWith('/api/auth/resend-verification')
     || path.startsWith('/api/auth/logout')
     || path.startsWith('/api/auth/sessions')
     || (path.startsWith('/api/notifications') && method === 'POST')
@@ -280,21 +516,32 @@ export const requireCsrf: MiddlewareHandler<AppBindings> = async (c, next) => {
 };
 
 export function registerAuthRoutes(app: Hono<AppBindings>) {
+  app.get('/api/auth/setup', async (c) => {
+    const ready = await hasUsableEmailAccount(c.env.DB);
+    return c.json({ requires_setup: !ready });
+  });
+
   app.post('/api/auth/setup', async (c) => {
-    const token = c.req.header('x-setup-token') || '';
-    if (!c.env.ADMIN_SETUP_TOKEN || token !== c.env.ADMIN_SETUP_TOKEN) {
+    const configuredToken = c.env.ADMIN_SETUP_TOKEN?.trim() || '';
+    const requestToken = (c.req.header('x-setup-token') || '').trim();
+    if (configuredToken && requestToken !== configuredToken) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
-    const existing = await c.env.DB.prepare('SELECT id FROM users LIMIT 1').first();
-    if (existing) {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    const ready = await hasUsableEmailAccount(c.env.DB);
+    if (ready) {
       return c.json({ error: 'Admin already exists' }, 409);
     }
 
     const body = await c.req.json();
-    const { username, password } = body as { username?: string; password?: string };
-    if (!username || !password) {
-      return c.json({ error: 'username and password are required' }, 400);
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
+    if (!email || !password) {
+      return c.json({ error: 'email and password are required' }, 400);
+    }
+    if (!isValidEmail(email)) {
+      return c.json({ error: 'Invalid email format' }, 400);
     }
 
     const id = crypto.randomUUID();
@@ -302,40 +549,74 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const passwordHash = await hashPassword(password, salt);
     const now = new Date().toISOString();
 
+    const columns = ['id', 'username', 'password_hash', 'password_salt', 'role', 'created_at', 'updated_at'];
+    const values: Array<string | null> = [id, email, passwordHash, salt, 'admin', now, now];
+    if (userSchema.hasEmail) {
+      columns.push('email');
+      values.push(email);
+    }
+    if (userSchema.hasEmailVerifiedAt) {
+      columns.push('email_verified_at');
+      values.push(now);
+    }
     await c.env.DB.prepare(
-      'INSERT INTO users (id, username, password_hash, password_salt, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, username, passwordHash, salt, 'admin', now, now).run();
+      `INSERT INTO users (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
+    ).bind(...values).run();
 
     notifyUpdate(c, 'user:setup', {
       id,
-      username,
+      username: email,
       role: 'admin'
     });
     await recordAuditLog(c, {
       action: 'setup',
       resourceType: 'users',
       resourceId: id,
-      summary: `初始化管理員帳號 ${username}`,
+      summary: `初始化管理員帳號 ${email}`,
       details: {
-        username,
+        username: email,
         role: 'admin'
       }
     });
-    return c.json({ id, username }, 201);
+    return c.json({ id, username: email, email }, 201);
   });
 
   app.post('/api/auth/login', async (c) => {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
     const body = await c.req.json();
-    const { username, password } = body as { username?: string; password?: string };
-    if (!username || !password) {
-      return c.json({ error: 'username and password are required' }, 400);
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
+    if (!email || !password) {
+      return c.json({ error: 'email and password are required' }, 400);
+    }
+    if (!isValidEmail(email)) {
+      return c.json({ error: 'Invalid email format' }, 400);
     }
 
+    const loginIp = getRequestIpAddress(c) || 'unknown-ip';
+    const loginRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'login',
+      limiterKey: `${loginIp}:${email}`,
+      windowMs: LOGIN_RATE_LIMIT.windowMs,
+      maxAttempts: LOGIN_RATE_LIMIT.maxAttempts,
+      blockMs: LOGIN_RATE_LIMIT.blockMs
+    });
+    if (!loginRateLimit.allowed) {
+      c.header('Retry-After', String(loginRateLimit.retryAfterSeconds));
+      return c.json({ error: 'Too many login attempts. Please try again later.' }, 429);
+    }
+
+    const loginField = userSchema.hasEmail ? 'email' : 'username';
+    const verifyField = userSchema.hasEmailVerifiedAt ? ', email_verified_at' : '';
     const user = await c.env.DB.prepare(
-      'SELECT id, username, password_hash, password_salt, role FROM users WHERE username = ?'
-    ).bind(username).first();
+      `SELECT id, username, password_hash, password_salt, role${verifyField} FROM users WHERE ${loginField} = ?`
+    ).bind(email).first();
     if (!user) {
       return c.json({ error: 'Invalid credentials' }, 401);
+    }
+
+    if (userSchema.hasEmailVerifiedAt && !(user as any).email_verified_at) {
+      return c.json({ error: 'Email not verified', email }, 403);
     }
 
     const salt = (user as any).password_salt as string;
@@ -386,9 +667,112 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       user: {
         id: (user as any).id,
         username: (user as any).username,
+        email: (user as any).username,
         role: normalizeRole((user as any).role)
       }
     });
+  });
+
+  app.post('/api/auth/verify-email', async (c) => {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt || !userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt) {
+      return c.json({ error: 'Email verification is not available' }, 503);
+    }
+
+    const body = await c.req.json();
+    const token = normalizeIdentifier((body as any)?.token);
+    if (!token) {
+      return c.json({ error: 'token is required' }, 400);
+    }
+
+    const tokenHash = await sha256Base64(token);
+    const now = new Date().toISOString();
+    const user = await c.env.DB.prepare(
+      `SELECT id, email
+       FROM users
+       WHERE email_verify_token_hash = ?
+         AND email_verify_expires_at IS NOT NULL
+         AND email_verify_expires_at > ?`
+    ).bind(tokenHash, now).first();
+    if (!user) {
+      return c.json({ error: 'Invalid or expired token' }, 400);
+    }
+
+    await c.env.DB.prepare(
+      `UPDATE users
+       SET email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+       WHERE id = ?`
+    ).bind(now, now, (user as any).id as string).run();
+
+    await recordAuditLog(c, {
+      action: 'verify_email',
+      resourceType: 'users',
+      resourceId: (user as any).id as string,
+      summary: `驗證 Email ${(user as any).email as string}`,
+      details: {
+        email: (user as any).email as string
+      }
+    });
+
+    return c.json({ ok: true, email: (user as any).email as string });
+  });
+
+  app.post('/api/auth/resend-verification', async (c) => {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt || !userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt) {
+      return c.json({ ok: true });
+    }
+
+    const body = await c.req.json();
+    const email = normalizeEmail((body as any)?.email);
+    if (!email || !isValidEmail(email)) {
+      return c.json({ ok: true });
+    }
+
+    const resendIp = getRequestIpAddress(c) || 'unknown-ip';
+    const resendRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'resend_verification',
+      limiterKey: `${resendIp}:${email}`,
+      windowMs: RESEND_RATE_LIMIT.windowMs,
+      maxAttempts: RESEND_RATE_LIMIT.maxAttempts,
+      blockMs: RESEND_RATE_LIMIT.blockMs
+    });
+    if (!resendRateLimit.allowed) {
+      c.header('Retry-After', String(resendRateLimit.retryAfterSeconds));
+      return c.json({ error: 'Too many resend requests. Please try again later.' }, 429);
+    }
+
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, email_verified_at FROM users WHERE email = ?'
+    ).bind(email).first();
+    if (!user || (user as any).email_verified_at) {
+      return c.json({ ok: true });
+    }
+
+    const { token, tokenHash, expiresAt } = await createVerificationToken();
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE users
+       SET email_verify_token_hash = ?, email_verify_expires_at = ?, updated_at = ?
+       WHERE id = ?`
+    ).bind(tokenHash, expiresAt, now, (user as any).id as string).run();
+
+    const verifyUrl = buildVerificationUrl(c.env, token);
+    const delivered = await sendVerificationEmail(c.env, email, verifyUrl);
+
+    await recordAuditLog(c, {
+      action: 'resend_verification',
+      resourceType: 'users',
+      resourceId: (user as any).id as string,
+      summary: `重送 Email 驗證信 ${email}`,
+      details: {
+        email,
+        delivered
+      }
+    });
+
+    const debugToken = c.env.ENVIRONMENT === 'production' ? null : token;
+    return c.json({ ok: true, delivered, ...(debugToken ? { debug_verify_token: debugToken } : {}) });
   });
 
   app.post('/api/auth/logout', async (c) => {
@@ -416,6 +800,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       user: {
         id: sessionUser.userId,
         username: sessionUser.username,
+        email: sessionUser.username,
         role: sessionUser.role
       }
     });
@@ -523,17 +908,24 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!sessionUser || sessionUser.role !== 'admin') {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    const userSchema = await getUserSchemaSupport(c.env.DB);
 
     const body = await c.req.json();
-    const { username, password, role } = body as { username?: string; password?: string; role?: UserRole };
-    if (!username || !password) {
-      return c.json({ error: 'username and password are required' }, 400);
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
+    const role = (body as any)?.role as UserRole | undefined;
+    if (!email || !password) {
+      return c.json({ error: 'email and password are required' }, 400);
+    }
+    if (!isValidEmail(email)) {
+      return c.json({ error: 'Invalid email format' }, 400);
     }
 
     const finalRole: UserRole = role === 'admin' ? 'admin' : 'readonly';
+    const existingField = userSchema.hasEmail ? 'email' : 'username';
     const existing = await c.env.DB.prepare(
-      'SELECT id FROM users WHERE username = ?'
-    ).bind(username).first();
+      `SELECT id FROM users WHERE ${existingField} = ?`
+    ).bind(email).first();
     if (existing) {
       return c.json({ error: 'User already exists' }, 409);
     }
@@ -543,26 +935,70 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const passwordHash = await hashPassword(password, salt);
     const now = new Date().toISOString();
 
+    let verifyToken: string | null = null;
+    let verifyTokenHash: string | null = null;
+    let verifyExpiresAt: string | null = null;
+    if (userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt) {
+      const token = await createVerificationToken();
+      verifyToken = token.token;
+      verifyTokenHash = token.tokenHash;
+      verifyExpiresAt = token.expiresAt;
+    }
+
+    const columns = ['id', 'username', 'password_hash', 'password_salt', 'role', 'created_at', 'updated_at'];
+    const values: Array<string | null> = [id, email, passwordHash, salt, finalRole, now, now];
+    if (userSchema.hasEmail) {
+      columns.push('email');
+      values.push(email);
+    }
+    if (userSchema.hasEmailVerifiedAt) {
+      columns.push('email_verified_at');
+      values.push(null);
+    }
+    if (userSchema.hasEmailVerifyTokenHash) {
+      columns.push('email_verify_token_hash');
+      values.push(verifyTokenHash);
+    }
+    if (userSchema.hasEmailVerifyExpiresAt) {
+      columns.push('email_verify_expires_at');
+      values.push(verifyExpiresAt);
+    }
     await c.env.DB.prepare(
-      'INSERT INTO users (id, username, password_hash, password_salt, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, username, passwordHash, salt, finalRole, now, now).run();
+      `INSERT INTO users (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
+    ).bind(...values).run();
+
+    let delivered = false;
+    if (verifyToken) {
+      const verifyUrl = buildVerificationUrl(c.env, verifyToken);
+      delivered = await sendVerificationEmail(c.env, email, verifyUrl);
+    }
 
     notifyUpdate(c, 'user:create', {
       id,
-      username,
+      username: email,
       role: finalRole
     });
     await recordAuditLog(c, {
       action: 'create',
       resourceType: 'users',
       resourceId: id,
-      summary: `新增帳號 ${username}`,
+      summary: `新增帳號 ${email}`,
       details: {
-        username,
-        role: finalRole
+        username: email,
+        role: finalRole,
+        verification_email_sent: delivered
       }
     });
-    return c.json({ id, username, role: finalRole }, 201);
+    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    return c.json({
+      id,
+      username: email,
+      email,
+      role: finalRole,
+      email_verified_at: null,
+      verification_email_sent: delivered,
+      ...(debugToken ? { debug_verify_token: debugToken } : {})
+    }, 201);
   });
 
   app.get('/api/auth/users', async (c) => {
@@ -570,14 +1006,30 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!sessionUser || sessionUser.role !== 'admin') {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    const userSchema = await getUserSchemaSupport(c.env.DB);
 
+    const fields = [
+      'u.id',
+      'u.username',
+      'u.role',
+      'u.created_at',
+      'u.updated_at',
+      '(SELECT MIN(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS first_login_at',
+      '(SELECT MAX(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS latest_login_at'
+    ];
+    if (userSchema.hasEmail) fields.push('email');
+    if (userSchema.hasEmailVerifiedAt) fields.push('email_verified_at');
     const { results } = await c.env.DB.prepare(
-      'SELECT id, username, role, created_at, updated_at FROM users ORDER BY created_at DESC'
+      `SELECT ${fields.join(', ')} FROM users u ORDER BY u.created_at DESC`
     ).all();
 
     return c.json(results.map((row) => ({
       id: (row as any).id as string,
       username: (row as any).username as string,
+      email: ((row as any).email as string | null) ?? ((row as any).username as string),
+      email_verified_at: userSchema.hasEmailVerifiedAt ? (((row as any).email_verified_at as string | null) ?? null) : null,
+      first_login_at: ((row as any).first_login_at as string | null) ?? null,
+      latest_login_at: ((row as any).latest_login_at as string | null) ?? null,
       role: normalizeRole((row as any).role),
       created_at: (row as any).created_at as string,
       updated_at: (row as any).updated_at as string
@@ -589,16 +1041,23 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!sessionUser || sessionUser.role !== 'admin') {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    const userSchema = await getUserSchemaSupport(c.env.DB);
 
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { role, password } = body as { role?: UserRole; password?: string };
-    if (!role && !password) {
-      return c.json({ error: 'role or password is required' }, 400);
+    const role = (body as any)?.role as UserRole | undefined;
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    const hasEmailUpdate = typeof (body as any)?.email === 'string';
+    const nextEmail = hasEmailUpdate ? normalizeEmail((body as any).email) : '';
+    if (!role && !password && !hasEmailUpdate) {
+      return c.json({ error: 'role or password or email is required' }, 400);
+    }
+    if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
+      return c.json({ error: 'Invalid email format' }, 400);
     }
 
     const existing = await c.env.DB.prepare(
-      'SELECT id, username, role FROM users WHERE id = ?'
+      `SELECT id, username, role${userSchema.hasEmail ? ', email' : ''} FROM users WHERE id = ?`
     ).bind(id).first();
     if (!existing) {
       return c.json({ error: 'User not found' }, 404);
@@ -623,7 +1082,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     const now = new Date().toISOString();
     const updates: string[] = ['updated_at = ?'];
-    const values: Array<string> = [now];
+    const values: Array<string | null> = [now];
+    let delivered = false;
 
     if (role) {
       updates.push('role = ?');
@@ -637,13 +1097,44 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       values.push(passwordHash, salt);
     }
 
+    if (hasEmailUpdate) {
+      const currentEmail = ((existing as any).email as string | null) ?? ((existing as any).username as string);
+      if (currentEmail !== nextEmail) {
+        const duplicateField = userSchema.hasEmail ? 'email' : 'username';
+        const duplicate = await c.env.DB.prepare(
+          `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
+        ).bind(nextEmail, id).first();
+        if (duplicate) {
+          return c.json({ error: 'User already exists' }, 409);
+        }
+
+        updates.push('username = ?');
+        values.push(nextEmail);
+        if (userSchema.hasEmail) {
+          updates.push('email = ?');
+          values.push(nextEmail);
+        }
+        if (userSchema.hasEmailVerifiedAt) {
+          updates.push('email_verified_at = ?');
+          values.push(null);
+        }
+        if (userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt) {
+          const token = await createVerificationToken();
+          updates.push('email_verify_token_hash = ?', 'email_verify_expires_at = ?');
+          values.push(token.tokenHash, token.expiresAt);
+          const verifyUrl = buildVerificationUrl(c.env, token.token);
+          delivered = await sendVerificationEmail(c.env, nextEmail, verifyUrl);
+        }
+      }
+    }
+
     values.push(id);
     await c.env.DB.prepare(
       `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
     ).bind(...values).run();
 
     const updated = await c.env.DB.prepare(
-      'SELECT id, username, role, created_at, updated_at FROM users WHERE id = ?'
+      `SELECT id, username, role, created_at, updated_at${userSchema.hasEmail ? ', email' : ''}${userSchema.hasEmailVerifiedAt ? ', email_verified_at' : ''} FROM users WHERE id = ?`
     ).bind(id).first();
 
     notifyUpdate(c, 'user:update', {
@@ -661,14 +1152,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         role: normalizeRole((updated as any).role),
         changed_fields: [
           ...(role ? ['role'] : []),
-          ...(password ? ['password'] : [])
-        ]
+          ...(password ? ['password'] : []),
+          ...(hasEmailUpdate ? ['email'] : [])
+        ],
+        verification_email_sent: delivered
       }
     });
 
     return c.json({
       id: (updated as any).id as string,
       username: (updated as any).username as string,
+      email: ((updated as any).email as string | null) ?? ((updated as any).username as string),
+      email_verified_at: userSchema.hasEmailVerifiedAt ? (((updated as any).email_verified_at as string | null) ?? null) : null,
       role: normalizeRole((updated as any).role),
       created_at: (updated as any).created_at as string,
       updated_at: (updated as any).updated_at as string

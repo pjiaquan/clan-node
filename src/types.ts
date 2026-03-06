@@ -4,6 +4,10 @@ export type Env = {
   ADMIN_SETUP_TOKEN?: string;
   FRONTEND_ORIGIN?: string;
   ENVIRONMENT?: string;
+  EMAIL_VERIFICATION_URL_BASE?: string;
+  BREVO_API_KEY?: string;
+  BREVO_FROM_EMAIL?: string;
+  BREVO_FROM_NAME?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   DUAL_WRITE_REMOTE?: string;

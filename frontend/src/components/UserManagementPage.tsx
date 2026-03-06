@@ -51,8 +51,8 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
     };
   }, [users]);
 
-  const handleCreateUser = useCallback(async (username: string, password: string, role: UserRole) => {
-    await api.createUser(username, password, role);
+  const handleCreateUser = useCallback(async (email: string, password: string, role: UserRole) => {
+    await api.createUser(email, password, role);
     setShowCreateModal(false);
     await loadUsers(true);
   }, [loadUsers]);
@@ -72,7 +72,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
   }, [t]);
 
   const handleDeleteUser = useCallback(async (user: ManagedUser) => {
-    const confirmed = window.confirm(t('userMgmt.deleteConfirm', { username: user.username }));
+    const confirmed = window.confirm(t('userMgmt.deleteConfirm', { email: user.email || user.username }));
     if (!confirmed) return;
     setBusyUserId(user.id);
     setError(null);
@@ -86,11 +86,26 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
     }
   }, [t]);
 
+  const formatDateTime = useCallback((value: string | null | undefined) => {
+    if (!value) return '-';
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
+  }, [locale]);
+
   return (
     <div className="user-admin-page">
       <header className="user-admin-header">
         <div className="user-admin-header-left">
-          <h1>{t('userMgmt.title')}</h1>
+          <h1>
+            <button type="button" className="header-title-button" onClick={onBack}>
+              {t('userMgmt.title')}
+            </button>
+          </h1>
         </div>
         <div className="user-admin-header-right">
           <span className="user-admin-current-user">{currentUser.username}</span>
@@ -146,7 +161,10 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
               <table className="user-admin-table">
                 <thead>
                   <tr>
-                    <th>{t('userMgmt.username')}</th>
+                    <th>{t('userMgmt.email')}</th>
+                    <th>{t('userMgmt.emailStatus')}</th>
+                    <th>{t('userMgmt.firstLoginAt')}</th>
+                    <th>{t('userMgmt.latestLoginAt')}</th>
                     <th>{t('userMgmt.role')}</th>
                     <th>{t('userMgmt.createdAt')}</th>
                     <th>{t('userMgmt.updatedAt')}</th>
@@ -161,10 +179,13 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                       <tr key={user.id}>
                         <td>
                           <div className="user-admin-username">
-                            <span>{user.username}</span>
+                            <span>{user.email || user.username}</span>
                             {isSelf && <span className="user-admin-self-badge">{t('userMgmt.currentUser')}</span>}
                           </div>
                         </td>
+                        <td>{user.email_verified_at ? t('userMgmt.emailVerified') : t('userMgmt.emailUnverified')}</td>
+                        <td>{formatDateTime(user.first_login_at)}</td>
+                        <td>{formatDateTime(user.latest_login_at)}</td>
                         <td>
                           <select
                             className="user-admin-role-select"
@@ -176,20 +197,8 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                             <option value="readonly">{t('userMgmt.roleReadonly')}</option>
                           </select>
                         </td>
-                        <td>{new Intl.DateTimeFormat(locale, {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }).format(new Date(user.created_at))}</td>
-                        <td>{new Intl.DateTimeFormat(locale, {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }).format(new Date(user.updated_at))}</td>
+                        <td>{formatDateTime(user.created_at)}</td>
+                        <td>{formatDateTime(user.updated_at)}</td>
                         <td>
                           <button
                             type="button"

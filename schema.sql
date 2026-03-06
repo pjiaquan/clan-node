@@ -134,12 +134,17 @@ CREATE INDEX IF NOT EXISTS idx_person_custom_fields_label ON person_custom_field
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL UNIQUE,
+    email_verified_at TEXT,
+    email_verify_token_hash TEXT,
+    email_verify_expires_at TEXT,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email);
 
 -- Sessions table: stores login sessions
 CREATE TABLE IF NOT EXISTS sessions (
@@ -154,6 +159,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- Auth rate limits table: stores login/resend throttling counters and block windows
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+    action TEXT NOT NULL,
+    limiter_key TEXT NOT NULL,
+    window_start_ms INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    blocked_until_ms INTEGER,
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (action, limiter_key)
+);
+CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_blocked_until ON auth_rate_limits(blocked_until_ms);
 
 -- Notifications table: readonly users can report requested changes for admin handling
 CREATE TABLE IF NOT EXISTS notifications (

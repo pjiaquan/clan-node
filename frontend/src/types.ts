@@ -76,12 +76,17 @@ export type UserRole = 'admin' | 'readonly';
 export interface AuthUser {
   id: string;
   username: string;
+  email?: string;
   role: UserRole;
 }
 
 export interface ManagedUser {
   id: string;
   username: string;
+  email?: string;
+  email_verified_at?: string | null;
+  first_login_at?: string | null;
+  latest_login_at?: string | null;
   role: UserRole;
   created_at: string;
   updated_at: string;

@@ -148,7 +148,11 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
     <div className="notice-page">
       <header className="notice-header">
         <div className="notice-header-left">
-          <h1>{t('notification.title')}</h1>
+          <h1>
+            <button type="button" className="header-title-button" onClick={onBack}>
+              {t('notification.title')}
+            </button>
+          </h1>
         </div>
         <div className="notice-header-right">
           <span className="notice-user-chip">{currentUser.username}</span>

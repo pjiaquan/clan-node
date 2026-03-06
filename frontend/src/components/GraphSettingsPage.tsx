@@ -265,7 +265,11 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     <div className="graph-settings-page">
       <header className="graph-settings-header">
         <div className="graph-settings-header-left">
-          <h1>{t('settings.title')}</h1>
+          <h1>
+            <button type="button" className="header-title-button" onClick={handleBack}>
+              {t('settings.title')}
+            </button>
+          </h1>
         </div>
         <div className="graph-settings-header-right">
           <span className="graph-settings-user-chip">{currentUser.username}</span>
