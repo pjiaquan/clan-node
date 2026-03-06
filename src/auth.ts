@@ -394,6 +394,13 @@ const sendMfaCodeEmail = async (env: Env, to: string, code: string) => sendTrans
   htmlContent: `<p>Your sign-in code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`
 });
 
+const sendPasswordChangedEmail = async (env: Env, to: string) => sendTransactionalEmail(env, {
+  to,
+  subject: 'Your password was changed',
+  textContent: 'Your Family Tree password was changed. If this was not you, contact an administrator immediately.',
+  htmlContent: '<p>Your Family Tree password was changed.</p><p>If this was not you, contact an administrator immediately.</p>'
+});
+
 const createVerificationToken = async () => {
   const token = randomBase64(32).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   const tokenHash = await sha256Base64(token);
@@ -2005,6 +2012,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const updates: string[] = ['updated_at = ?'];
     const values: Array<string | null> = [now];
     let delivered = false;
+    let passwordNotificationSent = false;
 
     if (role) {
       updates.push('role = ?');
@@ -2064,6 +2072,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       `SELECT id, username, role, created_at, updated_at${userSchema.hasEmail ? ', email' : ''}${userSchema.hasEmailVerifiedAt ? ', email_verified_at' : ''} FROM users WHERE id = ?`
     ).bind(id).first();
 
+    if (password && updated) {
+      const destinationEmail = ((updated as any).email as string | null) ?? ((updated as any).username as string);
+      if (destinationEmail && isValidEmail(destinationEmail)) {
+        passwordNotificationSent = await sendPasswordChangedEmail(c.env, destinationEmail);
+      }
+    }
+
     notifyUpdate(c, 'user:update', {
       id,
       username: (updated as any).username,
@@ -2082,7 +2097,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
           ...(password ? ['password'] : []),
           ...(hasEmailUpdate ? ['email'] : [])
         ],
-        verification_email_sent: delivered
+        verification_email_sent: delivered,
+        password_notification_sent: passwordNotificationSent
       }
     });
 
@@ -2093,7 +2109,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       email_verified_at: userSchema.hasEmailVerifiedAt ? (((updated as any).email_verified_at as string | null) ?? null) : null,
       role: normalizeRole((updated as any).role),
       created_at: (updated as any).created_at as string,
-      updated_at: (updated as any).updated_at as string
+      updated_at: (updated as any).updated_at as string,
+      password_notification_sent: passwordNotificationSent
     });
   });
 

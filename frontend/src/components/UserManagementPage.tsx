@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { AuthUser, ManagedUser, UserRole } from '../types';
 import { CreateUserModal } from './CreateUserModal';
 import { PageHeaderMenu } from './PageHeaderMenu';
+import { ResetUserPasswordModal } from './ResetUserPasswordModal';
 import { useI18n } from '../i18n';
 
 type UserManagementPageProps = {
@@ -17,8 +18,10 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [passwordTarget, setPasswordTarget] = useState<ManagedUser | null>(null);
 
   const loadUsers = useCallback(async (silent = false) => {
     try {
@@ -28,6 +31,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
         setLoading(true);
       }
       setError(null);
+      setNotice(null);
       const data = await api.fetchUsers();
       setUsers(data);
     } catch (err) {
@@ -61,6 +65,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
     if (user.role === role) return;
     setBusyUserId(user.id);
     setError(null);
+    setNotice(null);
     try {
       const updated = await api.updateUser(user.id, { role });
       setUsers((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
@@ -76,11 +81,28 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
     if (!confirmed) return;
     setBusyUserId(user.id);
     setError(null);
+    setNotice(null);
     try {
       await api.deleteUser(user.id);
       setUsers((prev) => prev.filter((item) => item.id !== user.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('userMgmt.deleteFailed'));
+    } finally {
+      setBusyUserId(null);
+    }
+  }, [t]);
+
+  const handleResetPassword = useCallback(async (user: ManagedUser, password: string) => {
+    setBusyUserId(user.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.updateUser(user.id, { password });
+      setPasswordTarget(null);
+      setNotice(t('userMgmt.passwordResetSuccess', { email: user.email || user.username }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('userMgmt.passwordResetFailed'));
+      throw err;
     } finally {
       setBusyUserId(null);
     }
@@ -153,6 +175,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
           </div>
 
           {error && <div className="user-admin-error">{error}</div>}
+          {notice && <div className="user-admin-notice">{notice}</div>}
 
           {loading ? (
             <div className="user-admin-loading">{t('userMgmt.loading')}</div>
@@ -200,14 +223,24 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
                         <td>{formatDateTime(user.created_at)}</td>
                         <td>{formatDateTime(user.updated_at)}</td>
                         <td>
-                          <button
-                            type="button"
-                            className="user-admin-btn danger"
-                            disabled={rowBusy || isSelf}
-                            onClick={() => handleDeleteUser(user)}
-                          >
-                            {t('common.delete')}
-                          </button>
+                          <div className="user-admin-actions">
+                            <button
+                              type="button"
+                              className="user-admin-btn secondary"
+                              disabled={rowBusy}
+                              onClick={() => setPasswordTarget(user)}
+                            >
+                              {t('userMgmt.resetPassword')}
+                            </button>
+                            <button
+                              type="button"
+                              className="user-admin-btn danger"
+                              disabled={rowBusy || isSelf}
+                              onClick={() => handleDeleteUser(user)}
+                            >
+                              {t('common.delete')}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -223,6 +256,14 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
         <CreateUserModal
           onClose={() => setShowCreateModal(false)}
           onSubmit={handleCreateUser}
+        />
+      )}
+
+      {passwordTarget && (
+        <ResetUserPasswordModal
+          email={passwordTarget.email || passwordTarget.username}
+          onClose={() => setPasswordTarget(null)}
+          onSubmit={(password) => handleResetPassword(passwordTarget, password)}
         />
       )}
     </div>

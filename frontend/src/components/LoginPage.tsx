@@ -78,10 +78,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           : t('login.prompt')}
         </p>
         {pendingMfa ? (
-          <form onSubmit={handleVerifyMfa}>
+          <form key={`mfa-form-${pendingMfaMethod}`} onSubmit={handleVerifyMfa}>
             <div className="form-group">
-              <label>{pendingMfaMethod === 'totp' ? t('login.totpCode') : t('login.mfaCode')}</label>
+              <label htmlFor="login-mfa-code">{pendingMfaMethod === 'totp' ? t('login.totpCode') : t('login.mfaCode')}</label>
               <input
+                id="login-mfa-code"
+                name="mfa_code"
                 type="text"
                 inputMode="numeric"
                 pattern="[0-9]{6}"
@@ -89,6 +91,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 value={mfaCode}
                 onChange={(e) => setMfaCode(e.target.value.replace(/\D+/g, '').slice(0, 6))}
                 autoComplete="one-time-code"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-lpignore="true"
                 autoFocus
                 required
               />
@@ -98,45 +103,49 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <button type="submit" className="btn-primary" disabled={submitting}>
               {submitting ? t('login.mfaVerifying') : t('login.verifyMfa')}
             </button>
-            {pendingMfa.methods.includes('email') && pendingMfaMethod !== 'email' && onUseEmailMfa && (
-              <button
-                type="button"
-                className="user-admin-btn secondary"
-                onClick={() => { void onUseEmailMfa(); }}
-                disabled={submitting}
-              >
-                {t('login.useEmailFallback')}
-              </button>
-            )}
-            {pendingMfa.methods.includes('totp') && pendingMfaMethod !== 'totp' && onUseTotpMfa && (
-              <button
-                type="button"
-                className="user-admin-btn secondary"
-                onClick={onUseTotpMfa}
-                disabled={submitting}
-              >
-                {t('login.useAuthenticatorApp')}
-              </button>
-            )}
-            {onCancelMfa && (
-              <button
-                type="button"
-                className="user-admin-btn secondary"
-                onClick={() => {
-                  setMfaCode('');
-                  onCancelMfa();
-                }}
-                disabled={submitting}
-              >
-                {t('login.backToSignIn')}
-              </button>
-            )}
+            <div className="login-secondary-actions">
+              {pendingMfa.methods.includes('email') && pendingMfaMethod !== 'email' && onUseEmailMfa && (
+                <button
+                  type="button"
+                  className="user-admin-btn secondary"
+                  onClick={() => { void onUseEmailMfa(); }}
+                  disabled={submitting}
+                >
+                  {t('login.useEmailFallback')}
+                </button>
+              )}
+              {pendingMfa.methods.includes('totp') && pendingMfaMethod !== 'totp' && onUseTotpMfa && (
+                <button
+                  type="button"
+                  className="user-admin-btn secondary"
+                  onClick={onUseTotpMfa}
+                  disabled={submitting}
+                >
+                  {t('login.useAuthenticatorApp')}
+                </button>
+              )}
+              {onCancelMfa && (
+                <button
+                  type="button"
+                  className="user-admin-btn secondary"
+                  onClick={() => {
+                    setMfaCode('');
+                    onCancelMfa();
+                  }}
+                  disabled={submitting}
+                >
+                  {t('login.backToSignIn')}
+                </button>
+              )}
+            </div>
           </form>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form key="login-form" onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>{t('login.email')}</label>
+              <label htmlFor="login-email">{t('login.email')}</label>
               <input
+                id="login-email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -146,11 +155,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               />
             </div>
             <div className="form-group">
-              <label>{t('login.password')}</label>
+              <label htmlFor="login-password">{t('login.password')}</label>
               <input
+                id="login-password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
             </div>

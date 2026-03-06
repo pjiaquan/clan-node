@@ -289,6 +289,11 @@ function App() {
     setAuthNotice(null);
   }, []);
 
+  useEffect(() => {
+    if (!pendingMfa) return;
+    setPendingMfaMethod(pendingMfa.preferred_method);
+  }, [pendingMfa?.session_id, pendingMfa?.preferred_method]);
+
   const handleSetupAdmin = useCallback(async (email: string, password: string) => {
     setAuthError(null);
     setAuthNotice(null);

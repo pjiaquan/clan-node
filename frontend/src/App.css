@@ -220,6 +220,16 @@
   font-size: 0.85rem;
 }
 
+.user-admin-notice {
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #047857;
+  font-size: 0.85rem;
+}
+
 .user-admin-loading {
   padding: 2.2rem 1rem;
   text-align: center;
@@ -250,6 +260,25 @@
   font-size: 0.88rem;
   color: #1e293b;
   border-bottom: 1px solid #f1f5f9;
+}
+
+.user-admin-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.user-admin-modal-target {
+  margin: -0.35rem 0 1rem;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.user-admin-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
 }
 
 .user-admin-username {
@@ -1235,6 +1264,17 @@
 .login-card .btn-primary {
   width: 100%;
   margin-top: 0.5rem;
+}
+
+.login-secondary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.login-secondary-actions .user-admin-btn {
+  width: 100%;
 }
 
 .login-error {
