@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
-import type { AuthUser } from './types';
+import type { AuthUser, PendingMfaChallenge } from './types';
 import { LoginPage } from './components/LoginPage';
 import { SetupPage } from './components/SetupPage';
 import { ClanGraph } from './ClanGraph';
@@ -59,6 +59,8 @@ function App() {
   const [resendingVerification, setResendingVerification] = useState(false);
   const [requiresSetup, setRequiresSetup] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(null);
+  const [pendingMfaMethod, setPendingMfaMethod] = useState<'totp' | 'email'>('email');
   const [view, setView] = useState<AppView>(() => getViewFromHash());
   const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialTheme());
@@ -100,6 +102,8 @@ function App() {
     const onUnauthorized = () => {
       setIsAuthed(false);
       setAuthUser(null);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
       setAuthError(t('app.authExpired'));
       setAuthNotice(null);
       navigateTo('graph');
@@ -148,6 +152,8 @@ function App() {
           if (!cancelled) {
             setIsAuthed(false);
             setAuthUser(null);
+            setPendingMfa(null);
+            setPendingMfaMethod('email');
           }
           return;
         }
@@ -155,6 +161,8 @@ function App() {
         if (cancelled) return;
         setIsAuthed(true);
         setAuthUser(data.user);
+        setPendingMfa(null);
+        setPendingMfaMethod('email');
         try {
           const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
           const storedCenter = localStorage.getItem('clan.centerId');
@@ -169,6 +177,8 @@ function App() {
         if (!cancelled) {
           setIsAuthed(false);
           setAuthUser(null);
+          setPendingMfa(null);
+          setPendingMfaMethod('email');
         }
       } finally {
         if (!cancelled) setAuthChecked(true);
@@ -185,8 +195,23 @@ function App() {
     setAuthNotice(null);
     try {
       const data = await api.login(email, password);
+      if ('mfa_required' in data && data.mfa_required) {
+        setPendingMfa(data);
+        setPendingMfaMethod(data.preferred_method);
+        if (data.preferred_method === 'email') {
+          const debugSuffix = data.debug_mfa_code ? ` (${data.debug_mfa_code})` : '';
+          setAuthNotice(`${t('login.mfaCodeSent', { email: data.masked_email })}${debugSuffix}`);
+        } else {
+          setAuthNotice(null);
+        }
+        setIsAuthed(false);
+        setAuthUser(null);
+        return;
+      }
       setIsAuthed(true);
       setAuthUser(data.user);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
       try {
         const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
         const storedCenter = localStorage.getItem('clan.centerId');
@@ -202,8 +227,67 @@ function App() {
       setAuthError(message);
       setIsAuthed(false);
       setAuthUser(null);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
     }
-  }, [isZh]);
+  }, [t]);
+
+  const handleVerifyMfa = useCallback(async (code: string) => {
+    if (!pendingMfa) return;
+    setAuthError(null);
+    try {
+      if (pendingMfaMethod === 'email' && !pendingMfa.email_challenge_id) {
+        throw new Error(t('login.mfaCodeMissing'));
+      }
+      const data = pendingMfaMethod === 'totp'
+        ? await api.verifyTotpMfa(pendingMfa.session_id, code)
+        : await api.verifyMfa(pendingMfa.email_challenge_id || '', code);
+      setIsAuthed(true);
+      setAuthUser(data.user);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
+      setAuthNotice(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('login.mfaVerifyFailed');
+      setAuthError(message);
+      setIsAuthed(false);
+      setAuthUser(null);
+    }
+  }, [pendingMfa, pendingMfaMethod, t]);
+
+  const handleUseEmailMfa = useCallback(async () => {
+    if (!pendingMfa) return;
+    setAuthError(null);
+    try {
+      const result = await api.sendEmailMfaCode(pendingMfa.session_id);
+      setPendingMfa((prev) => prev ? {
+        ...prev,
+        email_challenge_id: result.challenge_id,
+        delivered: result.delivered,
+        preferred_method: 'email',
+        debug_mfa_code: result.debug_mfa_code
+      } : prev);
+      setPendingMfaMethod('email');
+      const debugSuffix = result.debug_mfa_code ? ` (${result.debug_mfa_code})` : '';
+      setAuthNotice(`${t('login.mfaCodeSent', { email: pendingMfa.masked_email })}${debugSuffix}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('login.mfaVerifyFailed');
+      setAuthError(message);
+    }
+  }, [pendingMfa, t]);
+
+  const handleUseTotpMfa = useCallback(() => {
+    setPendingMfaMethod('totp');
+    setAuthError(null);
+    setAuthNotice(null);
+  }, []);
+
+  const handleCancelMfa = useCallback(() => {
+    setPendingMfa(null);
+    setPendingMfaMethod('email');
+    setAuthError(null);
+    setAuthNotice(null);
+  }, []);
 
   const handleSetupAdmin = useCallback(async (email: string, password: string) => {
     setAuthError(null);
@@ -211,6 +295,8 @@ function App() {
     try {
       await api.setupAdmin(email, password);
       setRequiresSetup(false);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
       await handleLogin(email, password);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('setup.failed');
@@ -237,6 +323,8 @@ function App() {
     await api.logout();
     setIsAuthed(false);
     setAuthUser(null);
+    setPendingMfa(null);
+    setPendingMfaMethod('email');
     navigateTo('graph');
   }, [navigateTo]);
 
@@ -340,6 +428,12 @@ function App() {
           error={authError}
           notice={authNotice}
           onLogin={handleLogin}
+          onVerifyMfa={handleVerifyMfa}
+          onUseEmailMfa={handleUseEmailMfa}
+          onUseTotpMfa={handleUseTotpMfa}
+          onCancelMfa={handleCancelMfa}
+          pendingMfa={pendingMfa}
+          pendingMfaMethod={pendingMfaMethod}
           onResendVerification={handleResendVerification}
           resendBusy={resendingVerification}
         />

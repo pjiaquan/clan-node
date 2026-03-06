@@ -58,7 +58,10 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder={t('createUser.passwordPlaceholder')}
+              autoComplete="new-password"
+              minLength={12}
             />
+            <small className="name-lock-hint">{t('createUser.passwordPolicy')}</small>
           </div>
           <div className="form-group">
             <label htmlFor="new-role">{t('createUser.role')}</label>

@@ -80,6 +80,27 @@ export interface AuthUser {
   role: UserRole;
 }
 
+export interface PendingMfaChallenge {
+  session_id: string;
+  email: string;
+  masked_email: string;
+  methods: Array<'totp' | 'email'>;
+  preferred_method: 'totp' | 'email';
+  email_challenge_id?: string | null;
+  delivered?: boolean;
+  debug_mfa_code?: string;
+}
+
+export interface MfaStatus {
+  totp_enabled: boolean;
+  totp_enabled_at: string | null;
+  pending_setup: boolean;
+  pending_expires_at: string | null;
+  email_fallback_enabled: boolean;
+  email: string;
+  masked_email: string;
+}
+
 export interface ManagedUser {
   id: string;
   username: string;

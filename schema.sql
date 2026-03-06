@@ -138,6 +138,10 @@ CREATE TABLE IF NOT EXISTS users (
     email_verified_at TEXT,
     email_verify_token_hash TEXT,
     email_verify_expires_at TEXT,
+    mfa_totp_secret TEXT,
+    mfa_totp_enabled_at TEXT,
+    mfa_totp_pending_secret TEXT,
+    mfa_totp_pending_expires_at TEXT,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
@@ -171,6 +175,35 @@ CREATE TABLE IF NOT EXISTS auth_rate_limits (
     PRIMARY KEY (action, limiter_key)
 );
 CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_blocked_until ON auth_rate_limits(blocked_until_ms);
+
+-- MFA challenge table: stores short-lived email OTP login challenges
+CREATE TABLE IF NOT EXISTS auth_mfa_challenges (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_auth_mfa_challenges_user ON auth_mfa_challenges(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_mfa_challenges_expires_at ON auth_mfa_challenges(expires_at);
+
+-- MFA session table: stores password-verified pending MFA steps
+CREATE TABLE IF NOT EXISTS auth_mfa_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_auth_mfa_sessions_user ON auth_mfa_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_mfa_sessions_expires_at ON auth_mfa_sessions(expires_at);
 
 -- Notifications table: readonly users can report requested changes for admin handling
 CREATE TABLE IF NOT EXISTS notifications (

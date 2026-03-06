@@ -6,6 +6,8 @@ import type {
   GraphData,
   KinshipLabel,
   ManagedUser,
+  MfaStatus,
+  PendingMfaChallenge,
   NotificationItem,
   NotificationStats,
   NotificationStatus,
@@ -20,6 +22,10 @@ import type {
 export type CreateRelationshipResponse = Relationship & {
   created_relationship_ids?: number[];
 };
+
+export type LoginResponse =
+  | { user: AuthUser; mfa_required?: false }
+  | ({ mfa_required: true } & PendingMfaChallenge);
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const normalizeApiBase = (value: string) => {
@@ -281,11 +287,78 @@ export const api = {
     return res.json();
   },
 
-  login: async (email: string, password: string): Promise<{ user: AuthUser }> => {
+  login: async (email: string, password: string): Promise<LoginResponse> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  verifyMfa: async (challengeId: string, code: string): Promise<{ user: AuthUser }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/verify-mfa`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge_id: challengeId, code }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  verifyTotpMfa: async (sessionId: string, code: string): Promise<{ user: AuthUser }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/verify-totp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, code }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  sendEmailMfaCode: async (sessionId: string): Promise<{ ok: boolean; challenge_id: string; delivered?: boolean; debug_mfa_code?: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  fetchMfaStatus: async (): Promise<MfaStatus> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/status`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  startTotpSetup: async (): Promise<{ secret: string; otpauth_url: string; expires_at: string; email: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/totp/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  confirmTotpSetup: async (code: string): Promise<{ ok: boolean; enabled_at: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/totp/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
     });
     if (!res.ok) {
       throw new Error(await parseErrorMessage(res));

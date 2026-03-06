@@ -58,8 +58,10 @@ export const SetupPage: React.FC<SetupPageProps> = ({ error, onSetup }) => {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="new-password"
+              minLength={12}
               required
             />
+            <small className="name-lock-hint">{t('setup.passwordPolicy')}</small>
           </div>
           <div className="form-group">
             <label>{t('setup.confirmPassword')}</label>
@@ -68,6 +70,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ error, onSetup }) => {
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               autoComplete="new-password"
+              minLength={12}
               required
             />
           </div>
