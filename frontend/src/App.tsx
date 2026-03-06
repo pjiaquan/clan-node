@@ -461,6 +461,11 @@ function App() {
         <UserManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageNotifications={() => navigateTo('notifications')}
+          onManageAuditLogs={() => navigateTo('auditLogs')}
+          onManageRelationshipNames={() => navigateTo('kinshipLabels')}
           onLogout={handleLogout}
         />
       );
@@ -471,6 +476,11 @@ function App() {
         <SessionManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+          onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
+          onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
+          onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
           onLogout={handleLogout}
         />
       );
@@ -481,6 +491,11 @@ function App() {
         <NotificationManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={() => navigateTo('users')}
+          onManageAuditLogs={() => navigateTo('auditLogs')}
+          onManageRelationshipNames={() => navigateTo('kinshipLabels')}
           onLogout={handleLogout}
         />
       );
@@ -491,6 +506,11 @@ function App() {
         <AuditLogPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={() => navigateTo('users')}
+          onManageNotifications={() => navigateTo('notifications')}
+          onManageRelationshipNames={() => navigateTo('kinshipLabels')}
           onLogout={handleLogout}
         />
       );
@@ -501,6 +521,11 @@ function App() {
         <KinshipLabelManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={() => navigateTo('users')}
+          onManageNotifications={() => navigateTo('notifications')}
+          onManageAuditLogs={() => navigateTo('auditLogs')}
           onLogout={handleLogout}
         />
       );
@@ -513,6 +538,11 @@ function App() {
           settings={graphSettings}
           onSave={handleSaveGraphSettings}
           onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+          onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
+          onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
+          onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
           onLogout={handleLogout}
         />
       );
@@ -541,11 +571,17 @@ function App() {
     authError,
     authNotice,
     authUser,
+    pendingMfa,
+    pendingMfaMethod,
     requiresSetup,
     view,
     graphSettings,
     handleLogin,
     handleLogout,
+    handleVerifyMfa,
+    handleUseEmailMfa,
+    handleUseTotpMfa,
+    handleCancelMfa,
     handleResendVerification,
     handleSetupAdmin,
     handleSaveGraphSettings,

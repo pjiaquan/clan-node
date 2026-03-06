@@ -14,6 +14,11 @@ type GraphSettingsPageProps = {
   settings: GraphSettings;
   onSave: (settings: GraphSettings, options?: { navigate?: boolean }) => void;
   onBack: () => void;
+  onManageSessions: () => void;
+  onManageUsers?: () => void;
+  onManageNotifications?: () => void;
+  onManageAuditLogs?: () => void;
+  onManageRelationshipNames?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -165,6 +170,11 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   settings,
   onSave,
   onBack,
+  onManageSessions,
+  onManageUsers,
+  onManageNotifications,
+  onManageAuditLogs,
+  onManageRelationshipNames,
   onLogout,
 }) => {
   const { t } = useI18n();
@@ -275,7 +285,14 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
           <span className="graph-settings-user-chip">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="settings"
+            isAdmin={currentUser.role === 'admin'}
             onBack={handleBack}
+            onManageSessions={onManageSessions}
+            onManageUsers={onManageUsers}
+            onManageNotifications={onManageNotifications}
+            onManageAuditLogs={onManageAuditLogs}
+            onManageRelationshipNames={onManageRelationshipNames}
             onLogout={onLogout}
           />
         </div>

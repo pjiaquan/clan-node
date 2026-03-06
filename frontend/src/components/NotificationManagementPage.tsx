@@ -7,6 +7,11 @@ import { useI18n } from '../i18n';
 type NotificationManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onManageSessions: () => void;
+  onOpenSettings: () => void;
+  onManageUsers: () => void;
+  onManageAuditLogs: () => void;
+  onManageRelationshipNames: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -25,7 +30,16 @@ const formatDate = (value: string | null | undefined, locale: string) => {
   }).format(date);
 };
 
-export const NotificationManagementPage: React.FC<NotificationManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+export const NotificationManagementPage: React.FC<NotificationManagementPageProps> = ({
+  currentUser,
+  onBack,
+  onManageSessions,
+  onOpenSettings,
+  onManageUsers,
+  onManageAuditLogs,
+  onManageRelationshipNames,
+  onLogout,
+}) => {
   const { t, locale } = useI18n();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,7 +172,14 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
           <span className="notice-user-chip">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="notifications"
+            isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onManageSessions={onManageSessions}
+            onOpenSettings={onOpenSettings}
+            onManageUsers={onManageUsers}
+            onManageAuditLogs={onManageAuditLogs}
+            onManageRelationshipNames={onManageRelationshipNames}
             onLogout={onLogout}
           />
         </div>

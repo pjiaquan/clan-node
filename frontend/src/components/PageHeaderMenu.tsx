@@ -1,10 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 
+export type PageHeaderView = 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
+
 type PageHeaderMenuProps = {
   username?: string | null;
   backLabel?: string;
+  currentPage?: PageHeaderView;
+  isAdmin?: boolean;
   onBack: () => void;
+  onManageSessions?: () => void;
+  onOpenSettings?: () => void;
+  onManageUsers?: () => void;
+  onManageNotifications?: () => void;
+  onManageAuditLogs?: () => void;
+  onManageRelationshipNames?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -25,7 +35,15 @@ const MenuItemLabel: React.FC<{ text: string }> = ({ text }) => (
 export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   username,
   backLabel,
+  currentPage,
+  isAdmin = false,
   onBack,
+  onManageSessions,
+  onOpenSettings,
+  onManageUsers,
+  onManageNotifications,
+  onManageAuditLogs,
+  onManageRelationshipNames,
   onLogout,
 }) => {
   const { t } = useI18n();
@@ -96,6 +114,78 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
           >
             <MenuItemLabel text={resolvedBackLabel} />
           </button>
+          {currentPage !== 'sessions' && onManageSessions && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageSessions();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.sessionManagement')} />
+            </button>
+          )}
+          {currentPage !== 'settings' && onOpenSettings && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onOpenSettings();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.graphSettings')} />
+            </button>
+          )}
+          {isAdmin && currentPage !== 'users' && onManageUsers && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageUsers();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.accountManagement')} />
+            </button>
+          )}
+          {isAdmin && currentPage !== 'notifications' && onManageNotifications && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageNotifications();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.notificationManagement')} />
+            </button>
+          )}
+          {isAdmin && currentPage !== 'auditLogs' && onManageAuditLogs && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageAuditLogs();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.auditLogs')} />
+            </button>
+          )}
+          {isAdmin && currentPage !== 'kinshipLabels' && onManageRelationshipNames && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageRelationshipNames();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.relationshipNameManagement')} />
+            </button>
+          )}
           <button
             type="button"
             className="header-action-item"

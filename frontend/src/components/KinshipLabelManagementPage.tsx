@@ -7,6 +7,11 @@ import { useI18n } from '../i18n';
 type KinshipLabelManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onManageSessions: () => void;
+  onOpenSettings: () => void;
+  onManageUsers: () => void;
+  onManageNotifications: () => void;
+  onManageAuditLogs: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -46,6 +51,11 @@ const currentFormalTitleFrom = (row: KinshipLabel, draft: RowDraft) => (
 export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProps> = ({
   currentUser,
   onBack,
+  onManageSessions,
+  onOpenSettings,
+  onManageUsers,
+  onManageNotifications,
+  onManageAuditLogs,
   onLogout,
 }) => {
   const { t, locale } = useI18n();
@@ -236,7 +246,14 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
           <span className="notice-user-chip">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="kinshipLabels"
+            isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onManageSessions={onManageSessions}
+            onOpenSettings={onOpenSettings}
+            onManageUsers={onManageUsers}
+            onManageNotifications={onManageNotifications}
+            onManageAuditLogs={onManageAuditLogs}
             onLogout={onLogout}
           />
         </div>

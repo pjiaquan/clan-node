@@ -9,10 +9,24 @@ import { useI18n } from '../i18n';
 type UserManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onManageSessions: () => void;
+  onOpenSettings: () => void;
+  onManageNotifications: () => void;
+  onManageAuditLogs: () => void;
+  onManageRelationshipNames: () => void;
   onLogout: () => Promise<void> | void;
 };
 
-export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+export const UserManagementPage: React.FC<UserManagementPageProps> = ({
+  currentUser,
+  onBack,
+  onManageSessions,
+  onOpenSettings,
+  onManageNotifications,
+  onManageAuditLogs,
+  onManageRelationshipNames,
+  onLogout,
+}) => {
   const { t, locale } = useI18n();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +147,14 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({ currentU
           <span className="user-admin-current-user">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="users"
+            isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onManageSessions={onManageSessions}
+            onOpenSettings={onOpenSettings}
+            onManageNotifications={onManageNotifications}
+            onManageAuditLogs={onManageAuditLogs}
+            onManageRelationshipNames={onManageRelationshipNames}
             onLogout={onLogout}
           />
         </div>

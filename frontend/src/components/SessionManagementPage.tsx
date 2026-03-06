@@ -8,6 +8,11 @@ import { useI18n } from '../i18n';
 type SessionManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onOpenSettings: () => void;
+  onManageUsers?: () => void;
+  onManageNotifications?: () => void;
+  onManageAuditLogs?: () => void;
+  onManageRelationshipNames?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -31,7 +36,16 @@ const platformGroup = (session: AuthSession) => {
   return 'other';
 };
 
-export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ currentUser, onBack, onLogout }) => {
+export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
+  currentUser,
+  onBack,
+  onOpenSettings,
+  onManageUsers,
+  onManageNotifications,
+  onManageAuditLogs,
+  onManageRelationshipNames,
+  onLogout,
+}) => {
   const { t, locale } = useI18n();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -211,7 +225,14 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({ cu
           <span className="session-user-chip">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="sessions"
+            isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onOpenSettings={onOpenSettings}
+            onManageUsers={onManageUsers}
+            onManageNotifications={onManageNotifications}
+            onManageAuditLogs={onManageAuditLogs}
+            onManageRelationshipNames={onManageRelationshipNames}
             onLogout={onLogout}
           />
         </div>

@@ -7,6 +7,11 @@ import { useI18n } from '../i18n';
 type AuditLogPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onManageSessions: () => void;
+  onOpenSettings: () => void;
+  onManageUsers: () => void;
+  onManageNotifications: () => void;
+  onManageRelationshipNames: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -32,7 +37,16 @@ const serializeDetails = (details: AuditLogItem['details']) => {
   }
 };
 
-export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack, onLogout }) => {
+export const AuditLogPage: React.FC<AuditLogPageProps> = ({
+  currentUser,
+  onBack,
+  onManageSessions,
+  onOpenSettings,
+  onManageUsers,
+  onManageNotifications,
+  onManageRelationshipNames,
+  onLogout,
+}) => {
   const { t, locale } = useI18n();
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,7 +133,14 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({ currentUser, onBack,
           <span className="notice-user-chip">{currentUser.username}</span>
           <PageHeaderMenu
             username={currentUser.username}
+            currentPage="auditLogs"
+            isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onManageSessions={onManageSessions}
+            onOpenSettings={onOpenSettings}
+            onManageUsers={onManageUsers}
+            onManageNotifications={onManageNotifications}
+            onManageRelationshipNames={onManageRelationshipNames}
             onLogout={onLogout}
           />
         </div>
