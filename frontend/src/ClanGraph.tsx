@@ -62,6 +62,8 @@ const getRenderedEdgeType = (relationshipType: string, edgeLineStyle: GraphSetti
 const SVG_XMLNS = 'http://www.w3.org/2000/svg';
 const XHTML_XMLNS = 'http://www.w3.org/1999/xhtml';
 const SCREENSHOT_EXPORT_SCALE = 2;
+const DARK_SCREENSHOT_BG = '#0b1220';
+const LIGHT_SCREENSHOT_BG = '#ffffff';
 
 const copyComputedStyles = (source: Element, target: Element) => {
   const sourceStyle = window.getComputedStyle(source);
@@ -96,7 +98,48 @@ const copyComputedStyles = (source: Element, target: Element) => {
   }
 };
 
-const buildScreenshotSvg = (element: HTMLElement) => {
+const getScreenshotThemeCss = (theme: 'light' | 'dark') => {
+  if (theme === 'dark') {
+    return `
+      .person-node {
+        background: #1e293b !important;
+        border-color: #334155 !important;
+        box-shadow: 0 8px 20px rgba(2, 6, 23, 0.45) !important;
+      }
+      .node-name {
+        color: #e5eef9 !important;
+      }
+      .node-title {
+        background: #162235 !important;
+        color: #94a3b8 !important;
+      }
+      .react-flow__edge-label {
+        background: #1e293b !important;
+        color: #94a3b8 !important;
+      }
+    `;
+  }
+
+  return `
+    .person-node {
+      background: #ffffff !important;
+      border-color: #e2e8f0 !important;
+    }
+    .node-name {
+      color: #0f172a !important;
+    }
+    .node-title {
+      background: #f8fafc !important;
+      color: #64748b !important;
+    }
+    .react-flow__edge-label {
+      background: #ffffff !important;
+      color: #64748b !important;
+    }
+  `;
+};
+
+const buildScreenshotSvg = (element: HTMLElement, theme: 'light' | 'dark') => {
   const rect = element.getBoundingClientRect();
   const width = Math.max(1, Math.ceil(rect.width));
   const height = Math.max(1, Math.ceil(rect.height));
@@ -107,12 +150,16 @@ const buildScreenshotSvg = (element: HTMLElement) => {
   clone.style.width = `${width}px`;
   clone.style.height = `${height}px`;
   clone.style.margin = '0';
+  clone.style.colorScheme = theme;
 
   const serialized = new XMLSerializer().serializeToString(clone);
   const svg = [
     `<svg xmlns="${SVG_XMLNS}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
     '<foreignObject x="0" y="0" width="100%" height="100%">',
+    `<div xmlns="${XHTML_XMLNS}" data-theme="${theme}" style="width:${width}px;height:${height}px;margin:0;color-scheme:${theme};background:${theme === 'dark' ? DARK_SCREENSHOT_BG : LIGHT_SCREENSHOT_BG};">`,
+    `<style>${getScreenshotThemeCss(theme)}</style>`,
     serialized,
+    '</div>',
     '</foreignObject>',
     '</svg>',
   ].join('');
@@ -896,7 +943,8 @@ export function ClanGraph({
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
 
-    const { svg, width, height } = buildScreenshotSvg(captureElement);
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    const { svg, width, height } = buildScreenshotSvg(captureElement, theme);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const baseFilename = `clan-node-view-${stamp}`;
     const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
@@ -919,7 +967,7 @@ export function ClanGraph({
         throw new Error('canvas-context-missing');
       }
       context.scale(SCREENSHOT_EXPORT_SCALE, SCREENSHOT_EXPORT_SCALE);
-      context.fillStyle = '#ffffff';
+      context.fillStyle = theme === 'dark' ? DARK_SCREENSHOT_BG : LIGHT_SCREENSHOT_BG;
       context.fillRect(0, 0, width, height);
       context.drawImage(image, 0, 0, width, height);
       const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));

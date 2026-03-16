@@ -3707,6 +3707,30 @@ button:disabled:hover {
   color: var(--app-text);
 }
 
+:root[data-theme='dark'] .session-btn.secondary {
+  background: rgba(30, 41, 59, 0.92);
+  border-color: rgba(148, 163, 184, 0.58);
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .session-btn.secondary:hover {
+  background: rgba(51, 65, 85, 0.98);
+  color: #ffffff;
+}
+
+:root[data-theme='dark'] .session-btn.danger {
+  background: linear-gradient(180deg, rgba(153, 27, 27, 0.82) 0%, rgba(153, 27, 27, 0.98) 100%);
+  border-color: rgba(252, 165, 165, 0.82);
+  color: #fff1f2;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='dark'] .session-btn.danger:hover {
+  background: linear-gradient(180deg, rgba(185, 28, 28, 0.9) 0%, rgba(185, 28, 28, 1) 100%);
+  border-color: rgba(254, 202, 202, 0.92);
+  color: #ffffff;
+}
+
 :root[data-theme='dark'] .user-admin-btn {
   font-weight: 700;
   color: #f8fafc;
