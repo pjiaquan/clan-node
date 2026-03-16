@@ -259,7 +259,11 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
           ) : (
             <div className="session-mfa-card">
               <p>{mfaStatus?.totp_enabled ? t('session.mfaEnabled') : t('session.mfaNotEnabled')}</p>
-              <p>{t('session.mfaEmailFallback', { email: mfaStatus?.masked_email || currentUser.email || currentUser.username })}</p>
+              <p>
+                {mfaStatus?.email_fallback_enabled
+                  ? t('session.mfaEmailFallback', { email: mfaStatus?.masked_email || currentUser.email || currentUser.username })
+                  : t('session.mfaNoEmailFallback')}
+              </p>
               {mfaStatus?.totp_enabled_at && <p>{t('session.mfaEnabledAt', { value: formatDate(mfaStatus.totp_enabled_at, locale) })}</p>}
               {mfaSetupSecret && (
                 <div className="session-mfa-setup">

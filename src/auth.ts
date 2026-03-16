@@ -3,6 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
 import { notifyUpdate } from './notify';
 import { recordAuditLog } from './audit';
+import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
@@ -15,11 +16,15 @@ const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_MAX_LENGTH = 128;
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const DEFAULT_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const ADMIN_IDLE_SESSION_TTL_MS = 1000 * 60 * 60 * 2;
+const DEFAULT_IDLE_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MFA_TTL_MS = 1000 * 60 * 10;
 const MFA_MAX_ATTEMPTS = 5;
 const TOTP_PERIOD_SECONDS = 30;
 const TOTP_DIGITS = 6;
 const TOTP_WINDOW_STEPS = 1;
+const SESSION_TOKEN_BYTES = 32;
+const ENCRYPTED_SECRET_PREFIX = 'enc:v1';
 
 const toBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -30,11 +35,39 @@ const toBase64 = (buffer: ArrayBuffer) => {
   return btoa(binary);
 };
 
+const toBase64Url = (buffer: ArrayBuffer | Uint8Array) => {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    binary += String.fromCharCode(bytes[i] ?? 0);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+};
+
 const randomBase64 = (size = 16) => {
   const bytes = new Uint8Array(size);
   crypto.getRandomValues(bytes);
   return toBase64(bytes.buffer);
 };
+
+const randomBase64Url = (size = 16) => {
+  const bytes = new Uint8Array(size);
+  crypto.getRandomValues(bytes);
+  return toBase64Url(bytes);
+};
+
+const fromBase64 = (value: string) => {
+  const normalized = value.replace(/\s+/g, '');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
+const fromBase64Url = (value: string) => fromBase64(value.replace(/-/g, '+').replace(/_/g, '/'));
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -95,6 +128,11 @@ async function hashPassword(password: string, salt: string) {
 async function sha256Base64(input: string) {
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
   return toBase64(digest);
+}
+
+async function sha256Base64Url(input: string) {
+  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
+  return toBase64Url(digest);
 }
 
 async function hmacSha1(secret: Uint8Array, message: Uint8Array) {
@@ -244,6 +282,129 @@ let userSchemaSupportCache: UserSchemaSupport | null = null;
 let authRateLimitTableReady = false;
 let authMfaTableReady = false;
 let authMfaSessionTableReady = false;
+let cachedEncryptionKeySource: string | null = null;
+let cachedEncryptionKey: CryptoKey | null = null;
+let encryptionKeyWarningShown = false;
+
+const parseEncryptionKeyBytes = (value: string): Uint8Array => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error('AUTH_ENCRYPTION_KEY is empty');
+  }
+
+  try {
+    const decoded = fromBase64Url(trimmed);
+    if (decoded.byteLength === 32) {
+      return decoded;
+    }
+  } catch {
+    // Fall through to raw-key handling.
+  }
+
+  const raw = textEncoder.encode(trimmed);
+  if (raw.byteLength === 32) {
+    return raw;
+  }
+
+  throw new Error('AUTH_ENCRYPTION_KEY must be 32 raw bytes/chars or a base64/base64url-encoded 32-byte key');
+};
+
+const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
+  const keySource = env.AUTH_ENCRYPTION_KEY?.trim() || '';
+  if (!keySource) {
+    if (env.ENVIRONMENT === 'production' && !encryptionKeyWarningShown) {
+      encryptionKeyWarningShown = true;
+      console.warn('AUTH_ENCRYPTION_KEY is not set; MFA secrets will remain stored in plaintext.');
+    }
+    return null;
+  }
+  if (cachedEncryptionKey && cachedEncryptionKeySource === keySource) {
+    return cachedEncryptionKey;
+  }
+  const keyBytes = parseEncryptionKeyBytes(keySource);
+  cachedEncryptionKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  cachedEncryptionKeySource = keySource;
+  return cachedEncryptionKey;
+};
+
+const requireProductionSecret = (
+  c: Context<AppBindings>,
+  key: keyof Pick<Env, 'AUTH_ENCRYPTION_KEY' | 'ADMIN_SETUP_TOKEN'>,
+  feature: string
+) => {
+  if (c.env.ENVIRONMENT !== 'production') return null;
+  if (typeof c.env[key] === 'string' && c.env[key]?.trim()) {
+    return null;
+  }
+  return c.json({ error: `Server misconfiguration: ${key} is required in production for ${feature}` }, 503);
+};
+
+const encryptSecret = async (env: Env, plaintext: string): Promise<string> => {
+  const key = await getEncryptionKey(env);
+  if (!key) return plaintext;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    textEncoder.encode(plaintext)
+  );
+  return `${ENCRYPTED_SECRET_PREFIX}:${toBase64Url(iv)}:${toBase64Url(cipher)}`;
+};
+
+const decryptSecret = async (env: Env, value: string | null | undefined): Promise<string | null> => {
+  if (!value) return null;
+  if (!value.startsWith(`${ENCRYPTED_SECRET_PREFIX}:`)) {
+    return value;
+  }
+  const parts = value.split(':');
+  if (parts.length !== 4) {
+    throw new Error('Invalid encrypted secret payload');
+  }
+  const key = await getEncryptionKey(env);
+  if (!key) {
+    throw new Error('AUTH_ENCRYPTION_KEY is required to decrypt stored secrets');
+  }
+  const iv = fromBase64Url(parts[2]);
+  const cipher = fromBase64Url(parts[3]);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    cipher
+  );
+  return new TextDecoder().decode(plaintext);
+};
+
+const migrateStoredTotpSecretIfNeeded = async (
+  db: D1Database,
+  env: Env,
+  userId: string,
+  value: string | null | undefined
+) => {
+  if (!value || isEncryptedValue(value) || !hasConfiguredEncryptionKey(env)) {
+    return;
+  }
+  const encrypted = await encryptSecret(env, value);
+  if (!encrypted || encrypted === value) return;
+  await db.prepare(
+    'UPDATE users SET mfa_totp_secret = ?, updated_at = ? WHERE id = ?'
+  ).bind(encrypted, new Date().toISOString(), userId).run();
+};
+
+const createSessionToken = () => randomBase64Url(SESSION_TOKEN_BYTES);
+
+const hashSessionToken = async (token: string) => `s1_${await sha256Base64Url(token)}`;
+
+const getSessionLookupIds = async (sessionToken: string) => {
+  const ids = new Set<string>([sessionToken]);
+  ids.add(await hashSessionToken(sessionToken));
+  return Array.from(ids);
+};
 
 const addSessionColumnIfMissing = async (
   db: D1Database,
@@ -635,7 +796,8 @@ const createSession = async (
   c: Context<AppBindings>,
   user: { id: string; username: string; role: UserRole }
 ) => {
-  const sessionId = crypto.randomUUID();
+  const sessionToken = createSessionToken();
+  const sessionId = await hashSessionToken(sessionToken);
   const now = new Date();
   const sessionTtlMs = user.role === 'admin' ? ADMIN_SESSION_TTL_MS : DEFAULT_SESSION_TTL_MS;
   const expiresAt = new Date(now.getTime() + sessionTtlMs);
@@ -664,7 +826,7 @@ const createSession = async (
   ).bind(...values).run();
 
   const isSecure = isSecureRequest(c.env);
-  setCookie(c, SESSION_COOKIE, sessionId, {
+  setCookie(c, SESSION_COOKIE, sessionToken, {
     httpOnly: true,
     path: '/',
     sameSite: isSecure ? 'None' : 'Lax',
@@ -672,7 +834,7 @@ const createSession = async (
     expires: expiresAt
   });
 
-  return { sessionId, expiresAt };
+  return { sessionId: sessionToken, expiresAt };
 };
 
 const createMfaChallenge = async (
@@ -805,20 +967,34 @@ const classifyClient = (userAgent?: string | null) => {
 };
 
 async function getSessionUser(db: D1Database, sessionId: string) {
+  const lookupIds = await getSessionLookupIds(sessionId);
   const now = new Date().toISOString();
   const row = await db.prepare(
-    `SELECT s.id as session_id, s.user_id as user_id, s.expires_at as expires_at,
+    `SELECT s.id as session_id, s.user_id as user_id, s.created_at as created_at, s.expires_at as expires_at,
+            s.last_seen_at as last_seen_at,
             u.username as username, u.role as role
      FROM sessions s
      JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.expires_at > ?`
-  ).bind(sessionId, now).first();
+     WHERE s.id IN (${lookupIds.map(() => '?').join(', ')}) AND s.expires_at > ?
+     ORDER BY s.created_at DESC
+     LIMIT 1`
+  ).bind(...lookupIds, now).first();
   if (!row) return null;
+  const role = normalizeRole((row as any).role);
+  const idleTtlMs = role === 'admin' ? ADMIN_IDLE_SESSION_TTL_MS : DEFAULT_IDLE_SESSION_TTL_MS;
+  const lastSeenRaw = ((row as any).last_seen_at as string | null) || ((row as any).created_at as string | null) || null;
+  if (lastSeenRaw) {
+    const lastSeenMs = Date.parse(lastSeenRaw);
+    if (Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs > idleTtlMs) {
+      await db.prepare('DELETE FROM sessions WHERE id = ?').bind((row as any).session_id as string).run();
+      return null;
+    }
+  }
   return {
     sessionId: (row as any).session_id as string,
     userId: (row as any).user_id as string,
     username: (row as any).username as string,
-    role: normalizeRole((row as any).role)
+    role
   };
 }
 
@@ -974,6 +1150,19 @@ export const requireCsrf: MiddlewareHandler<AppBindings> = async (c, next) => {
   return next();
 };
 
+const deleteSessionsByToken = async (db: D1Database, sessionToken: string) => {
+  const lookupIds = await getSessionLookupIds(sessionToken);
+  await db.prepare(
+    `DELETE FROM sessions WHERE id IN (${lookupIds.map(() => '?').join(', ')})`
+  ).bind(...lookupIds).run();
+};
+
+const matchesSessionToken = async (storedSessionId: string, sessionToken: string | null) => {
+  if (!sessionToken) return false;
+  if (storedSessionId === sessionToken) return true;
+  return storedSessionId === await hashSessionToken(sessionToken);
+};
+
 export function registerAuthRoutes(app: Hono<AppBindings>) {
   app.get('/api/auth/setup', async (c) => {
     const ready = await hasUsableEmailAccount(c.env.DB);
@@ -981,6 +1170,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/setup', async (c) => {
+    const productionSecretError = requireProductionSecret(c, 'ADMIN_SETUP_TOKEN', 'initial admin setup');
+    if (productionSecretError) {
+      return productionSecretError;
+    }
+
     const configuredToken = c.env.ADMIN_SETUP_TOKEN?.trim() || '';
     const requestToken = (c.req.header('x-setup-token') || '').trim();
     if (configuredToken && requestToken !== configuredToken) {
@@ -1132,11 +1326,22 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+    const totpEnabled = Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret);
+    if (userRole === 'admin' && !totpEnabled) {
+      await recordLoginAttempt(c, {
+        email,
+        success: false,
+        reason: 'admin_totp_required',
+        userId: (user as any).id as string,
+        role: userRole
+      });
+      return c.json({ error: 'Admin accounts require authenticator app MFA. Sign in from an existing admin session and enable TOTP first.' }, 403);
+    }
+
     const mfaSession = await createMfaSession(c, {
       userId: (user as any).id as string,
       email
     });
-    const totpEnabled = Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret);
     let emailChallengeId: string | null = null;
     let emailDelivered: boolean | null = null;
     let debugMfaCode: string | null = null;
@@ -1171,7 +1376,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       session_id: mfaSession.sessionId,
       email,
       masked_email: maskEmail(email),
-      methods: totpEnabled ? ['totp', 'email'] : ['email'],
+      methods: totpEnabled
+        ? (userRole === 'admin' ? ['totp'] : ['totp', 'email'])
+        : ['email'],
       preferred_method: totpEnabled ? 'totp' : 'email',
       email_challenge_id: emailChallengeId,
       delivered: emailDelivered,
@@ -1205,6 +1412,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'Invalid or expired MFA session' }, 400);
     }
+    if (normalizeRole((user as any).role) === 'admin') {
+      return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
+    }
 
     const emailFallback = await issueEmailFallbackChallenge(c, {
       userId: (mfaSession as any).user_id as string,
@@ -1228,6 +1438,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/mfa/verify-totp', async (c) => {
+    const productionSecretError = requireProductionSecret(c, 'AUTH_ENCRYPTION_KEY', 'TOTP verification');
+    if (productionSecretError) {
+      return productionSecretError;
+    }
+
     await ensureAuthMfaSessionTable(c.env.DB);
     const userSchema = await getUserSchemaSupport(c.env.DB);
 
@@ -1264,7 +1479,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Authenticator app MFA is not enabled' }, 400);
     }
 
-    const isValid = await verifyTotpCode((user as any).mfa_totp_secret as string, code);
+    const totpSecret = await decryptSecret(c.env, (user as any).mfa_totp_secret as string | null);
+    if (!totpSecret) {
+      return c.json({ error: 'Authenticator app MFA is not enabled' }, 400);
+    }
+
+    const isValid = await verifyTotpCode(totpSecret, code);
     if (!isValid) {
       const nextAttempts = attemptCount + 1;
       if (nextAttempts >= maxAttempts) {
@@ -1302,6 +1522,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+    await migrateStoredTotpSecretIfNeeded(
+      c.env.DB,
+      c.env,
+      (user as any).id as string,
+      (user as any).mfa_totp_secret as string | null
+    );
     await createSession(c, {
       id: (user as any).id as string,
       username: (user as any).username as string,
@@ -1416,6 +1642,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     ).bind((consumedChallenge as any).user_id as string).first();
     if (!user) {
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
+    }
+    if (normalizeRole((user as any).role) === 'admin') {
+      await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE user_id = ?').bind((consumedChallenge as any).user_id as string).run();
+      return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -1588,13 +1818,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       totp_enabled_at: userSchema.hasMfaTotpEnabledAt ? (((user as any).mfa_totp_enabled_at as string | null) ?? null) : null,
       pending_setup: Boolean(userSchema.hasMfaTotpPendingExpiresAt && (user as any).mfa_totp_pending_expires_at),
       pending_expires_at: userSchema.hasMfaTotpPendingExpiresAt ? (((user as any).mfa_totp_pending_expires_at as string | null) ?? null) : null,
-      email_fallback_enabled: true,
+      email_fallback_enabled: sessionUser.role !== 'admin',
       email,
       masked_email: maskEmail(email)
     });
   });
 
   app.post('/api/auth/mfa/totp/setup', async (c) => {
+    const productionSecretError = requireProductionSecret(c, 'AUTH_ENCRYPTION_KEY', 'TOTP setup');
+    if (productionSecretError) {
+      return productionSecretError;
+    }
+
     const sessionUser = c.get('sessionUser');
     if (!sessionUser) {
       return c.json({ error: 'Unauthorized' }, 401);
@@ -1616,11 +1851,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const secret = createTotpSecret();
     const expiresAt = new Date(Date.now() + MFA_TTL_MS).toISOString();
     const nowIso = new Date().toISOString();
+    const encryptedSecret = await encryptSecret(c.env, secret);
     await c.env.DB.prepare(
       `UPDATE users
        SET mfa_totp_pending_secret = ?, mfa_totp_pending_expires_at = ?, updated_at = ?
        WHERE id = ?`
-    ).bind(secret, expiresAt, nowIso, sessionUser.userId).run();
+    ).bind(encryptedSecret, expiresAt, nowIso, sessionUser.userId).run();
 
     await recordAuditLog(c, {
       action: 'mfa_totp_setup_start',
@@ -1642,6 +1878,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/mfa/totp/confirm', async (c) => {
+    const productionSecretError = requireProductionSecret(c, 'AUTH_ENCRYPTION_KEY', 'TOTP setup');
+    if (productionSecretError) {
+      return productionSecretError;
+    }
+
     const sessionUser = c.get('sessionUser');
     if (!sessionUser) {
       return c.json({ error: 'Unauthorized' }, 401);
@@ -1667,7 +1908,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const pendingSecret = ((user as any).mfa_totp_pending_secret as string | null) ?? null;
+    const pendingSecret = await decryptSecret(c.env, ((user as any).mfa_totp_pending_secret as string | null) ?? null);
     const pendingExpiresAt = ((user as any).mfa_totp_pending_expires_at as string | null) ?? null;
     if (!pendingSecret || !pendingExpiresAt || pendingExpiresAt <= new Date().toISOString()) {
       return c.json({ error: 'TOTP setup expired. Start setup again.' }, 400);
@@ -1680,11 +1921,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     const email = ((user as any).email as string | null) ?? ((user as any).username as string);
     const nowIso = new Date().toISOString();
+    const encryptedSecret = await encryptSecret(c.env, pendingSecret);
     await c.env.DB.prepare(
       `UPDATE users
        SET mfa_totp_secret = ?, mfa_totp_enabled_at = ?, mfa_totp_pending_secret = NULL, mfa_totp_pending_expires_at = NULL, updated_at = ?
        WHERE id = ?`
-    ).bind(pendingSecret, nowIso, nowIso, sessionUser.userId).run();
+    ).bind(encryptedSecret, nowIso, nowIso, sessionUser.userId).run();
 
     await recordAuditLog(c, {
       action: 'mfa_totp_enabled',
@@ -1702,7 +1944,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   app.post('/api/auth/logout', async (c) => {
     const sessionId = getSessionIdFromRequest(c);
     if (sessionId) {
-      await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
+      await deleteSessionsByToken(c.env.DB, sessionId);
     }
     clearSessionCookie(c);
     return c.json({ ok: true });
@@ -1748,7 +1990,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     ).bind(sessionUser.userId, nowIso).all();
 
     const currentSessionId = getSessionIdFromRequest(c);
-    return c.json(results.map((row) => {
+    const sessions = await Promise.all(results.map(async (row) => {
       const userAgent = schema.hasUserAgent ? ((row as any).user_agent as string | null) : null;
       const client = classifyClient(userAgent);
       return {
@@ -1762,9 +2004,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         browser: client.browser,
         platform: client.platform,
         device_label: client.deviceLabel,
-        current: currentSessionId ? (currentSessionId === (row as any).id) : false
+        current: await matchesSessionToken((row as any).id as string, currentSessionId)
       };
     }));
+    return c.json(sessions);
   });
 
   app.delete('/api/auth/sessions/:id', async (c) => {
@@ -1786,7 +2029,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(id).run();
     const currentSessionId = getSessionIdFromRequest(c);
-    if (currentSessionId && currentSessionId === id) {
+    const isCurrent = await matchesSessionToken(id, currentSessionId);
+    if (isCurrent) {
       clearSessionCookie(c);
     }
     await recordAuditLog(c, {
@@ -1796,10 +2040,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       summary: `撤銷 session ${id}`,
       details: {
         session_id: id,
-        current: Boolean(currentSessionId && currentSessionId === id)
+        current: isCurrent
       }
     });
-    return c.json({ ok: true, current: Boolean(currentSessionId && currentSessionId === id) });
+    return c.json({ ok: true, current: isCurrent });
   });
 
   app.post('/api/auth/sessions/revoke-others', async (c) => {
@@ -1813,9 +2057,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
+    const keepIds = await getSessionLookupIds(currentSessionId);
     const result = await c.env.DB.prepare(
-      'DELETE FROM sessions WHERE user_id = ? AND id != ?'
-    ).bind(sessionUser.userId, currentSessionId).run();
+      `DELETE FROM sessions
+       WHERE user_id = ?
+         AND id NOT IN (${keepIds.map(() => '?').join(', ')})`
+    ).bind(sessionUser.userId, ...keepIds).run();
     await recordAuditLog(c, {
       action: 'revoke_others',
       resourceType: 'sessions',
