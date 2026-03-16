@@ -162,6 +162,54 @@ type PendingRelationshipChoice = {
   suggestedType: RelationshipChoiceType;
 };
 
+type StoredViewport = {
+  x: number;
+  y: number;
+  zoom: number;
+};
+
+const normalizeViewport = (viewport: StoredViewport): StoredViewport => ({
+  x: Math.round(viewport.x * 100) / 100,
+  y: Math.round(viewport.y * 100) / 100,
+  zoom: Math.round(viewport.zoom * 1000) / 1000,
+});
+
+const sameViewport = (a: StoredViewport | null, b: StoredViewport) => (
+  Boolean(a)
+  && a!.x === b.x
+  && a!.y === b.y
+  && a!.zoom === b.zoom
+);
+
+const readStoredViewport = (storageKey: string): StoredViewport | null => {
+  try {
+    const hasPendingFocus = Boolean(
+      localStorage.getItem('clan.pendingFocus')
+      || localStorage.getItem('clan.pendingFocusPosition')
+    );
+    if (hasPendingFocus) {
+      localStorage.removeItem('clan.pendingViewport');
+      return null;
+    }
+    const raw = localStorage.getItem('clan.pendingViewport') || localStorage.getItem(storageKey);
+    if (!raw) return null;
+    return normalizeViewport(JSON.parse(raw) as StoredViewport);
+  } catch (error) {
+    console.warn('Failed to read stored viewport:', error);
+    localStorage.removeItem('clan.pendingViewport');
+    localStorage.removeItem(storageKey);
+    return null;
+  }
+};
+
+const clearStoredLastEditedId = () => {
+  try {
+    localStorage.removeItem('clan.lastEditedId');
+  } catch (error) {
+    console.warn('Failed to clear last edited id:', error);
+  }
+};
+
 type ClanGraphProps = {
   username: string | null;
   readOnly?: boolean;
@@ -292,6 +340,9 @@ export function ClanGraph({
   const toastTimer = useRef<number | null>(null);
   const screenshotCountdownTimer = useRef<number | null>(null);
   const screenshotToastClearTimer = useRef<number | null>(null);
+  const lastPersistedViewportRef = useRef<StoredViewport | null>(null);
+  const initialViewportRestoreDoneRef = useRef(false);
+  const viewportPersistenceReadyRef = useRef(false);
   const expandRelayoutTimer = useRef<number | null>(null);
   const avatarTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const avatarPreviewRequestRef = useRef(0);
@@ -299,11 +350,28 @@ export function ClanGraph({
   const canUndo = undoStack.length > 0;
   const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
   const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
+  const viewportStorageKey = 'clan.viewport';
+  const [initialViewport] = useState<StoredViewport | null>(() => readStoredViewport(viewportStorageKey));
   const reportIssuePerson = useMemo(() => (
     reportIssuePersonId
       ? graphData?.nodes.find((person) => person.id === reportIssuePersonId) ?? null
       : null
   ), [graphData, reportIssuePersonId]);
+  const hasStartupNavigationState = useCallback(() => {
+    try {
+      return Boolean(
+        localStorage.getItem('clan.pendingFocus')
+        || localStorage.getItem('clan.pendingFocusPosition')
+        || localStorage.getItem('clan.pendingCenterId')
+        || localStorage.getItem('clan.lastEditedId')
+        || localStorage.getItem('clan.pendingViewport')
+        || localStorage.getItem(viewportStorageKey)
+      );
+    } catch (error) {
+      console.warn('Failed to inspect startup navigation state:', error);
+      return false;
+    }
+  }, [viewportStorageKey]);
 
   useEffect(() => {
     avatarBlobMap.current = avatarBlobs;
@@ -1703,15 +1771,26 @@ export function ClanGraph({
     };
   }, [getFocusPosition]);
 
+  const persistViewportState = useCallback((viewport: StoredViewport, options?: { pending?: boolean }) => {
+    const normalizedViewport = normalizeViewport(viewport);
+    try {
+      if (!sameViewport(lastPersistedViewportRef.current, normalizedViewport)) {
+        localStorage.setItem(viewportStorageKey, JSON.stringify(normalizedViewport));
+        lastPersistedViewportRef.current = normalizedViewport;
+      }
+      if (options?.pending) {
+        localStorage.setItem('clan.pendingViewport', JSON.stringify(normalizedViewport));
+      }
+    } catch (error) {
+      console.warn('Failed to persist viewport:', error);
+    }
+  }, [viewportStorageKey]);
+
   const persistPendingViewport = useCallback((id: string, zoom = 1.0) => {
     const viewport = getViewportForNode(id, zoom);
     if (!viewport) return;
-    try {
-      localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
-    } catch (error) {
-      console.warn('Failed to persist pending viewport:', error);
-    }
-  }, [getViewportForNode]);
+    persistViewportState(viewport, { pending: true });
+  }, [getViewportForNode, persistViewportState]);
 
   const revealCollapsedNodeBySearch = useCallback((targetId: string) => {
     let changed = false;
@@ -1844,13 +1923,14 @@ export function ClanGraph({
       } else {
         instance.setCenter?.(focusPosition.x, focusPosition.y, { zoom });
       }
+      persistViewportState(viewport);
     };
     requestAnimationFrame(() => {
       applyFocus();
       window.setTimeout(applyFocus, 100);
     });
     return true;
-  }, [getViewportForNode, getFocusPosition, reactFlowInstance]);
+  }, [getViewportForNode, getFocusPosition, reactFlowInstance, persistViewportState]);
 
   const deleteRelationshipWithFocus = useCallback(async (edgeId: string) => {
     const focusPosition = getRelationshipFocusPosition(edgeId);
@@ -1937,8 +2017,9 @@ export function ClanGraph({
   useEffect(() => {
     if (!graphData || !reactFlowInstance || initialAutoFocusDoneRef.current) return;
     initialAutoFocusDoneRef.current = true;
+    if (hasStartupNavigationState()) return;
     focusMe({ highlight: false, syncCenter: false });
-  }, [graphData, reactFlowInstance, focusMe]);
+  }, [graphData, reactFlowInstance, focusMe, hasStartupNavigationState]);
 
   const handleDeletePerson = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -2437,25 +2518,21 @@ export function ClanGraph({
   }, [nodes]);
 
   useEffect(() => {
-    if (!reactFlowInstance) return;
-    try {
-      const hasPendingFocus = Boolean(localStorage.getItem('clan.pendingFocus') || localStorage.getItem('clan.pendingFocusPosition'));
-      if (hasPendingFocus) {
+    if (initialViewportRestoreDoneRef.current) return;
+    initialViewportRestoreDoneRef.current = true;
+    if (initialViewport) {
+      lastPersistedViewportRef.current = initialViewport;
+      clearStoredLastEditedId();
+      try {
         localStorage.removeItem('clan.pendingViewport');
-        return;
+      } catch (error) {
+        console.warn('Failed to clear pending viewport after initialization:', error);
       }
-      const raw = localStorage.getItem('clan.pendingViewport');
-      if (!raw) return;
-      const viewport = JSON.parse(raw) as { x: number; y: number; zoom: number };
-      if (reactFlowInstance.setViewport) {
-        reactFlowInstance.setViewport(viewport);
-      }
-      localStorage.removeItem('clan.pendingViewport');
-    } catch (error) {
-      console.warn('Failed to restore viewport:', error);
-      localStorage.removeItem('clan.pendingViewport');
     }
-  }, [reactFlowInstance]);
+    requestAnimationFrame(() => {
+      viewportPersistenceReadyRef.current = true;
+    });
+  }, [initialViewport]);
 
   useEffect(() => {
     try {
@@ -2509,20 +2586,33 @@ export function ClanGraph({
       || graphData?.nodes.find(node => node.id === pendingCenterId)?.metadata?.position;
     if (position && reactFlowInstance.setCenter) {
       requestAnimationFrame(() => {
-        reactFlowInstance.setCenter(position.x, position.y, { zoom: reactFlowInstance.getZoom?.() });
+        const zoom = reactFlowInstance.getZoom?.() ?? 1;
+        const viewport = getViewportForNode(pendingCenterId, zoom);
+        reactFlowInstance.setCenter(position.x, position.y, { zoom });
+        if (viewport) {
+          persistViewportState(viewport);
+        }
         setPendingCenterId(null);
       });
     }
-  }, [pendingCenterId, pendingFocus, pendingFocusPosition, reactFlowInstance, nodes, graphData]);
+  }, [pendingCenterId, pendingFocus, pendingFocusPosition, reactFlowInstance, nodes, graphData, getViewportForNode, persistViewportState]);
 
   useEffect(() => {
     if (!pendingFocusPosition || !reactFlowInstance?.setCenter) return;
     reactFlowInstance.setCenter(pendingFocusPosition.x, pendingFocusPosition.y, { zoom: pendingFocusPosition.zoom });
+    const bounds = flowWrapperRef.current?.getBoundingClientRect();
+    const width = bounds?.width || window.innerWidth;
+    const height = bounds?.height || window.innerHeight;
+    persistViewportState({
+      x: width / 2 - pendingFocusPosition.x * pendingFocusPosition.zoom,
+      y: height / 2 - pendingFocusPosition.y * pendingFocusPosition.zoom,
+      zoom: pendingFocusPosition.zoom,
+    });
     localStorage.removeItem('clan.pendingFocusPosition');
     localStorage.removeItem('clan.pendingFocus');
     setPendingFocus(null);
     setPendingFocusPosition(null);
-  }, [pendingFocusPosition, reactFlowInstance]);
+  }, [pendingFocusPosition, reactFlowInstance, persistViewportState]);
 
   useEffect(() => {
     if (!graphData || !reactFlowInstance?.setCenter) return;
@@ -2556,12 +2646,14 @@ export function ClanGraph({
             } else {
               reactFlowInstance.setCenter(parsed.x!, parsed.y!, { zoom });
             }
+            persistViewportState(viewport);
             requestAnimationFrame(() => {
               if (reactFlowInstance.setViewport) {
                 reactFlowInstance.setViewport(viewport);
               } else {
                 reactFlowInstance.setCenter(parsed.x!, parsed.y!, { zoom });
               }
+              persistViewportState(viewport);
             });
             handled = true;
           }
@@ -2596,7 +2688,7 @@ export function ClanGraph({
         pendingFocusRetryRef.current = null;
       }
     };
-  }, [graphData, reactFlowInstance, focusNodeById]);
+  }, [graphData, reactFlowInstance, focusNodeById, persistViewportState]);
 
   useEffect(() => {
     if (!pendingFocus || !reactFlowInstance) return;
@@ -2608,18 +2700,32 @@ export function ClanGraph({
     } else if (reactFlowInstance.setCenter) {
       reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: pendingFocus.zoom });
     }
+    persistViewportState(viewport);
     localStorage.removeItem('clan.pendingFocus');
     setPendingFocus(null);
-  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition, nodes]);
+  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition, nodes, persistViewportState]);
 
   useEffect(() => {
     try {
+      if (initialViewport) {
+        clearStoredLastEditedId();
+        return;
+      }
+      const hasExplicitStartupFocus = Boolean(
+        localStorage.getItem('clan.pendingFocus')
+        || localStorage.getItem('clan.pendingFocusPosition')
+        || localStorage.getItem('clan.pendingCenterId')
+      );
+      if (hasExplicitStartupFocus) {
+        clearStoredLastEditedId();
+        return;
+      }
       const editedId = localStorage.getItem('clan.lastEditedId');
       if (editedId) setLastEditedId(editedId);
     } catch (error) {
       console.warn('Failed to restore last edited id:', error);
     }
-  }, []);
+  }, [initialViewport]);
 
   useEffect(() => {
     if (!pendingFocus || !reactFlowInstance) return;
@@ -2634,6 +2740,7 @@ export function ClanGraph({
         } else if (reactFlowInstance.setCenter) {
           reactFlowInstance.setCenter(focusPosition.x, focusPosition.y, { zoom: pendingFocus.zoom });
         }
+        persistViewportState(viewport);
         localStorage.removeItem('clan.pendingFocus');
         setPendingFocus(null);
         return;
@@ -2647,7 +2754,7 @@ export function ClanGraph({
     return () => {
       attempts = 999;
     };
-  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition]);
+  }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition, persistViewportState]);
 
   useEffect(() => {
     if (!lastEditedId) return;
@@ -2664,9 +2771,8 @@ export function ClanGraph({
           window.clearInterval(lastEditedFocusTimer.current);
           lastEditedFocusTimer.current = null;
         }
-        if (focused) {
-          setLastEditedId(null);
-        }
+        clearStoredLastEditedId();
+        setLastEditedId(null);
       }
     }, 150);
   }, [lastEditedId, focusNodeById, graphData, reactFlowInstance]);
@@ -2852,7 +2958,7 @@ export function ClanGraph({
                   y: height / 2 - focusPosition.y * zoom,
                   zoom
                 };
-                localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+                persistViewportState(viewport, { pending: true });
               }
               localStorage.removeItem('clan.pendingFocus');
               localStorage.removeItem('clan.pendingFocusPosition');
@@ -3185,12 +3291,17 @@ export function ClanGraph({
           edges={edges}
           nodeTypes={nodeTypes}
           proOptions={{ hideAttribution: true }}
+          defaultViewport={initialViewport ?? undefined}
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={allowNodeConnecting ? onConnect : undefined}
           onConnectStart={allowNodeConnecting ? onConnectStart : undefined}
           onConnectEnd={allowNodeConnecting ? onConnectEnd : undefined}
+          onMoveEnd={(_event, viewport) => {
+            if (!viewportPersistenceReadyRef.current) return;
+            persistViewportState(viewport);
+          }}
           onNodeDragStart={allowNodeDragging ? onNodeDragStart : undefined}
           onNodeDrag={allowNodeDragging ? onNodeDrag : undefined}
           onNodeDragStop={allowNodeDragging ? onNodeDragStop : undefined}
@@ -3666,14 +3777,14 @@ export function ClanGraph({
               if (avatarOperationApplied) {
                 await fetchGraph();
                 setEditingPersonId(null);
-                showToast(t('graph.saved'), 'success');
-                const viewport = getViewportForNode(id, 1.0);
-                if (viewport && reactFlowInstance?.setViewport) {
-                  reactFlowInstance.setViewport(viewport);
-                  localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
-                }
-                focusNodeById(id, 1.0);
-                return;
+              showToast(t('graph.saved'), 'success');
+              const viewport = getViewportForNode(id, 1.0);
+              if (viewport && reactFlowInstance?.setViewport) {
+                reactFlowInstance.setViewport(viewport);
+                persistViewportState(viewport, { pending: true });
+              }
+              focusNodeById(id, 1.0);
+              return;
               }
               setEditingPersonId(null);
               showToast(t('graph.noChanges'), 'warning');
@@ -3694,7 +3805,7 @@ export function ClanGraph({
               const viewport = getViewportForNode(id, 1.0);
               if (viewport && reactFlowInstance?.setViewport) {
                 reactFlowInstance.setViewport(viewport);
-                localStorage.setItem('clan.pendingViewport', JSON.stringify(viewport));
+                persistViewportState(viewport, { pending: true });
               }
               focusNodeById(id, 1.0);
             } catch (error) {

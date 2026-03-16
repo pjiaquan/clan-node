@@ -50,6 +50,20 @@ const getInitialTheme = (): ThemeMode => {
   return 'light';
 };
 
+const hasStoredViewportState = () => {
+  try {
+    return Boolean(
+      localStorage.getItem('clan.viewport')
+      || localStorage.getItem('clan.pendingViewport')
+      || localStorage.getItem('clan.pendingFocus')
+      || localStorage.getItem('clan.pendingFocusPosition')
+    );
+  } catch (error) {
+    console.warn('Failed to inspect stored viewport state:', error);
+    return false;
+  }
+};
+
 function App() {
   const { isZh, toggleLanguage, t } = useI18n();
   const [authChecked, setAuthChecked] = useState(false);
@@ -166,7 +180,7 @@ function App() {
         try {
           const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
           const storedCenter = localStorage.getItem('clan.centerId');
-          if (storedCenter && !hasFocused) {
+          if (storedCenter && !hasFocused && !hasStoredViewportState()) {
             localStorage.setItem('clan.pendingFocus', JSON.stringify({ id: storedCenter, zoom: 1 }));
             sessionStorage.setItem('clan.focusedOnLogin', '1');
           }
@@ -215,7 +229,7 @@ function App() {
       try {
         const hasFocused = sessionStorage.getItem('clan.focusedOnLogin');
         const storedCenter = localStorage.getItem('clan.centerId');
-        if (storedCenter && !hasFocused) {
+        if (storedCenter && !hasFocused && !hasStoredViewportState()) {
           localStorage.setItem('clan.pendingFocus', JSON.stringify({ id: storedCenter, zoom: 1 }));
           sessionStorage.setItem('clan.focusedOnLogin', '1');
         }

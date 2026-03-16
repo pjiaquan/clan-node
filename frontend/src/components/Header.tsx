@@ -4,16 +4,232 @@ import { createPersonSearchMatcher, type SearchablePerson } from '../utils/perso
 import type { RelationshipTypeKey } from '../types';
 import { useI18n } from '../i18n';
 
-const ActionLabel: React.FC<{ text: string; badge?: React.ReactNode }> = ({ text, badge }) => (
+type ActionIconName =
+  | 'sessions'
+  | 'settings'
+  | 'clearDim'
+  | 'expand'
+  | 'showHidden'
+  | 'screenshot'
+  | 'undo'
+  | 'addMember'
+  | 'myLocation'
+  | 'relationship'
+  | 'center'
+  | 'spouse'
+  | 'exSpouse'
+  | 'parentChild'
+  | 'sibling'
+  | 'inLaw'
+  | 'reverse'
+  | 'delete'
+  | 'createAccount'
+  | 'accounts'
+  | 'notifications'
+  | 'audit'
+  | 'labels'
+  | 'language'
+  | 'themeLight'
+  | 'themeDark'
+  | 'logout';
+
+const ActionIcon: React.FC<{ name: ActionIconName }> = ({ name }) => {
+  switch (name) {
+    case 'sessions':
+      return (
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="5" width="12" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M7 19h4M18 9h3M18 13h3M18 17h3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'settings':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M4 7h7M15 7h5M9 7a2 2 0 1 0 4 0a2 2 0 0 0-4 0ZM4 17h3M11 17h9M7 17a2 2 0 1 0 4 0a2 2 0 0 0-4 0Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'clearDim':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M4 12s3-5 8-5s8 5 8 5s-3 5-8 5s-8-5-8-5Z" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M3 3l18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'expand':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M9 3H3v6M15 3h6v6M21 15v6h-6M9 21H3v-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 9l6-6M21 9l-6-6M3 15l6 6M21 15l-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'showHidden':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M2.5 12s3.5-6 9.5-6s9.5 6 9.5 6s-3.5 6-9.5 6s-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      );
+    case 'screenshot':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M8 6l1.5-2h5L16 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      );
+    case 'undo':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M9 8H4V3M4 8l5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M5 8h8a6 6 0 1 1 0 12H8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'addMember':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5M18 8v6M15 11h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'myLocation':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'relationship':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M9 8.5a3.5 3.5 0 0 1 5 0l1 1a3.5 3.5 0 0 1 0 5l-1.5 1.5a3.5 3.5 0 0 1-5 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M15 15.5a3.5 3.5 0 0 1-5 0l-1-1a3.5 3.5 0 0 1 0-5L10.5 8a3.5 3.5 0 0 1 5 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'center':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M12 4v3M12 17v3M4 12h3M17 12h3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3 3" />
+        </svg>
+      );
+    case 'spouse':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M12 20s-6-3.8-8-8.1C2.7 9.3 4.2 6 7.5 6c1.9 0 3.2 1 4.5 2.5C13.3 7 14.6 6 16.5 6C19.8 6 21.3 9.3 20 11.9C18 16.2 12 20 12 20Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'exSpouse':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M12 20s-6-3.8-8-8.1C2.7 9.3 4.2 6 7.5 6c1.9 0 3.2 1 4.5 2.5C13.3 7 14.6 6 16.5 6C19.8 6 21.3 9.3 20 11.9C18 16.2 12 20 12 20Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'parentChild':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="5.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="7" cy="18.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="17" cy="18.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 8v4M7 16v-2h10v2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'sibling':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="8" cy="8" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="16" cy="8" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M8 10.5v3.5M16 10.5v3.5M8 14h8M5 19c0-2.2 1.8-4 4-4M15 15c2.2 0 4 1.8 4 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'inLaw':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M7 8.5a3.5 3.5 0 0 1 5 0l.8.8M17 15.5a3.5 3.5 0 0 1-5 0l-.8-.8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M9.5 14.5l5-5M13.5 16.5l4-4M6.5 10.5l4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'reverse':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M7 7h11l-3-3M17 17H6l3 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'delete':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M4 7h16M9 7V5h6v2M7 7l1 12h8l1-12M10 11v5M14 11v5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'createAccount':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5M18 8v6M15 11h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'accounts':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="17" cy="10" r="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M3.5 19c0-2.8 2.2-5 5-5s5 2.2 5 5M14 19c0-1.9 1.6-3.5 3.5-3.5S21 17.1 21 19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'notifications':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4l2-2Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'audit':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M7 4h10l3 3v13H7z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M17 4v4h4M10 12h6M10 16h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'labels':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M4 12l8-8h7l1 1v7l-8 8L4 12Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <circle cx="15.5" cy="8.5" r="1.25" fill="currentColor" />
+        </svg>
+      );
+    case 'language':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M4 6h10M9 6c0 6-2 10-5 12M7 12c1.2 1.8 2.8 3.4 5 4.8M14 8h6M17 8v10M14.5 15h5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'themeLight':
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'themeDark':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M15 4a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 1 1 15 4Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'logout':
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M18 12H9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+  }
+};
+
+const ActionLabel: React.FC<{ text: string; icon: ActionIconName; badge?: React.ReactNode }> = ({ text, icon, badge }) => (
   <>
     <span className="header-action-main">
       <span className="header-action-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24">
-          <path d="M8 7h11M8 12h11M8 17h11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          <circle cx="5" cy="7" r="1.2" fill="currentColor" />
-          <circle cx="5" cy="12" r="1.2" fill="currentColor" />
-          <circle cx="5" cy="17" r="1.2" fill="currentColor" />
-        </svg>
+        <ActionIcon name={icon} />
       </span>
       <span className="header-action-text">{text}</span>
     </span>
@@ -321,7 +537,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.sessionManagement')} />
+                  <ActionLabel text={t('header.sessionManagement')} icon="sessions" />
                 </button>
               )}
               {onOpenSettings && (
@@ -333,7 +549,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.graphSettings')} />
+                  <ActionLabel text={t('header.graphSettings')} icon="settings" />
                 </button>
               )}
               <button
@@ -345,7 +561,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasActiveDimming}
               >
-                <ActionLabel text={t('header.clearAllDimming')} />
+                <ActionLabel text={t('header.clearAllDimming')} icon="clearDim" />
               </button>
               <button
                 type="button"
@@ -356,7 +572,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasCollapsedNodes}
               >
-                <ActionLabel text={t('header.expandAllCollapsed')} />
+                <ActionLabel text={t('header.expandAllCollapsed')} icon="expand" />
               </button>
               <button
                 type="button"
@@ -367,7 +583,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasHiddenNodes}
               >
-                <ActionLabel text={t('header.showAllHiddenNodes')} />
+                <ActionLabel text={t('header.showAllHiddenNodes')} icon="showHidden" />
               </button>
               <button
                 type="button"
@@ -378,7 +594,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={screenshotBusy}
               >
-                <ActionLabel text={t('header.takeScreenshot')} />
+                <ActionLabel text={t('header.takeScreenshot')} icon="screenshot" />
               </button>
               <button
                 type="button"
@@ -389,7 +605,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!canUndo || editDisabled}
               >
-                <ActionLabel text={t('header.undo')} />
+                <ActionLabel text={t('header.undo')} icon="undo" />
               </button>
               <button
                 type="button"
@@ -400,7 +616,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={editDisabled}
               >
-                <ActionLabel text={t('header.addMember')} />
+                <ActionLabel text={t('header.addMember')} icon="addMember" />
               </button>
               <button
                 type="button"
@@ -410,7 +626,7 @@ export const Header: React.FC<HeaderProps> = ({
                   closeMobileMenu();
                 }}
               >
-                <ActionLabel text={t('header.myLocation')} />
+                <ActionLabel text={t('header.myLocation')} icon="myLocation" />
               </button>
               {selectedNode && (
                 <>
@@ -423,7 +639,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={linkMode ? t('header.selectTarget') : t('header.createRelationship')} />
+                    <ActionLabel text={linkMode ? t('header.selectTarget') : t('header.createRelationship')} icon="relationship" />
                   </button>
                   <button
                     type="button"
@@ -433,7 +649,7 @@ export const Header: React.FC<HeaderProps> = ({
                       closeMobileMenu();
                     }}
                   >
-                    <ActionLabel text={t('header.setCenter')} />
+                    <ActionLabel text={t('header.setCenter')} icon="center" />
                   </button>
                 </>
               )}
@@ -448,7 +664,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={spouseToggleLabel} />
+                    <ActionLabel text={spouseToggleLabel} icon={spouseToggleType === 'spouse' ? 'spouse' : 'exSpouse'} />
                   </button>
                   <button
                     type="button"
@@ -459,7 +675,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={parentChildLabel} />
+                    <ActionLabel text={parentChildLabel} icon="parentChild" />
                   </button>
                   <button
                     type="button"
@@ -470,7 +686,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={siblingLabel} />
+                    <ActionLabel text={siblingLabel} icon="sibling" />
                   </button>
                   <button
                     type="button"
@@ -481,7 +697,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={inLawLabel} />
+                    <ActionLabel text={inLawLabel} icon="inLaw" />
                   </button>
                   <button
                     type="button"
@@ -492,7 +708,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={t('header.reverseDirection')} />
+                    <ActionLabel text={t('header.reverseDirection')} icon="reverse" />
                   </button>
                   <button
                     type="button"
@@ -503,7 +719,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     disabled={editDisabled}
                   >
-                    <ActionLabel text={t('header.deleteRelationship')} />
+                    <ActionLabel text={t('header.deleteRelationship')} icon="delete" />
                   </button>
                 </>
               )}
@@ -516,7 +732,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.createAccount')} />
+                  <ActionLabel text={t('header.createAccount')} icon="createAccount" />
                 </button>
               )}
               {isAdmin && onManageUsers && (
@@ -528,7 +744,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.accountManagement')} />
+                  <ActionLabel text={t('header.accountManagement')} icon="accounts" />
                 </button>
               )}
               {isAdmin && onManageNotifications && (
@@ -542,6 +758,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <ActionLabel
                     text={t('header.notificationManagement')}
+                    icon="notifications"
                     badge={hasPendingNotifications ? <span className="header-notice-badge">{pendingLabel}</span> : undefined}
                   />
                 </button>
@@ -555,7 +772,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.auditLogs')} />
+                  <ActionLabel text={t('header.auditLogs')} icon="audit" />
                 </button>
               )}
               {isAdmin && onManageRelationshipNames && (
@@ -567,7 +784,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={t('header.relationshipNameManagement')} />
+                  <ActionLabel text={t('header.relationshipNameManagement')} icon="labels" />
                 </button>
               )}
               <button
@@ -578,7 +795,7 @@ export const Header: React.FC<HeaderProps> = ({
                   closeMobileMenu();
                 }}
               >
-                <ActionLabel text={t('header.switchLanguage')} />
+                <ActionLabel text={t('header.switchLanguage')} icon="language" />
               </button>
               {onToggleTheme && (
                 <button
@@ -589,7 +806,7 @@ export const Header: React.FC<HeaderProps> = ({
                     closeMobileMenu();
                   }}
                 >
-                  <ActionLabel text={themeToggleLabel} />
+                  <ActionLabel text={themeToggleLabel} icon={themeMode === 'dark' ? 'themeLight' : 'themeDark'} />
                 </button>
               )}
               <button
@@ -600,7 +817,7 @@ export const Header: React.FC<HeaderProps> = ({
                   closeMobileMenu();
                 }}
               >
-                <ActionLabel text={t('common.logout')} />
+                <ActionLabel text={t('common.logout')} icon="logout" />
               </button>
             </div>
           )}
@@ -649,7 +866,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={linkMode ? t('header.selectTarget') : t('header.createRelationship')} />
+                      <ActionLabel text={linkMode ? t('header.selectTarget') : t('header.createRelationship')} icon="relationship" />
                     </button>
                     <button
                       type="button"
@@ -659,7 +876,7 @@ export const Header: React.FC<HeaderProps> = ({
                         closeActionMenu();
                       }}
                     >
-                      <ActionLabel text={t('header.setCenter')} />
+                      <ActionLabel text={t('header.setCenter')} icon="center" />
                     </button>
                   </>
                 )}
@@ -674,7 +891,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={spouseToggleLabel} />
+                      <ActionLabel text={spouseToggleLabel} icon={spouseToggleType === 'spouse' ? 'spouse' : 'exSpouse'} />
                     </button>
                     <button
                       type="button"
@@ -685,7 +902,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={parentChildLabel} />
+                      <ActionLabel text={parentChildLabel} icon="parentChild" />
                     </button>
                     <button
                       type="button"
@@ -696,7 +913,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={siblingLabel} />
+                      <ActionLabel text={siblingLabel} icon="sibling" />
                     </button>
                     <button
                       type="button"
@@ -707,7 +924,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={inLawLabel} />
+                      <ActionLabel text={inLawLabel} icon="inLaw" />
                     </button>
                     <button
                       type="button"
@@ -718,7 +935,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={t('header.reverseDirection')} />
+                      <ActionLabel text={t('header.reverseDirection')} icon="reverse" />
                     </button>
                     <button
                       type="button"
@@ -729,7 +946,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       disabled={editDisabled}
                     >
-                      <ActionLabel text={t('header.deleteRelationship')} />
+                      <ActionLabel text={t('header.deleteRelationship')} icon="delete" />
                     </button>
                   </>
                 )}
@@ -769,7 +986,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.sessionManagement')} />
+                  <ActionLabel text={t('header.sessionManagement')} icon="sessions" />
                 </button>
               )}
               {onOpenSettings && (
@@ -781,7 +998,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.graphSettings')} />
+                  <ActionLabel text={t('header.graphSettings')} icon="settings" />
                 </button>
               )}
               <button
@@ -792,7 +1009,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDesktopMenuOpen(false);
                 }}
               >
-                <ActionLabel text={t('header.myLocation')} />
+                <ActionLabel text={t('header.myLocation')} icon="myLocation" />
               </button>
               <button
                 type="button"
@@ -803,7 +1020,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!canUndo || editDisabled}
               >
-                <ActionLabel text={t('header.undo')} />
+                <ActionLabel text={t('header.undo')} icon="undo" />
               </button>
               <button
                 type="button"
@@ -814,7 +1031,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasActiveDimming}
               >
-                <ActionLabel text={t('header.clearAllDimming')} />
+                <ActionLabel text={t('header.clearAllDimming')} icon="clearDim" />
               </button>
               <button
                 type="button"
@@ -825,7 +1042,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasCollapsedNodes}
               >
-                <ActionLabel text={t('header.expandAllCollapsed')} />
+                <ActionLabel text={t('header.expandAllCollapsed')} icon="expand" />
               </button>
               <button
                 type="button"
@@ -836,7 +1053,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={!hasHiddenNodes}
               >
-                <ActionLabel text={t('header.showAllHiddenNodes')} />
+                <ActionLabel text={t('header.showAllHiddenNodes')} icon="showHidden" />
               </button>
               <button
                 type="button"
@@ -847,7 +1064,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 disabled={screenshotBusy}
               >
-                <ActionLabel text={t('header.takeScreenshot')} />
+                <ActionLabel text={t('header.takeScreenshot')} icon="screenshot" />
               </button>
               {isAdmin && onCreateUser && (
                 <button
@@ -858,7 +1075,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.createAccount')} />
+                  <ActionLabel text={t('header.createAccount')} icon="createAccount" />
                 </button>
               )}
               {isAdmin && onManageUsers && (
@@ -870,7 +1087,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.accountManagement')} />
+                  <ActionLabel text={t('header.accountManagement')} icon="accounts" />
                 </button>
               )}
               {isAdmin && onManageNotifications && (
@@ -884,6 +1101,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <ActionLabel
                     text={t('header.notificationManagement')}
+                    icon="notifications"
                     badge={hasPendingNotifications ? <span className="header-notice-badge">{pendingLabel}</span> : undefined}
                   />
                 </button>
@@ -897,7 +1115,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.auditLogs')} />
+                  <ActionLabel text={t('header.auditLogs')} icon="audit" />
                 </button>
               )}
               {isAdmin && onManageRelationshipNames && (
@@ -909,7 +1127,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={t('header.relationshipNameManagement')} />
+                  <ActionLabel text={t('header.relationshipNameManagement')} icon="labels" />
                 </button>
               )}
               <button
@@ -920,7 +1138,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDesktopMenuOpen(false);
                 }}
               >
-                <ActionLabel text={t('header.switchLanguage')} />
+                <ActionLabel text={t('header.switchLanguage')} icon="language" />
               </button>
               {onToggleTheme && (
                 <button
@@ -931,7 +1149,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setDesktopMenuOpen(false);
                   }}
                 >
-                  <ActionLabel text={themeToggleLabel} />
+                  <ActionLabel text={themeToggleLabel} icon={themeMode === 'dark' ? 'themeLight' : 'themeDark'} />
                 </button>
               )}
               <button
@@ -942,7 +1160,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDesktopMenuOpen(false);
                 }}
               >
-                <ActionLabel text={t('common.logout')} />
+                <ActionLabel text={t('common.logout')} icon="logout" />
               </button>
             </div>
           )}
