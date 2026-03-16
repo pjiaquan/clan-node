@@ -28,6 +28,10 @@ interface HeaderProps {
   hasActiveDimming: boolean;
   onExpandAllCollapsed: () => void;
   hasCollapsedNodes: boolean;
+  onShowAllHiddenNodes: () => void;
+  hasHiddenNodes: boolean;
+  onCaptureScreenshot: () => void;
+  screenshotBusy: boolean;
   selectedNode: string | null;
   selectedEdge: string | null;
   selectedEdgeType?: string | null;
@@ -65,6 +69,10 @@ export const Header: React.FC<HeaderProps> = ({
   hasActiveDimming,
   onExpandAllCollapsed,
   hasCollapsedNodes,
+  onShowAllHiddenNodes,
+  hasHiddenNodes,
+  onCaptureScreenshot,
+  screenshotBusy,
   selectedNode,
   selectedEdge,
   selectedEdgeType,
@@ -349,6 +357,28 @@ export const Header: React.FC<HeaderProps> = ({
                 disabled={!hasCollapsedNodes}
               >
                 <ActionLabel text={t('header.expandAllCollapsed')} />
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onShowAllHiddenNodes();
+                  closeMobileMenu();
+                }}
+                disabled={!hasHiddenNodes}
+              >
+                <ActionLabel text={t('header.showAllHiddenNodes')} />
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onCaptureScreenshot();
+                  closeMobileMenu();
+                }}
+                disabled={screenshotBusy}
+              >
+                <ActionLabel text={t('header.takeScreenshot')} />
               </button>
               <button
                 type="button"
@@ -796,6 +826,28 @@ export const Header: React.FC<HeaderProps> = ({
                 disabled={!hasCollapsedNodes}
               >
                 <ActionLabel text={t('header.expandAllCollapsed')} />
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onShowAllHiddenNodes();
+                  setDesktopMenuOpen(false);
+                }}
+                disabled={!hasHiddenNodes}
+              >
+                <ActionLabel text={t('header.showAllHiddenNodes')} />
+              </button>
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onCaptureScreenshot();
+                  setDesktopMenuOpen(false);
+                }}
+                disabled={screenshotBusy}
+              >
+                <ActionLabel text={t('header.takeScreenshot')} />
               </button>
               {isAdmin && onCreateUser && (
                 <button

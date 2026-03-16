@@ -21,6 +21,7 @@ interface ContextMenuProps {
   onToggleDimSingle: (id: string) => void;
   onToggleDimRelatives: (id: string) => void;
   onToggleDimNonRelatives: (id: string) => void;
+  onHideNode: (id: string) => void;
   onToggleCollapseMaternal: (id: string) => void;
   onToggleCollapsePaternal: (id: string) => void;
   onToggleCollapseChildren: (id: string) => void;
@@ -58,6 +59,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onToggleDimSingle,
   onToggleDimRelatives,
   onToggleDimNonRelatives,
+  onHideNode,
   onToggleCollapseMaternal,
   onToggleCollapsePaternal,
   onToggleCollapseChildren,
@@ -217,6 +219,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           )}
         </>
       )}
+      <button
+        onClick={() => {
+          onHideNode(id);
+          onClose();
+        }}
+        style={menuItemStyle}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {t('context.hideNode')}
+      </button>
       <button
         onClick={() => setCollapseOpen((prev) => !prev)}
         style={menuItemStyle}

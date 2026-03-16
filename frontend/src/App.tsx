@@ -593,20 +593,23 @@ function App() {
   ]);
 
   const hideFloatingThemeToggle = isMobileViewport;
+  const hideFloatingLanguageToggle = isMobileViewport;
   const languageToggleLabel = isZh ? t('app.switchToEnglish') : t('app.switchToChinese');
 
   return (
     <>
-      <button
-        type="button"
-        className="theme-toggle"
-        style={{ right: hideFloatingThemeToggle ? '0.75rem' : '6.7rem' }}
-        onClick={toggleLanguage}
-        aria-label={languageToggleLabel}
-        title={languageToggleLabel}
-      >
-        {isZh ? t('app.langButtonEn') : t('app.langButtonZh')}
-      </button>
+      {!hideFloatingLanguageToggle && (
+        <button
+          type="button"
+          className="theme-toggle"
+          style={{ right: hideFloatingThemeToggle ? '0.75rem' : '6.7rem' }}
+          onClick={toggleLanguage}
+          aria-label={languageToggleLabel}
+          title={languageToggleLabel}
+        >
+          {isZh ? t('app.langButtonEn') : t('app.langButtonZh')}
+        </button>
+      )}
       {!hideFloatingThemeToggle && (
         <button
           type="button"

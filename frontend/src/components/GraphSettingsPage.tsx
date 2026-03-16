@@ -4,8 +4,14 @@ import type { AuthUser } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
 import { useI18n } from '../i18n';
 import {
+  decryptBackupPayload,
+  encryptBackupPayload,
+  isEncryptedBackupPayload,
+} from '../utils/backupCrypto';
+import {
   DEFAULT_GRAPH_SETTINGS,
   normalizeGraphSettings,
+  type EdgeLineStyle,
   type GraphSettings,
 } from '../graphSettings';
 
@@ -32,6 +38,8 @@ type FieldSpec = {
   max: number;
   step: number;
 };
+
+const EDGE_LINE_STYLE_OPTIONS: EdgeLineStyle[] = ['orthogonal', 'spline'];
 
 const SPACING_FIELDS: FieldSpec[] = [
   {
@@ -218,24 +226,61 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     setDraft(DEFAULT_GRAPH_SETTINGS);
   };
 
+  const handleEdgeLineStyleChange = (value: string) => {
+    if (value !== 'orthogonal' && value !== 'spline') return;
+    setDraft((prev) => ({
+      ...prev,
+      edgeLineStyle: value,
+    }));
+  };
+
+  const promptForExportPassphrase = () => {
+    const first = window.prompt(t('settings.backupPassphrasePrompt'));
+    if (first === null) return null;
+    if (!first.trim()) {
+      throw new Error(t('settings.backupPassphraseRequired'));
+    }
+    const second = window.prompt(t('settings.backupPassphraseConfirmPrompt'));
+    if (second === null) return null;
+    if (first !== second) {
+      throw new Error(t('settings.backupPassphraseMismatch'));
+    }
+    return first;
+  };
+
+  const promptForImportPassphrase = () => {
+    const passphrase = window.prompt(t('settings.backupPassphraseImportPrompt'));
+    if (passphrase === null) return null;
+    if (!passphrase.trim()) {
+      throw new Error(t('settings.backupPassphraseRequired'));
+    }
+    return passphrase;
+  };
+
   const handleExportBackup = async () => {
     setBackupError(null);
     setBackupMessage(null);
     setIsExportingBackup(true);
     try {
+      const passphrase = promptForExportPassphrase();
+      if (passphrase === null) {
+        setIsExportingBackup(false);
+        return;
+      }
       const payload = await api.exportNodeBackup();
-      const json = JSON.stringify(payload, null, 2);
+      const encryptedPayload = await encryptBackupPayload(payload, passphrase);
+      const json = JSON.stringify(encryptedPayload, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const link = document.createElement('a');
       link.href = url;
-      link.download = `clan-node-backup-${stamp}.json`;
+      link.download = `clan-node-backup-${stamp}.encrypted.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setBackupMessage(t('settings.backupDownloaded'));
+      setBackupMessage(t('settings.backupDownloadedEncrypted'));
     } catch (error) {
       setBackupError(error instanceof Error ? error.message : t('settings.exportFailed'));
     } finally {
@@ -256,7 +301,16 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     try {
       const text = await backupFile.text();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const result = await api.importNodeBackup(parsed);
+      const payload = isEncryptedBackupPayload(parsed)
+        ? await decryptBackupPayload(parsed, (() => {
+          const passphrase = promptForImportPassphrase();
+          if (passphrase === null) {
+            throw new Error(t('settings.importCancelled'));
+          }
+          return passphrase;
+        })())
+        : parsed;
+      const result = await api.importNodeBackup(payload);
       setBackupMessage(
         t('settings.importDone', {
           people: result.counts.people || 0,
@@ -318,6 +372,25 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
           <div className="graph-settings-grid">
             {AUTO_LINK_FIELDS.map((field) => renderField(field, t, draft, onNumberChange))}
           </div>
+        </section>
+
+        <section className="graph-settings-panel">
+          <h2>{t('settings.lineDisplay')}</h2>
+          <label className="graph-settings-field">
+            <span className="graph-settings-field-label">{t('settings.field.edgeLineStyle.label')}</span>
+            <select
+              className="graph-settings-input"
+              value={draft.edgeLineStyle}
+              onChange={(event) => handleEdgeLineStyleChange(event.target.value)}
+            >
+              {EDGE_LINE_STYLE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {t(`settings.field.edgeLineStyle.option.${option}`)}
+                </option>
+              ))}
+            </select>
+            <small>{t('settings.field.edgeLineStyle.hint')}</small>
+          </label>
         </section>
 
         <section className="graph-settings-panel">

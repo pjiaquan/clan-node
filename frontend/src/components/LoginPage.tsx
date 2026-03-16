@@ -23,7 +23,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onVerifyMfa,
   onUseEmailMfa,
   onUseTotpMfa,
-  onCancelMfa,
   pendingMfa = null,
   pendingMfaMethod = 'email',
   onResendVerification,
@@ -123,19 +122,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   disabled={submitting}
                 >
                   {t('login.useAuthenticatorApp')}
-                </button>
-              )}
-              {onCancelMfa && (
-                <button
-                  type="button"
-                  className="user-admin-btn secondary"
-                  onClick={() => {
-                    setMfaCode('');
-                    onCancelMfa();
-                  }}
-                  disabled={submitting}
-                >
-                  {t('login.backToSignIn')}
                 </button>
               )}
             </div>

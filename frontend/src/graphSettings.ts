@@ -1,3 +1,5 @@
+export type EdgeLineStyle = 'orthogonal' | 'spline';
+
 export type GraphSettings = {
   repelGap: number;
   spouseGap: number;
@@ -17,6 +19,7 @@ export type GraphSettings = {
   autoSpouseMinOverlapRatio: number;
   autoSpouseMinVerticalOverlapRatio: number;
   showBirthTimeOnNode: boolean;
+  edgeLineStyle: EdgeLineStyle;
 };
 
 export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
@@ -38,6 +41,7 @@ export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   autoSpouseMinOverlapRatio: 0.32,
   autoSpouseMinVerticalOverlapRatio: 0.45,
   showBirthTimeOnNode: false,
+  edgeLineStyle: 'orthogonal',
 };
 
 const STORAGE_KEY = 'clan.graphSettings';
@@ -59,6 +63,11 @@ const toBoolean = (value: unknown, fallback: boolean) => {
     if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
     if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
   }
+  return fallback;
+};
+
+const toEdgeLineStyle = (value: unknown, fallback: EdgeLineStyle): EdgeLineStyle => {
+  if (value === 'orthogonal' || value === 'spline') return value;
   return fallback;
 };
 
@@ -135,6 +144,7 @@ const sanitizeGraphSettings = (value?: Partial<GraphSettings> | null): GraphSett
       1
     ),
     showBirthTimeOnNode: toBoolean(source.showBirthTimeOnNode, DEFAULT_GRAPH_SETTINGS.showBirthTimeOnNode),
+    edgeLineStyle: toEdgeLineStyle(source.edgeLineStyle, DEFAULT_GRAPH_SETTINGS.edgeLineStyle),
   };
 };
 

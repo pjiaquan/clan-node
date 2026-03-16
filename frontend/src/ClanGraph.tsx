@@ -47,6 +47,89 @@ const nodeTypes = {
   person: PersonNode,
 };
 
+const getRenderedEdgeType = (relationshipType: string, edgeLineStyle: GraphSettings['edgeLineStyle']) => {
+  if (edgeLineStyle === 'spline') {
+    return 'simplebezier';
+  }
+  return relationshipType === 'spouse'
+    || relationshipType === 'ex_spouse'
+    || relationshipType === 'sibling'
+    || relationshipType === 'in_law'
+    ? 'step'
+    : 'smoothstep';
+};
+
+const SVG_XMLNS = 'http://www.w3.org/2000/svg';
+const XHTML_XMLNS = 'http://www.w3.org/1999/xhtml';
+
+const copyComputedStyles = (source: Element, target: Element) => {
+  const sourceStyle = window.getComputedStyle(source);
+  const targetStyle = (target as HTMLElement | SVGElement).style;
+  for (let index = 0; index < sourceStyle.length; index += 1) {
+    const property = sourceStyle[index];
+    targetStyle.setProperty(
+      property,
+      sourceStyle.getPropertyValue(property),
+      sourceStyle.getPropertyPriority(property)
+    );
+  }
+
+  if (source instanceof HTMLInputElement && target instanceof HTMLInputElement) {
+    target.value = source.value;
+  }
+  if (source instanceof HTMLTextAreaElement && target instanceof HTMLTextAreaElement) {
+    target.value = source.value;
+    target.textContent = source.value;
+  }
+  if (source instanceof HTMLSelectElement && target instanceof HTMLSelectElement) {
+    target.value = source.value;
+  }
+
+  const sourceChildren = Array.from(source.children);
+  const targetChildren = Array.from(target.children);
+  for (let index = 0; index < sourceChildren.length; index += 1) {
+    const sourceChild = sourceChildren[index];
+    const targetChild = targetChildren[index];
+    if (!sourceChild || !targetChild) continue;
+    copyComputedStyles(sourceChild, targetChild);
+  }
+};
+
+const buildScreenshotSvg = (element: HTMLElement) => {
+  const rect = element.getBoundingClientRect();
+  const width = Math.max(1, Math.ceil(rect.width));
+  const height = Math.max(1, Math.ceil(rect.height));
+  const clone = element.cloneNode(true) as HTMLElement;
+
+  copyComputedStyles(element, clone);
+  clone.setAttribute('xmlns', XHTML_XMLNS);
+  clone.style.width = `${width}px`;
+  clone.style.height = `${height}px`;
+  clone.style.margin = '0';
+
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = [
+    `<svg xmlns="${SVG_XMLNS}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    '<foreignObject x="0" y="0" width="100%" height="100%">',
+    serialized,
+    '</foreignObject>',
+    '</svg>',
+  ].join('');
+
+  return { svg, width, height };
+};
+
+const saveBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
 type UndoEntry =
   | {
     type: 'delete';
@@ -151,6 +234,7 @@ export function ClanGraph({
   const [dimNonRelativesId, setDimNonRelativesId] = useState<string | null>(null);
   const [dimNodeIds, setDimNodeIds] = useState<Set<string>>(new Set());
   const [dimExcludedNodeIds, setDimExcludedNodeIds] = useState<Set<string>>(new Set());
+  const [hiddenNodeIds, setHiddenNodeIds] = useState<Set<string>>(new Set());
   const [collapsedMaternalRoots, setCollapsedMaternalRoots] = useState<Set<string>>(new Set());
   const [collapsedPaternalRoots, setCollapsedPaternalRoots] = useState<Set<string>>(new Set());
   const [collapsedChildRoots, setCollapsedChildRoots] = useState<Set<string>>(new Set());
@@ -205,9 +289,12 @@ export function ClanGraph({
   const avatarFetches = useRef(new Set<string>());
   const avatarFailures = useRef(new Set<string>());
   const toastTimer = useRef<number | null>(null);
+  const screenshotCountdownTimer = useRef<number | null>(null);
+  const screenshotToastClearTimer = useRef<number | null>(null);
   const expandRelayoutTimer = useRef<number | null>(null);
   const avatarTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const avatarPreviewRequestRef = useRef(0);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
   const canUndo = undoStack.length > 0;
   const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
   const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
@@ -419,6 +506,11 @@ export function ClanGraph({
 
     return result;
   }, [graphData, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, collectFamilySide, collectChildSide, collectSiblingSide]);
+  const concealedNodeIds = useMemo(() => {
+    const result = new Set<string>(collapsedNodeIds);
+    hiddenNodeIds.forEach((id) => result.add(id));
+    return result;
+  }, [collapsedNodeIds, hiddenNodeIds]);
 
   const selectExpandedNodes = useCallback((ids: Set<string>) => {
     if (!ids.size) return;
@@ -521,6 +613,7 @@ export function ClanGraph({
       const storedNonRelatives = localStorage.getItem('clan.dimNonRelativesId');
       const storedDimNodes = localStorage.getItem('clan.dimNodeIds');
       const storedDimExcludedNodes = localStorage.getItem('clan.dimExcludedNodeIds');
+      const storedHiddenNodes = localStorage.getItem('clan.hiddenNodeIds');
       const storedMaternal = localStorage.getItem('clan.collapsedMaternalRoots');
       const storedPaternal = localStorage.getItem('clan.collapsedPaternalRoots');
       const storedChildren = localStorage.getItem('clan.collapsedChildRoots');
@@ -534,6 +627,10 @@ export function ClanGraph({
       if (storedDimExcludedNodes) {
         const ids = storedDimExcludedNodes.split(',').map((id) => id.trim()).filter(Boolean);
         setDimExcludedNodeIds(new Set(ids));
+      }
+      if (storedHiddenNodes) {
+        const ids = storedHiddenNodes.split(',').map((id) => id.trim()).filter(Boolean);
+        setHiddenNodeIds(new Set(ids));
       }
       if (storedMaternal) {
         const ids = storedMaternal.split(',').map((id) => id.trim()).filter(Boolean);
@@ -577,6 +674,10 @@ export function ClanGraph({
         Array.from(dimExcludedNodeIds.values()).join(',')
       );
       localStorage.setItem(
+        'clan.hiddenNodeIds',
+        Array.from(hiddenNodeIds.values()).join(',')
+      );
+      localStorage.setItem(
         'clan.collapsedMaternalRoots',
         Array.from(collapsedMaternalRoots.values()).join(',')
       );
@@ -595,9 +696,18 @@ export function ClanGraph({
     } catch (error) {
       console.warn('Failed to persist dim state:', error);
     }
-  }, [dimFocusId, dimNonRelativesId, dimNodeIds, dimExcludedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
+  }, [dimFocusId, dimNonRelativesId, dimNodeIds, dimExcludedNodeIds, hiddenNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots]);
 
   useEffect(() => () => {
+    if (toastTimer.current) {
+      window.clearTimeout(toastTimer.current);
+    }
+    if (screenshotCountdownTimer.current) {
+      window.clearTimeout(screenshotCountdownTimer.current);
+    }
+    if (screenshotToastClearTimer.current) {
+      window.clearTimeout(screenshotToastClearTimer.current);
+    }
     if (expandSelectTimer.current) {
       window.clearTimeout(expandSelectTimer.current);
     }
@@ -695,15 +805,105 @@ export function ClanGraph({
     return gendersDifferent ? 'spouse' : 'parent_child';
   }, [graphData, isInLawParentConnection]);
 
-  const showToast = useCallback((message: string, tone: 'success' | 'warning') => {
+  const showToast = useCallback((message: string, tone: 'success' | 'warning', duration = 1400) => {
     if (toastTimer.current) {
       window.clearTimeout(toastTimer.current);
     }
     setToast({ message, tone });
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
-    }, 1400);
+    }, duration);
   }, []);
+
+  const captureCurrentView = useCallback(async () => {
+    const captureElement = (
+      flowWrapperRef.current?.querySelector('.react-flow') as HTMLElement | null
+    ) ?? flowWrapperRef.current;
+    if (!captureElement) {
+      throw new Error('missing-capture-element');
+    }
+
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    const { svg, width, height } = buildScreenshotSvg(captureElement);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const baseFilename = `clan-node-view-${stamp}`;
+    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const nextImage = new Image();
+        nextImage.onload = () => resolve(nextImage);
+        nextImage.onerror = () => reject(new Error('image-render-failed'));
+        nextImage.src = svgUrl;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('canvas-context-missing');
+      }
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!pngBlob) {
+        throw new Error('png-encode-failed');
+      }
+      saveBlob(pngBlob, `${baseFilename}.png`);
+      showToast(t('graph.screenshotSaved'), 'success');
+      return;
+    } catch {
+      saveBlob(svgBlob, `${baseFilename}.svg`);
+      showToast(t('graph.screenshotSvgSaved'), 'success');
+      return;
+    } finally {
+      URL.revokeObjectURL(svgUrl);
+    }
+  }, [showToast, t]);
+
+  const handleCaptureScreenshot = useCallback(() => {
+    if (screenshotBusy) return;
+    if (screenshotCountdownTimer.current) {
+      window.clearTimeout(screenshotCountdownTimer.current);
+    }
+    if (screenshotToastClearTimer.current) {
+      window.clearTimeout(screenshotToastClearTimer.current);
+    }
+
+    setScreenshotBusy(true);
+    let remaining = 3;
+
+    const runCountdownStep = () => {
+      showToast(t('graph.screenshotCountdown', { seconds: remaining }), 'success', 900);
+      if (remaining === 1) {
+        screenshotToastClearTimer.current = window.setTimeout(() => {
+          setToast(null);
+          screenshotToastClearTimer.current = null;
+        }, 900);
+        screenshotCountdownTimer.current = window.setTimeout(async () => {
+          screenshotCountdownTimer.current = null;
+          try {
+            await captureCurrentView();
+          } catch {
+            showToast(t('graph.screenshotFailed'), 'warning');
+          } finally {
+            setScreenshotBusy(false);
+          }
+        }, 1000);
+        return;
+      }
+
+      remaining -= 1;
+      screenshotCountdownTimer.current = window.setTimeout(runCountdownStep, 1000);
+    };
+
+    runCountdownStep();
+  }, [captureCurrentView, screenshotBusy, showToast, t]);
 
   const hashAvatarFile = useCallback(async (file: File) => {
     if (!window.crypto?.subtle) {
@@ -790,7 +990,7 @@ export function ClanGraph({
 
     const desired = new Set<string>();
     for (const person of graphData.nodes) {
-      if (collapsedNodeIds.has(person.id)) continue;
+      if (concealedNodeIds.has(person.id)) continue;
       if (person.avatar_url) {
         desired.add(person.avatar_url);
       }
@@ -832,7 +1032,7 @@ export function ClanGraph({
         avatarFetches.current.delete(key);
       }
     });
-  }, [graphData, collapsedNodeIds]);
+  }, [graphData, concealedNodeIds]);
 
   useEffect(() => {
     if (!centerId) return;
@@ -1582,8 +1782,17 @@ export function ClanGraph({
       return;
     }
     const wasCollapsed = collapsedNodeIds.has(match.id);
+    const wasHidden = hiddenNodeIds.has(match.id);
     if (wasCollapsed) {
       revealCollapsedNodeBySearch(match.id);
+    }
+    if (wasHidden) {
+      setHiddenNodeIds((prev) => {
+        if (!prev.has(match.id)) return prev;
+        const next = new Set(prev);
+        next.delete(match.id);
+        return next;
+      });
     }
     setSelectedEdge(null);
     setSelectedNode(match.id);
@@ -1598,7 +1807,7 @@ export function ClanGraph({
       persistPendingViewport(match.id, 1.0);
       setPendingFocus({ id: match.id, zoom: 1.0 });
     };
-    if (wasCollapsed) {
+    if (wasCollapsed || wasHidden) {
       searchFocusTimer.current = window.setTimeout(() => {
         applyFocus();
         searchFocusTimer.current = null;
@@ -1614,7 +1823,7 @@ export function ClanGraph({
     searchFlashTimer.current = window.setTimeout(() => {
       setSearchFlashId(null);
     }, 1400);
-  }, [graphData, collapsedNodeIds, persistPendingViewport, revealCollapsedNodeBySearch, showToast, t]);
+  }, [graphData, collapsedNodeIds, hiddenNodeIds, persistPendingViewport, revealCollapsedNodeBySearch, showToast, t]);
 
   const focusNodeById = useCallback((id: string, zoom = 1.0) => {
     if (!reactFlowInstance) return false;
@@ -1886,6 +2095,7 @@ export function ClanGraph({
     || collapsedChildRoots.size > 0
     || collapsedSiblingRoots.size > 0
   );
+  const hasHiddenNodes = hiddenNodeIds.size > 0;
   const clearAllDimming = useCallback(() => {
     setDimFocusId(null);
     setDimNonRelativesId(null);
@@ -1898,6 +2108,11 @@ export function ClanGraph({
     setCollapsedChildRoots(new Set());
     setCollapsedSiblingRoots(new Set());
   }, []);
+  const showAllHiddenNodes = useCallback(() => {
+    if (!hiddenNodeIds.size) return;
+    setHiddenNodeIds(new Set());
+    showToast(t('graph.hiddenNodesRestored'), 'success');
+  }, [hiddenNodeIds, showToast, t]);
   const ctrlHoverFocusId = isShiftPressed ? hoveredNodeId : null;
   const { connectedNodeIds: ctrlHoverConnectedNodeIds, connectedEdgeIds: ctrlHoverConnectedEdgeIds } = useMemo(() => {
     const connectedNodeIds = new Set<string>();
@@ -1907,7 +2122,7 @@ export function ClanGraph({
     }
     connectedNodeIds.add(ctrlHoverFocusId);
     graphData.edges.forEach((edge) => {
-      if (collapsedNodeIds.has(edge.from_person_id) || collapsedNodeIds.has(edge.to_person_id)) {
+      if (concealedNodeIds.has(edge.from_person_id) || concealedNodeIds.has(edge.to_person_id)) {
         return;
       }
       if (edge.from_person_id === ctrlHoverFocusId || edge.to_person_id === ctrlHoverFocusId) {
@@ -1917,7 +2132,7 @@ export function ClanGraph({
       }
     });
     return { connectedNodeIds, connectedEdgeIds };
-  }, [graphData, collapsedNodeIds, ctrlHoverFocusId]);
+  }, [graphData, concealedNodeIds, ctrlHoverFocusId]);
   const isCtrlHoverActive = Boolean(ctrlHoverFocusId);
   const { selectedEdgeFocusNodeIds, selectedEdgeFocusEdgeIds } = useMemo(() => {
     const focusNodeIds = new Set<string>();
@@ -1955,7 +2170,7 @@ export function ClanGraph({
     const initialOrbitBaseRadius = graphSettings.initialOrbitBaseRadius;
     const initialOrbitStepRadius = graphSettings.initialOrbitStepRadius;
 
-    const visibleNodes = graphData.nodes.filter((person) => !collapsedNodeIds.has(person.id));
+    const visibleNodes = graphData.nodes.filter((person) => !concealedNodeIds.has(person.id));
 
     return visibleNodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
@@ -2053,13 +2268,13 @@ export function ClanGraph({
         },
       };
     });
-  }, [graphData, collapsedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, selectedEdgeFocusNodeIds, isSelectedEdgeFocusActive, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
+  }, [graphData, concealedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, selectedEdgeFocusNodeIds, isSelectedEdgeFocusActive, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
 
     return graphData.edges
-      .filter((edge) => !collapsedNodeIds.has(edge.from_person_id) && !collapsedNodeIds.has(edge.to_person_id))
+      .filter((edge) => !concealedNodeIds.has(edge.from_person_id) && !concealedNodeIds.has(edge.to_person_id))
       .map((edge) => {
         const edgeId = `e${edge.id}`;
         const isSelected = selectedEdge === edgeId;
@@ -2095,7 +2310,7 @@ export function ClanGraph({
           target: edge.to_person_id,
           sourceHandle: edge.metadata?.sourceHandle,
           targetHandle: edge.metadata?.targetHandle,
-          type: edge.type === 'spouse' || edge.type === 'ex_spouse' || edge.type === 'sibling' || edge.type === 'in_law' ? 'step' : 'smoothstep',
+          type: getRenderedEdgeType(edge.type, graphSettings.edgeLineStyle),
           animated: edge.type === 'spouse' || edge.type === 'sibling',
           markerEnd: { type: MarkerType.ArrowClosed },
           style: (() => {
@@ -2130,7 +2345,7 @@ export function ClanGraph({
           interactionWidth: isCoarsePointer ? 56 : 24,
         };
       });
-  }, [graphData, collapsedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, t]);
+  }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings.edgeLineStyle, t]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -2563,10 +2778,34 @@ export function ClanGraph({
 
   useEffect(() => {
     if (!selectedNode) return;
-    if (collapsedNodeIds.has(selectedNode)) {
+    if (concealedNodeIds.has(selectedNode)) {
       setSelectedNode(null);
     }
-  }, [selectedNode, collapsedNodeIds]);
+  }, [selectedNode, concealedNodeIds]);
+
+  useEffect(() => {
+    if (!selectedEdge || !graphData) return;
+    const edge = graphData.edges.find((item) => `e${item.id}` === selectedEdge);
+    if (!edge) {
+      setSelectedEdge(null);
+      return;
+    }
+    if (concealedNodeIds.has(edge.from_person_id) || concealedNodeIds.has(edge.to_person_id)) {
+      setSelectedEdge(null);
+    }
+  }, [selectedEdge, graphData, concealedNodeIds]);
+
+  useEffect(() => {
+    if (contextMenu && concealedNodeIds.has(contextMenu.id)) {
+      setContextMenu(null);
+    }
+  }, [contextMenu, concealedNodeIds]);
+
+  useEffect(() => {
+    if (linkMode && concealedNodeIds.has(linkMode.from)) {
+      setLinkMode(null);
+    }
+  }, [linkMode, concealedNodeIds]);
 
   const handleUndo = useCallback(async () => {
     if (!ensureEditable()) return;
@@ -2884,6 +3123,10 @@ export function ClanGraph({
         hasActiveDimming={hasActiveDimming}
         onExpandAllCollapsed={expandAllCollapsed}
         hasCollapsedNodes={hasCollapsedNodes}
+        onShowAllHiddenNodes={showAllHiddenNodes}
+        hasHiddenNodes={hasHiddenNodes}
+        onCaptureScreenshot={handleCaptureScreenshot}
+        screenshotBusy={screenshotBusy}
         selectedNode={selectedNode}
         selectedEdge={selectedEdge}
         selectedEdgeType={selectedEdgeType}
@@ -3083,6 +3326,15 @@ export function ClanGraph({
             onToggleDimNonRelatives={(id) => {
               setDimFocusId(null);
               setDimNonRelativesId(prev => (prev === id ? null : id));
+            }}
+            onHideNode={(id) => {
+              setHiddenNodeIds((prev) => {
+                if (prev.has(id)) return prev;
+                const next = new Set(prev);
+                next.add(id);
+                return next;
+              });
+              showToast(t('graph.nodeHidden'), 'success');
             }}
             onToggleCollapseMaternal={(id) => {
               const shouldExpand = collapsedMaternalRoots.has(id);
