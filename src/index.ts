@@ -13,6 +13,17 @@ import { registerBackupRoutes } from './backup';
 
 const app = new Hono<AppBindings>();
 
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Referrer-Policy', 'no-referrer');
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (c.env.ENVIRONMENT === 'production') {
+    c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+});
+
 // Enable CORS for frontend
 app.use('*', cors({
   origin: (origin, c) => {
