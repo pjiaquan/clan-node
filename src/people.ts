@@ -5,6 +5,15 @@ import { notifyUpdate } from './notify';
 import { queueRemoteFormData, queueRemoteJson } from './dual_write';
 import { recordAuditLog } from './audit';
 import { buildSiblingLinkMeta } from './relationship_utils';
+import {
+  decryptCustomFieldRows,
+  decryptPersonRow,
+  decryptProtectedValue,
+  migratePlaintextCustomFieldRows,
+  migratePlaintextPersonRow,
+  protectPersonWriteFields,
+  encryptProtectedValue
+} from './data_protection';
 
 type UploadFile = Blob & {
   name?: string;
@@ -32,12 +41,15 @@ const isUploadFile = (value: unknown): value is UploadFile => (
   && typeof (value as Blob).stream === 'function'
 );
 
-async function updateSiblingOrdering(db: D1Database, personId: string) {
+async function updateSiblingOrdering(env: Env, personId: string) {
+  const db = env.DB;
   const person = await db.prepare(
     'SELECT id, dob FROM people WHERE id = ?'
   ).bind(personId).first();
 
-  const personDob = person && (person as any).dob ? new Date((person as any).dob).getTime() : 0;
+  const personDob = person && (person as any).dob
+    ? new Date((await decryptProtectedValue(env, (person as any).dob as string | null)) || '').getTime()
+    : 0;
   if (!personDob) return;
 
   const { results } = await db.prepare(
@@ -50,7 +62,9 @@ async function updateSiblingOrdering(db: D1Database, personId: string) {
     const other = await db.prepare(
       'SELECT id, dob FROM people WHERE id = ?'
     ).bind(otherId).first();
-    const otherDob = other && (other as any).dob ? new Date((other as any).dob).getTime() : 0;
+    const otherDob = other && (other as any).dob
+      ? new Date((await decryptProtectedValue(env, (other as any).dob as string | null)) || '').getTime()
+      : 0;
     if (!otherDob || otherDob === personDob) continue;
 
     const link = buildSiblingLinkMeta(personId, otherId, personDob, otherDob);
@@ -219,12 +233,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     return avatars;
   };
 
-  const loadCustomFields = async (db: Env['DB']) => {
+  const loadCustomFields = async (env: Env) => {
+    const db = env.DB;
     const { results } = await db.prepare(
-      'SELECT person_id, label, value FROM person_custom_fields'
+      'SELECT id, person_id, label, value FROM person_custom_fields'
     ).all();
+    await migratePlaintextCustomFieldRows(db, env, results as Array<Record<string, unknown>>);
+    const decrypted = await decryptCustomFieldRows(env, results as Array<Record<string, unknown>>);
     const map = new Map<string, { label: string; value: string }[]>();
-    results.forEach((row: any) => {
+    decrypted.forEach((row: any) => {
       const list = map.get(row.person_id) || [];
       list.push({ label: row.label, value: row.value });
       map.set(row.person_id, list);
@@ -232,11 +249,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     return map;
   };
 
-  const loadPersonCustomFields = async (db: Env['DB'], personId: string) => {
+  const loadPersonCustomFields = async (env: Env, personId: string) => {
+    const db = env.DB;
     const { results } = await db.prepare(
-      'SELECT label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
+      'SELECT id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
     ).bind(personId).all();
-    return results.map((row: any) => ({ label: row.label, value: row.value }));
+    await migratePlaintextCustomFieldRows(db, env, results as Array<Record<string, unknown>>);
+    const decrypted = await decryptCustomFieldRows(env, results as Array<Record<string, unknown>>);
+    return decrypted.map((row: any) => ({ label: row.label, value: row.value }));
   };
 
   const extractCustomFields = (body: any, metadata: any) => {
@@ -369,12 +389,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const { results } = await c.env.DB.prepare(
       'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
     ).all();
-    const customFieldsMap = await loadCustomFields(c.env.DB);
+    await Promise.all((results as any[]).map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row as Record<string, unknown>)));
+    const customFieldsMap = await loadCustomFields(c.env);
     const avatarMap = await loadAvatarMap(c.env.DB);
 
     const parsedResults = await Promise.all(results.map(async (person: any) => {
-      const avatars = avatarMap.get(person.id) || await ensureAvatarFromLegacy(c.env.DB, person);
-      return buildPersonPayload(person, customFieldsMap.get(person.id) || [], avatars);
+      const decryptedPerson = await decryptPersonRow(c.env, person);
+      const avatars = avatarMap.get(decryptedPerson.id) || await ensureAvatarFromLegacy(c.env.DB, decryptedPerson);
+      return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars);
     }));
 
     return c.json(parsedResults);
@@ -390,9 +412,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    const customFields = await loadPersonCustomFields(c.env.DB, id);
-    const avatars = await ensureAvatarFromLegacy(c.env.DB, person as any);
-    return c.json(buildPersonPayload(person, customFields, avatars));
+    await migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>);
+    const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
+    const customFields = await loadPersonCustomFields(c.env, id);
+    const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
+    return c.json(buildPersonPayload(decryptedPerson, customFields, avatars));
   });
 
   // List avatars for a single person
@@ -425,6 +449,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     const id = providedId || crypto.randomUUID();
     const now = new Date().toISOString();
+    const protectedFields = await protectPersonWriteFields(c.env, {
+      blood_type: blood_type || null,
+      dob: dob || null,
+      dod: dod || null,
+      tob: tob || null,
+      tod: tod || null,
+      metadata: metadata ? JSON.stringify(metadata) : null
+    });
 
     await c.env.DB.prepare(
       'INSERT INTO people (id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -433,13 +465,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       name,
       english_name || null,
       gender || 'O',
-      blood_type || null,
-      dob || null,
-      dod || null,
-      tob || null,
-      tod || null,
+      protectedFields.blood_type ?? null,
+      protectedFields.dob ?? null,
+      protectedFields.dod ?? null,
+      protectedFields.tob ?? null,
+      protectedFields.tod ?? null,
       avatar_url || null,
-      metadata ? JSON.stringify(metadata) : null,
+      protectedFields.metadata ?? null,
       now,
       now
     ).run();
@@ -453,7 +485,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         ).bind(
           id,
           field.label || '',
-          field.value || '',
+          await encryptProtectedValue(c.env, field.value || ''),
           now,
           now
         ).run();
@@ -500,17 +532,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
-    const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
-    const avatars = person ? await ensureAvatarFromLegacy(c.env.DB, person as any) : [];
+    const customFieldsResult = await loadPersonCustomFields(c.env, id);
+    const decryptedPerson = person ? await decryptPersonRow(c.env, person as Record<string, unknown>) : null;
+    const avatars = decryptedPerson ? await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any) : [];
     const metadataKeys = metadata && typeof metadata === 'object'
       ? Object.keys(metadata as Record<string, unknown>)
       : [];
     const customFieldsCount = Array.isArray(customFields) ? customFields.length : 0;
-    const customFieldsSummary = Array.isArray(customFields)
-      ? customFields.map(field => ({
-        label: field?.label || '',
-        value: field?.value || ''
-      }))
+    const customFieldLabels = Array.isArray(customFields)
+      ? customFields.map(field => String(field?.label || '')).filter(Boolean)
       : [];
     const avatarLink = avatar_url ? new URL(avatar_url, c.req.url).toString() : undefined;
     notifyUpdate(c, 'people:create', {
@@ -518,16 +548,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       name,
       english_name,
       gender,
-      blood_type,
-      dob,
-      dod,
-      tob,
-      tod,
       avatar_url,
       avatars_count: avatars.length,
       metadata_keys: metadataKeys,
       custom_fields_count: customFieldsCount,
-      custom_fields: customFieldsSummary
+      custom_field_labels: customFieldLabels,
+      has_protected_fields: Boolean(blood_type || dob || dod || tob || tod)
     }, avatarLink ? { photoUrl: avatarLink } : undefined);
     await recordAuditLog(c, {
       action: 'create',
@@ -538,15 +564,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         name,
         english_name: english_name || null,
         gender: gender || 'O',
-        blood_type: blood_type || null,
-        dob: dob || null,
-        dod: dod || null,
-        tob: tob || null,
-        tod: tod || null,
         avatar_url: avatar_url || null,
         avatars_count: avatars.length,
         metadata_keys: metadataKeys,
-        custom_fields_count: customFieldsCount
+        custom_fields_count: customFieldsCount,
+        custom_field_labels: customFieldLabels,
+        has_protected_fields: Boolean(blood_type || dob || dod || tob || tod)
       }
     });
 
@@ -574,7 +597,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     queueRemoteJson(c, 'POST', '/api/people', mirrorPayload);
 
-    return c.json(buildPersonPayload(person, customFieldsResult, avatars), 201);
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars), 201);
   });
 
   // Update a person
@@ -590,15 +613,24 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    const existingAny = existing as any;
+    await migratePlaintextPersonRow(c.env.DB, c.env, existing as Record<string, unknown>);
+    const existingAny = await decryptPersonRow(c.env, existing as Record<string, unknown>) as any;
     const previousDob = existingAny.dob as string | null;
-    const existingCustomFields = await loadPersonCustomFields(c.env.DB, id);
+    const existingCustomFields = await loadPersonCustomFields(c.env, id);
     await ensureAvatarFromLegacy(c.env.DB, existingAny);
 
     const now = new Date().toISOString();
     const updates: string[] = [];
     const values: unknown[] = [];
     const changedFields: string[] = [];
+    const protectedUpdates = await protectPersonWriteFields(c.env, {
+      blood_type: blood_type !== undefined ? (blood_type as string | null) : undefined,
+      dob: dob !== undefined ? (dob as string | null) : undefined,
+      dod: dod !== undefined ? (dod as string | null) : undefined,
+      tob: tob !== undefined ? (tob as string | null) : undefined,
+      tod: tod !== undefined ? (tod as string | null) : undefined,
+      metadata: metadata !== undefined ? (metadata ? JSON.stringify(metadata) : null) : undefined
+    });
 
     if (name !== undefined) {
       updates.push('name = ?');
@@ -617,27 +649,27 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     if (blood_type !== undefined) {
       updates.push('blood_type = ?');
-      values.push(blood_type);
+      values.push(protectedUpdates.blood_type ?? null);
       changedFields.push('blood_type');
     }
     if (dob !== undefined) {
       updates.push('dob = ?');
-      values.push(dob);
+      values.push(protectedUpdates.dob ?? null);
       changedFields.push('dob');
     }
     if (dod !== undefined) {
       updates.push('dod = ?');
-      values.push(dod);
+      values.push(protectedUpdates.dod ?? null);
       changedFields.push('dod');
     }
     if (tob !== undefined) {
       updates.push('tob = ?');
-      values.push(tob);
+      values.push(protectedUpdates.tob ?? null);
       changedFields.push('tob');
     }
     if (tod !== undefined) {
       updates.push('tod = ?');
-      values.push(tod);
+      values.push(protectedUpdates.tod ?? null);
       changedFields.push('tod');
     }
     if (avatar_url !== undefined) {
@@ -647,7 +679,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     if (metadata !== undefined) {
       updates.push('metadata = ?');
-      values.push(JSON.stringify(metadata));
+      values.push(protectedUpdates.metadata ?? null);
       changedFields.push('metadata');
     }
 
@@ -680,7 +712,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         ).bind(
           id,
           field.label || '',
-          field.value || '',
+          await encryptProtectedValue(c.env, field.value || ''),
           now,
           now
         ).run();
@@ -714,15 +746,16 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     if (dob !== undefined && dob !== previousDob) {
-      await updateSiblingOrdering(c.env.DB, id);
+      await updateSiblingOrdering(c.env, id);
     }
 
     const person = await c.env.DB.prepare(
       'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
     ).bind(id).first();
 
-    const customFieldsResult = await loadPersonCustomFields(c.env.DB, id);
-    const avatars = person ? await ensureAvatarFromLegacy(c.env.DB, person as any) : [];
+    const customFieldsResult = await loadPersonCustomFields(c.env, id);
+    const decryptedPerson = person ? await decryptPersonRow(c.env, person as Record<string, unknown>) : null;
+    const avatars = decryptedPerson ? await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any) : [];
     const formatCustomFields = (fields: { label: string; value: string }[]) => (
       fields.map((field) => ({
         label: field.label || '',
@@ -749,11 +782,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       };
     }
     if (gender !== undefined) updateDetails.gender = gender;
-    if (blood_type !== undefined) updateDetails.blood_type = blood_type;
-    if (dob !== undefined) updateDetails.dob = dob;
-    if (dod !== undefined) updateDetails.dod = dod;
-    if (tob !== undefined) updateDetails.tob = tob;
-    if (tod !== undefined) updateDetails.tod = tod;
+    if (blood_type !== undefined) updateDetails.blood_type_updated = true;
+    if (dob !== undefined) updateDetails.dob_updated = true;
+    if (dod !== undefined) updateDetails.dod_updated = true;
+    if (tob !== undefined) updateDetails.tob_updated = true;
+    if (tod !== undefined) updateDetails.tod_updated = true;
     let avatarLink: string | undefined;
     if (avatar_url !== undefined) {
       const prevAvatar = existingAny.avatar_url ?? null;
@@ -775,8 +808,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       const formattedNext = formatCustomFields(nextFields);
       if (JSON.stringify(previousFields) !== JSON.stringify(formattedNext)) {
         updateDetails.custom_fields = {
-          old: previousFields,
-          new: formattedNext
+          old_labels: previousFields.map((field) => field.label),
+          new_labels: formattedNext.map((field) => field.label)
         };
         updateDetails.custom_fields_count = formattedNext.length;
       }
@@ -794,7 +827,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     });
     queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
-    return c.json(buildPersonPayload(person, customFieldsResult, avatars));
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars));
   });
 
   // Upload avatar for a person (multi-avatar API)

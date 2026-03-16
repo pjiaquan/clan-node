@@ -10,21 +10,23 @@ import {
   trackInsertedRowId,
   type SiblingHandlePreference
 } from './relationship_utils';
+import { decryptProtectedValue } from './data_protection';
 
 async function getSiblingLinkMeta(
-  db: D1Database,
+  env: Env,
   aId: string,
   bId: string,
   preferredHandles?: SiblingHandlePreference
 ) {
+  const db = env.DB;
   const { results } = await db.prepare(
     'SELECT id, dob FROM people WHERE id IN (?, ?)'
   ).bind(aId, bId).all();
 
   const a = results.find(p => p.id === aId) as any | undefined;
   const b = results.find(p => p.id === bId) as any | undefined;
-  const aDob = a?.dob ? new Date(a.dob).getTime() : 0;
-  const bDob = b?.dob ? new Date(b.dob).getTime() : 0;
+  const aDob = a?.dob ? new Date((await decryptProtectedValue(env, a.dob as string | null)) || '').getTime() : 0;
+  const bDob = b?.dob ? new Date((await decryptProtectedValue(env, b.dob as string | null)) || '').getTime() : 0;
   return buildSiblingLinkMeta(aId, bId, aDob, bDob, preferredHandles);
 }
 
@@ -87,19 +89,20 @@ async function getPersonNameMap(
 }
 
 async function ensureSiblingLink(
-  db: D1Database,
+  env: Env,
   aId: string,
   bId: string,
   now: string,
   createdRelationshipIds?: number[]
 ) {
+  const db = env.DB;
   if (aId === bId) return;
   const exists = await db.prepare(
     "SELECT id FROM relationships WHERE type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
   ).bind(aId, bId, bId, aId).first();
   if (exists) return;
 
-  const link = await getSiblingLinkMeta(db, aId, bId);
+  const link = await getSiblingLinkMeta(env, aId, bId);
   const result = await db.prepare(
     "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'sibling', ?, ?)"
   ).bind(link.fromId, link.toId, link.metadata, now).run();
@@ -107,12 +110,13 @@ async function ensureSiblingLink(
 }
 
 async function linkSiblingNetworks(
-  db: D1Database,
+  env: Env,
   personA: string,
   personB: string,
   now: string,
   createdRelationshipIds?: number[]
 ) {
+  const db = env.DB;
   const [siblingsA, siblingsB] = await Promise.all([
     getSiblingIds(db, personA),
     getSiblingIds(db, personB)
@@ -120,13 +124,13 @@ async function linkSiblingNetworks(
 
   for (const siblingId of siblingsB) {
     if (siblingId !== personA) {
-      await ensureSiblingLink(db, personA, siblingId, now, createdRelationshipIds);
+      await ensureSiblingLink(env, personA, siblingId, now, createdRelationshipIds);
     }
   }
 
   for (const siblingId of siblingsA) {
     if (siblingId !== personB) {
-      await ensureSiblingLink(db, personB, siblingId, now, createdRelationshipIds);
+      await ensureSiblingLink(env, personB, siblingId, now, createdRelationshipIds);
     }
   }
 }
@@ -151,16 +155,17 @@ async function ensureParentChildLink(
 }
 
 async function linkParentToSiblingChildren(
-  db: D1Database,
+  env: Env,
   parentId: string,
   childId: string,
   now: string,
   createdRelationshipIds?: number[]
 ) {
+  const db = env.DB;
   const siblingIds = await getSiblingIds(db, childId);
   for (const siblingId of siblingIds) {
     await ensureParentChildLink(db, parentId, siblingId, now, createdRelationshipIds);
-    await linkSiblingNetworks(db, childId, siblingId, now, createdRelationshipIds);
+    await linkSiblingNetworks(env, childId, siblingId, now, createdRelationshipIds);
   }
 }
 
@@ -174,12 +179,13 @@ async function getChildIds(db: D1Database, parentId: string) {
 }
 
 async function linkSpouseToChild(
-  db: D1Database,
+  env: Env,
   parentId: string,
   childId: string,
   now: string,
   createdRelationshipIds?: number[]
 ) {
+  const db = env.DB;
   const { results } = await db.prepare(
     "SELECT from_person_id, to_person_id FROM relationships WHERE type = 'spouse' AND (from_person_id = ? OR to_person_id = ?)"
   ).bind(parentId, parentId).all();
@@ -209,7 +215,7 @@ async function linkSpouseToChild(
       trackInsertedRowId(result, createdRelationshipIds);
     }
 
-    await linkParentToSiblingChildren(db, spouseId, childId, now, createdRelationshipIds);
+    await linkParentToSiblingChildren(env, spouseId, childId, now, createdRelationshipIds);
     linked.push(spouseId);
   }
 
@@ -217,12 +223,13 @@ async function linkSpouseToChild(
 }
 
 async function linkSpousePairExistingChildren(
-  db: D1Database,
+  env: Env,
   personA: string,
   personB: string,
   now: string,
   createdRelationshipIds?: number[]
 ) {
+  const db = env.DB;
   const [aChildren, bChildren] = await Promise.all([
     getChildIds(db, personA),
     getChildIds(db, personB)
@@ -230,12 +237,12 @@ async function linkSpousePairExistingChildren(
 
   for (const childId of aChildren) {
     await ensureParentChildLink(db, personB, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(db, personB, childId, now, createdRelationshipIds);
+    await linkParentToSiblingChildren(env, personB, childId, now, createdRelationshipIds);
   }
 
   for (const childId of bChildren) {
     await ensureParentChildLink(db, personA, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(db, personA, childId, now, createdRelationshipIds);
+    await linkParentToSiblingChildren(env, personA, childId, now, createdRelationshipIds);
   }
 }
 
@@ -296,7 +303,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
 
-      await linkSpouseToChild(c.env.DB, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSpouseToChild(c.env, from_person_id, to_person_id, now, createdRelationshipIds);
       if (finalMetadata === null) {
         finalMetadata = PARENT_CHILD_METADATA;
       }
@@ -330,7 +337,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           targetHandle: (metadata as any).targetHandle
         }
         : undefined;
-      const link = await getSiblingLinkMeta(c.env.DB, from_person_id, to_person_id, preferredHandles);
+      const link = await getSiblingLinkMeta(c.env, from_person_id, to_person_id, preferredHandles);
       fromId = link.fromId;
       toId = link.toId;
       finalMetadata = link.metadata;
@@ -365,8 +372,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       target_handle: metadataSummary?.targetHandle
     });
     if (type === 'parent_child' && !shouldSkipAutoLink) {
-      await linkSpouseToChild(c.env.DB, from_person_id, to_person_id, now, createdRelationshipIds);
-      await linkParentToSiblingChildren(c.env.DB, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSpouseToChild(c.env, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkParentToSiblingChildren(c.env, from_person_id, to_person_id, now, createdRelationshipIds);
 
       const otherChildren = await c.env.DB.prepare(
         "SELECT to_person_id FROM relationships WHERE type = 'parent_child' AND from_person_id = ? AND to_person_id != ?"
@@ -377,22 +384,22 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           "SELECT id FROM relationships WHERE type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
         ).bind(to_person_id, siblingId, siblingId, to_person_id).first();
         if (!existingSibling) {
-          const link = await getSiblingLinkMeta(c.env.DB, to_person_id, siblingId);
+          const link = await getSiblingLinkMeta(c.env, to_person_id, siblingId);
           const siblingResult = await c.env.DB.prepare(
             "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'sibling', ?, ?)"
           ).bind(link.fromId, link.toId, link.metadata, now).run();
           trackInsertedRowId(siblingResult, createdRelationshipIds);
         }
-        await linkSiblingNetworks(c.env.DB, to_person_id, siblingId, now, createdRelationshipIds);
+        await linkSiblingNetworks(c.env, to_person_id, siblingId, now, createdRelationshipIds);
       }
     }
 
     if (type === 'sibling' && !shouldSkipAutoLink) {
-      await linkSiblingNetworks(c.env.DB, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSiblingNetworks(c.env, from_person_id, to_person_id, now, createdRelationshipIds);
     }
 
     if (type === 'spouse' && !shouldSkipAutoLink) {
-      await linkSpousePairExistingChildren(c.env.DB, fromId, toId, now, createdRelationshipIds);
+      await linkSpousePairExistingChildren(c.env, fromId, toId, now, createdRelationshipIds);
     }
 
     await recordAuditLog(c, {
@@ -482,8 +489,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const now = new Date().toISOString();
 
     if (nextType === 'parent_child' && !shouldSkipAutoLink) {
-      await linkSpouseToChild(c.env.DB, nextFrom, nextTo, now);
-      await linkParentToSiblingChildren(c.env.DB, nextFrom, nextTo, now);
+      await linkSpouseToChild(c.env, nextFrom, nextTo, now);
+      await linkParentToSiblingChildren(c.env, nextFrom, nextTo, now);
 
       const otherChildren = await c.env.DB.prepare(
         "SELECT to_person_id FROM relationships WHERE type = 'parent_child' AND from_person_id = ? AND to_person_id != ?"
@@ -494,12 +501,12 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           "SELECT id FROM relationships WHERE type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
         ).bind(nextTo, siblingId, siblingId, nextTo).first();
         if (!existingSibling) {
-          const link = await getSiblingLinkMeta(c.env.DB, nextTo, siblingId);
+          const link = await getSiblingLinkMeta(c.env, nextTo, siblingId);
           await c.env.DB.prepare(
             "INSERT INTO relationships (from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, 'sibling', ?, ?)"
           ).bind(link.fromId, link.toId, link.metadata, now).run();
         }
-        await linkSiblingNetworks(c.env.DB, nextTo, siblingId, now);
+        await linkSiblingNetworks(c.env, nextTo, siblingId, now);
       }
     }
 
@@ -510,15 +517,15 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           targetHandle: (metadata as any).targetHandle
         }
         : undefined;
-      const link = await getSiblingLinkMeta(c.env.DB, nextFrom, nextTo, preferredHandles);
+      const link = await getSiblingLinkMeta(c.env, nextFrom, nextTo, preferredHandles);
       await c.env.DB.prepare(
         'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
       ).bind(link.fromId, link.toId, link.metadata, id).run();
-      await linkSiblingNetworks(c.env.DB, nextFrom, nextTo, now);
+      await linkSiblingNetworks(c.env, nextFrom, nextTo, now);
     }
 
     if (nextType === 'spouse' && !shouldSkipAutoLink) {
-      await linkSpousePairExistingChildren(c.env.DB, nextFrom, nextTo, now);
+      await linkSpousePairExistingChildren(c.env, nextFrom, nextTo, now);
     }
 
     const updated = await c.env.DB.prepare(

@@ -2,6 +2,14 @@ import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { recordAuditLog } from './audit';
 import { queueRemoteJson } from './dual_write';
+import {
+  decryptCustomFieldRows,
+  decryptPersonRow,
+  encryptProtectedValue,
+  migratePlaintextCustomFieldRows,
+  migratePlaintextPersonRow,
+  protectPersonWriteFields
+} from './data_protection';
 
 const BACKUP_VERSION = 1;
 const RELATIONSHIP_TYPES = new Set(['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law']);
@@ -339,13 +347,17 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         'SELECT default_title, default_formal_title, custom_title, custom_formal_title, description, created_at, updated_at FROM kinship_labels ORDER BY default_title ASC, default_formal_title ASC'
       ).all(),
     ]);
+    await Promise.all((peopleResult.results as any[]).map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row as Record<string, unknown>)));
+    await migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldsResult.results as Array<Record<string, unknown>>);
+    const decryptedPeople = await Promise.all((peopleResult.results as any[]).map((row) => decryptPersonRow(c.env, row as Record<string, unknown>)));
+    const decryptedCustomFields = await decryptCustomFieldRows(c.env, customFieldsResult.results as Array<Record<string, unknown>>);
 
     const sessionUser = c.get('sessionUser');
     const payload = {
       version: BACKUP_VERSION,
       exported_at: new Date().toISOString(),
       exported_by: sessionUser?.username || null,
-      people: peopleResult.results.map((row: any) => ({
+      people: decryptedPeople.map((row: any) => ({
         id: String(row.id),
         name: String(row.name),
         english_name: row.english_name === null ? null : String(row.english_name),
@@ -378,7 +390,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         metadata: row.metadata === null ? null : String(row.metadata),
         created_at: String(row.created_at),
       })),
-      person_custom_fields: customFieldsResult.results.map((row: any) => ({
+      person_custom_fields: decryptedCustomFields.map((row: any) => ({
         id: Number(row.id),
         person_id: String(row.person_id),
         label: String(row.label),
@@ -458,6 +470,14 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         }
 
         for (const person of people) {
+          const protectedFields = await protectPersonWriteFields(c.env, {
+            blood_type: person.blood_type,
+            dob: person.dob,
+            dod: person.dod,
+            tob: person.tob,
+            tod: person.tod,
+            metadata: person.metadata
+          });
           await c.env.DB.prepare(
             `INSERT INTO people (
               id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
@@ -467,13 +487,13 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
             person.name,
             person.english_name,
             person.gender,
-            person.blood_type,
-            person.dob,
-            person.dod,
-            person.tob,
-            person.tod,
+            protectedFields.blood_type ?? null,
+            protectedFields.dob ?? null,
+            protectedFields.dod ?? null,
+            protectedFields.tob ?? null,
+            protectedFields.tod ?? null,
             person.avatar_url,
-            person.metadata,
+            protectedFields.metadata ?? null,
             person.created_at,
             person.updated_at
           ).run();
@@ -506,7 +526,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
               field.id,
               field.person_id,
               field.label,
-              field.value,
+              await encryptProtectedValue(c.env, field.value),
               field.created_at,
               field.updated_at
             ).run();
@@ -519,7 +539,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
           ).bind(
             field.person_id,
             field.label,
-            field.value,
+            await encryptProtectedValue(c.env, field.value),
             field.created_at,
             field.updated_at
           ).run();

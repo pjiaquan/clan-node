@@ -230,3 +230,20 @@ export interface NodeBackupPayload {
     updated_at: string | null;
   }>;
 }
+
+export interface EncryptedNodeBackupPayload {
+  format: 'clan-node-backup-encrypted';
+  version: 1;
+  encrypted_at: string;
+  kdf: {
+    algorithm: 'PBKDF2';
+    hash: 'SHA-256';
+    iterations: number;
+    salt: string;
+  };
+  cipher: {
+    algorithm: 'AES-GCM';
+    iv: string;
+  };
+  data: string;
+}

@@ -2,6 +2,7 @@ export type Env = {
   DB: D1Database;
   AVATARS: R2Bucket;
   ADMIN_SETUP_TOKEN?: string;
+  AUTH_ENCRYPTION_KEY?: string;
   FRONTEND_ORIGIN?: string;
   ENVIRONMENT?: string;
   EMAIL_VERIFICATION_URL_BASE?: string;

@@ -3,6 +3,12 @@ import type { AppBindings, Person, Relationship } from './types';
 import { safeParse } from './utils';
 import { calculateKinship } from './kinship';
 import { loadKinshipLabelMap, resolveKinshipLabel, trackKinshipLabelDefaults } from './kinship_labels';
+import {
+  decryptCustomFieldRows,
+  decryptPersonRow,
+  migratePlaintextCustomFieldRows,
+  migratePlaintextPersonRow
+} from './data_protection';
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
   const loadAvatarMap = async (db: D1Database) => {
@@ -55,6 +61,8 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         console.log('Center person not found');
         return c.json({ error: 'Center person not found' }, 404);
       }
+      await migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>);
+      const decryptedCenter = await decryptPersonRow(c.env, center as Record<string, unknown>);
 
       // Get all people
       console.log('Fetching all people...');
@@ -62,30 +70,34 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
       ).all();
       console.log(`Fetched ${peopleRaw.length} people`);
+      await Promise.all((peopleRaw as any[]).map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)));
       const avatarMap = await loadAvatarMap(c.env.DB);
 
       const { results: customFieldRows } = await c.env.DB.prepare(
-        'SELECT person_id, label, value FROM person_custom_fields'
+        'SELECT id, person_id, label, value FROM person_custom_fields'
       ).all();
+      await migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows as Array<Record<string, unknown>>);
+      const decryptedCustomFieldRows = await decryptCustomFieldRows(c.env, customFieldRows as Array<Record<string, unknown>>);
       const customFieldMap = new Map<string, { label: string; value: string }[]>();
-      customFieldRows.forEach((row: any) => {
+      decryptedCustomFieldRows.forEach((row: any) => {
         const list = customFieldMap.get(row.person_id) || [];
         list.push({ label: row.label, value: row.value });
         customFieldMap.set(row.person_id, list);
       });
 
-      const people = peopleRaw.map((person: any) => {
+      const people = await Promise.all(peopleRaw.map(async (person: any) => {
+        const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
         const avatars = avatarMap.get(String(person.id)) || [];
         return {
-          ...person,
-          avatar_url: resolvePrimaryAvatarUrl(avatars, person.avatar_url as string | null | undefined),
+          ...decryptedPerson,
+          avatar_url: resolvePrimaryAvatarUrl(avatars, decryptedPerson.avatar_url as string | null | undefined),
           avatars,
           metadata: {
-            ...safeParse(person.metadata as string),
-            customFields: customFieldMap.get((person as any).id) || []
+            ...safeParse(decryptedPerson.metadata as string),
+            customFields: customFieldMap.get((decryptedPerson as any).id) || []
           }
         };
-      });
+      }));
       const kinshipPeople: Person[] = people.map((person: any) => ({
         id: String(person.id),
         name: String(person.name),
@@ -128,7 +140,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
             });
             return { ...person, title: resolved.title, formal_title: resolved.formalTitle };
           }
-          const { title, formalTitle } = calculateKinship(centerId, person.id, kinshipRelationships, kinshipPeople, center as any);
+          const { title, formalTitle } = calculateKinship(centerId, person.id, kinshipRelationships, kinshipPeople, decryptedCenter as any);
           observedKinshipDefaults.push({
             default_title: title,
             default_formal_title: formalTitle,
