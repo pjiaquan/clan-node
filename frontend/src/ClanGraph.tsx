@@ -200,7 +200,7 @@ type UndoEntry =
   };
 
 type Gender = Person['gender'];
-type RelationshipChoiceType = 'parent_child' | 'spouse' | 'sibling';
+type RelationshipChoiceType = 'parent_child' | 'spouse' | 'sibling' | 'in_law';
 type PendingRelationshipChoice = {
   from: string;
   to: string;
@@ -1059,6 +1059,7 @@ export function ClanGraph({
   }, [createRelationship]);
 
   const normalizeRelationshipChoiceType = useCallback((type: string): RelationshipChoiceType => {
+    if (type === 'in_law') return 'in_law';
     if (type === 'spouse') return 'spouse';
     if (type === 'sibling') return 'sibling';
     return 'parent_child';
@@ -2872,6 +2873,14 @@ export function ClanGraph({
     () => nodes.filter(node => node.selected).map(node => node.id),
     [nodes]
   );
+  const pendingRelationshipHasDifferentSurname = useMemo(() => {
+    if (!pendingRelationshipChoice || !graphData) return false;
+    const fromPerson = graphData.nodes.find((node) => node.id === pendingRelationshipChoice.from);
+    const toPerson = graphData.nodes.find((node) => node.id === pendingRelationshipChoice.to);
+    const fromSurname = getSurname(fromPerson?.name);
+    const toSurname = getSurname(toPerson?.name);
+    return Boolean(fromSurname && toSurname && fromSurname !== toSurname);
+  }, [pendingRelationshipChoice, graphData]);
 
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (isCoarsePointer) {
@@ -3720,6 +3729,14 @@ export function ClanGraph({
               >
                 {t('relationship.spouse')}
               </button>
+              {pendingRelationshipHasDifferentSurname && (
+                <button
+                  className={`relationship-choice-btn ${pendingRelationshipChoice.suggestedType === 'in_law' ? 'is-suggested' : ''}`}
+                  onClick={() => confirmRelationshipChoice('in_law')}
+                >
+                  {t('relationship.in_law')}
+                </button>
+              )}
             </div>
             <button className="relationship-choice-cancel" onClick={() => setPendingRelationshipChoice(null)}>
               {t('common.cancel')}
