@@ -61,6 +61,7 @@ const getRenderedEdgeType = (relationshipType: string, edgeLineStyle: GraphSetti
 
 const SVG_XMLNS = 'http://www.w3.org/2000/svg';
 const XHTML_XMLNS = 'http://www.w3.org/1999/xhtml';
+const SCREENSHOT_EXPORT_SCALE = 2;
 
 const copyComputedStyles = (source: Element, target: Element) => {
   const sourceStyle = window.getComputedStyle(source);
@@ -841,12 +842,15 @@ export function ClanGraph({
         nextImage.src = svgUrl;
       });
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width * SCREENSHOT_EXPORT_SCALE;
+      canvas.height = height * SCREENSHOT_EXPORT_SCALE;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       const context = canvas.getContext('2d');
       if (!context) {
         throw new Error('canvas-context-missing');
       }
+      context.scale(SCREENSHOT_EXPORT_SCALE, SCREENSHOT_EXPORT_SCALE);
       context.fillStyle = '#ffffff';
       context.fillRect(0, 0, width, height);
       context.drawImage(image, 0, 0, width, height);
