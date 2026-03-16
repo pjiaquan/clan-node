@@ -3180,6 +3180,7 @@ export function ClanGraph({
           nodes={nodesWithHighlights}
           edges={edges}
           nodeTypes={nodeTypes}
+          proOptions={{ hideAttribution: true }}
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
