@@ -347,6 +347,7 @@ export function ClanGraph({
   } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
+  const [pendingParentChildOrderChoice, setPendingParentChildOrderChoice] = useState<PendingRelationshipChoice | null>(null);
   const [pendingSiblingOrderChoice, setPendingSiblingOrderChoice] = useState<PendingRelationshipChoice | null>(null);
   const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
   const {
@@ -1072,6 +1073,10 @@ export function ClanGraph({
     if (!pendingRelationshipChoice) return;
     const choice = pendingRelationshipChoice;
     setPendingRelationshipChoice(null);
+    if (type === 'parent_child' && (!choice.sourceHandle || !choice.targetHandle)) {
+      setPendingParentChildOrderChoice(choice);
+      return;
+    }
     if (type === 'sibling') {
       setPendingSiblingOrderChoice(choice);
       return;
@@ -1084,6 +1089,21 @@ export function ClanGraph({
       type
     );
   }, [pendingRelationshipChoice, createRelationshipWithUndo]);
+
+  const confirmParentChildOrderChoice = useCallback((elderId: string) => {
+    if (!pendingParentChildOrderChoice) return;
+    const youngerId = elderId === pendingParentChildOrderChoice.from
+      ? pendingParentChildOrderChoice.to
+      : pendingParentChildOrderChoice.from;
+    setPendingParentChildOrderChoice(null);
+    void createRelationshipWithUndo(
+      elderId,
+      youngerId,
+      'bottom-s',
+      'top-t',
+      'parent_child'
+    );
+  }, [pendingParentChildOrderChoice, createRelationshipWithUndo]);
 
   const confirmSiblingOrderChoice = useCallback((olderId: string) => {
     if (!pendingSiblingOrderChoice) return;
@@ -2928,6 +2948,15 @@ export function ClanGraph({
       to: toPerson?.name || pendingSiblingOrderChoice.to,
     };
   }, [pendingSiblingOrderChoice, graphData]);
+  const pendingParentChildOrderNames = useMemo(() => {
+    if (!pendingParentChildOrderChoice || !graphData) return null;
+    const fromPerson = graphData.nodes.find((node) => node.id === pendingParentChildOrderChoice.from);
+    const toPerson = graphData.nodes.find((node) => node.id === pendingParentChildOrderChoice.to);
+    return {
+      from: fromPerson?.name || pendingParentChildOrderChoice.from,
+      to: toPerson?.name || pendingParentChildOrderChoice.to,
+    };
+  }, [pendingParentChildOrderChoice, graphData]);
 
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (isCoarsePointer) {
@@ -3812,6 +3841,32 @@ export function ClanGraph({
               </button>
             </div>
             <button className="relationship-choice-cancel" onClick={() => setPendingSiblingOrderChoice(null)}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingParentChildOrderChoice && (
+        <div className="modal-overlay" onClick={() => setPendingParentChildOrderChoice(null)}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{t('graph.selectParentChildOrder')}</h3>
+            <p>{t('graph.parentChildOrderPrompt')}</p>
+            <div className="relationship-choice-actions">
+              <button
+                className="relationship-choice-btn is-suggested"
+                onClick={() => confirmParentChildOrderChoice(pendingParentChildOrderChoice.from)}
+              >
+                {t('graph.parentOlderThan', { name: pendingParentChildOrderNames?.from || pendingParentChildOrderChoice.from })}
+              </button>
+              <button
+                className="relationship-choice-btn"
+                onClick={() => confirmParentChildOrderChoice(pendingParentChildOrderChoice.to)}
+              >
+                {t('graph.parentOlderThan', { name: pendingParentChildOrderNames?.to || pendingParentChildOrderChoice.to })}
+              </button>
+            </div>
+            <button className="relationship-choice-cancel" onClick={() => setPendingParentChildOrderChoice(null)}>
               {t('common.cancel')}
             </button>
           </div>
