@@ -25,6 +25,11 @@ export interface Person {
   formal_title?: string;
   metadata?: {
     position?: { x: number; y: number };
+    render?: {
+      nodeType?: string;
+      variant?: string;
+      [key: string]: any;
+    };
     customFields?: { label: string; value: string }[];
     avatarHash?: string;
     [key: string]: any;
@@ -39,6 +44,11 @@ export interface Relationship {
   metadata?: {
     sourceHandle?: string;
     targetHandle?: string;
+    render?: {
+      variant?: string;
+      edgeType?: string;
+      [key: string]: any;
+    };
     [key: string]: any;
   } | null;
 }

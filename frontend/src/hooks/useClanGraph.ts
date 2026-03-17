@@ -113,16 +113,21 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     };
   }, [centerId, enabled, setCenterId]);
 
-  const updatePerson = useCallback(async (id: string, updates: any) => {
+  const updatePerson = useCallback(async (
+    id: string,
+    updates: any,
+    options?: { focusZoom?: number }
+  ) => {
     try {
+      const focusZoom = options?.focusZoom ?? 1.0;
       try {
         localStorage.setItem('clan.lastEditedId', id);
-        localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: 1.0 }));
+        localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: focusZoom }));
       } catch (error) {
         console.warn('Failed to persist last edited id:', error);
       }
       await api.updatePerson(id, updates);
-      fetchGraph();
+      await fetchGraph();
     } catch (error) {
       console.error('Failed to update person:', error);
       throw error;

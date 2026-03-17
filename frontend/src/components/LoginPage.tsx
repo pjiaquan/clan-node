@@ -70,6 +70,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   return (
     <div className="login-page">
       <div key={cardStageKey} className="login-card">
+        <img className="login-logo" src="/family_tree_logo.png" alt="Family Tree logo" />
         <h1>Family Tree</h1>
         <p>{pendingMfa
           ? pendingMfaMethod === 'totp'

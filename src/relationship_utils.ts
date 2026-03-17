@@ -10,8 +10,8 @@ type SiblingLink = {
 };
 
 const SIBLING_BY_AGE_METADATA = JSON.stringify({
-  sourceHandle: 'right-s',
-  targetHandle: 'left-t'
+  sourceHandle: 'bottom-s',
+  targetHandle: 'top-t'
 });
 
 const SIBLING_DEFAULT_METADATA = JSON.stringify({

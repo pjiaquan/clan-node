@@ -1245,6 +1245,14 @@
   text-align: center;
 }
 
+.login-logo {
+  display: block;
+  width: min(164px, 42vw);
+  height: auto;
+  margin: 0 auto 1rem;
+  object-fit: contain;
+}
+
 .login-card h1 {
   margin: 0 0 0.5rem 0;
   font-size: 1.75rem;
@@ -2857,6 +2865,11 @@ button:disabled:hover {
   .login-card {
     width: min(420px, 100%);
     margin: 0 auto;
+  }
+
+  .login-logo {
+    width: min(140px, 44vw);
+    margin-bottom: 0.85rem;
   }
 
   .user-admin-header {

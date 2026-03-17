@@ -13,7 +13,6 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Person, Relationship } from './types';
 import { api } from './api';
-import PersonNode from './PersonNode';
 import { useClanGraph } from './hooks/useClanGraph';
 import { useGraphAmbientState } from './hooks/useGraphAmbientState';
 import { ContextMenu } from './components/ContextMenu';
@@ -37,15 +36,12 @@ import {
   EDGE_FOCUS_DIM_EDGE_OPACITY,
   EDGE_FOCUS_DIM_NODE_OPACITY
 } from './clanGraph/constants';
+import { getGraphNodeTypes, resolveGraphEdgeRender, resolveGraphNodeRender } from './clanGraph/extensions/registry';
 import { getSurname, isEditableTarget } from './clanGraph/utils';
 import type { GraphSettings } from './graphSettings';
 import { createPersonSearchMatcher } from './utils/personSearch';
 import { useI18n } from './i18n';
 import 'reactflow/dist/style.css';
-
-const nodeTypes = {
-  person: PersonNode,
-};
 
 const getRenderedEdgeType = (relationshipType: string, edgeLineStyle: GraphSettings['edgeLineStyle']) => {
   if (edgeLineStyle === 'spline') {
@@ -351,6 +347,7 @@ export function ClanGraph({
   } | null>(null);
   const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
   const [pendingRelationshipChoice, setPendingRelationshipChoice] = useState<PendingRelationshipChoice | null>(null);
+  const [pendingSiblingOrderChoice, setPendingSiblingOrderChoice] = useState<PendingRelationshipChoice | null>(null);
   const [reportIssuePersonId, setReportIssuePersonId] = useState<string | null>(null);
   const {
     pendingNotificationCount,
@@ -398,6 +395,8 @@ export function ClanGraph({
   const allowNodeDragging = !isReadOnly && (!isLocked || isCoarsePointer);
   const allowNodeConnecting = !isReadOnly && (!isLocked || isCoarsePointer);
   const viewportStorageKey = 'clan.viewport';
+  const nodeTypes = useMemo(() => getGraphNodeTypes(), []);
+  const graphRenderContext = useMemo(() => ({ graphSettings, t }), [graphSettings, t]);
   const [initialViewport] = useState<StoredViewport | null>(() => readStoredViewport(viewportStorageKey));
   const reportIssuePerson = useMemo(() => (
     reportIssuePersonId
@@ -1073,6 +1072,10 @@ export function ClanGraph({
     if (!pendingRelationshipChoice) return;
     const choice = pendingRelationshipChoice;
     setPendingRelationshipChoice(null);
+    if (type === 'sibling') {
+      setPendingSiblingOrderChoice(choice);
+      return;
+    }
     void createRelationshipWithUndo(
       choice.from,
       choice.to,
@@ -1081,6 +1084,21 @@ export function ClanGraph({
       type
     );
   }, [pendingRelationshipChoice, createRelationshipWithUndo]);
+
+  const confirmSiblingOrderChoice = useCallback((olderId: string) => {
+    if (!pendingSiblingOrderChoice) return;
+    const youngerId = olderId === pendingSiblingOrderChoice.from
+      ? pendingSiblingOrderChoice.to
+      : pendingSiblingOrderChoice.from;
+    setPendingSiblingOrderChoice(null);
+    void createRelationshipWithUndo(
+      olderId,
+      youngerId,
+      'bottom-s',
+      'top-t',
+      'sibling'
+    );
+  }, [pendingSiblingOrderChoice, createRelationshipWithUndo]);
 
   const getAutoSpouseLinkCandidate = useCallback((
     draggedId: string,
@@ -2330,11 +2348,9 @@ export function ClanGraph({
             y: centerY + Math.sin((index * 45) * (Math.PI / 180)) * (initialOrbitBaseRadius + (index * initialOrbitStepRadius))
           }
       );
-
-      return {
-        id: person.id,
-        type: 'person',
-        position: position,
+      const requestedNodeType = person.metadata?.render?.nodeType || 'person';
+      const resolvedNodeRender = resolveGraphNodeRender(person, {
+        type: requestedNodeType,
         data: {
           name: person.name,
           initial: person.name.charAt(0),
@@ -2400,9 +2416,19 @@ export function ClanGraph({
           border: 'none',
           opacity,
         },
+      }, graphRenderContext);
+      const nodeType = nodeTypes[resolvedNodeRender.type] ? resolvedNodeRender.type : 'person';
+
+      return {
+        id: person.id,
+        type: nodeType,
+        position: position,
+        data: resolvedNodeRender.data,
+        style: resolvedNodeRender.style,
+        className: resolvedNodeRender.className,
       };
     });
-  }, [graphData, concealedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, selectedEdgeFocusNodeIds, isSelectedEdgeFocusActive, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode]);
+  }, [graphData, concealedNodeIds, collapsedMaternalRoots, collapsedPaternalRoots, collapsedChildRoots, collapsedSiblingRoots, dimIds, centerId, centerFlashId, searchFlashId, focusHoverId, handleAvatarClick, avatarBlobs, openContextMenuAt, isReadOnly, reactFlowInstance, updatePersonPosition, ctrlHoverConnectedNodeIds, isCtrlHoverActive, ctrlHoverFocusId, selectedEdgeFocusNodeIds, isSelectedEdgeFocusActive, graphSettings.initialOrbitBaseRadius, graphSettings.initialOrbitStepRadius, graphSettings.showBirthTimeOnNode, graphRenderContext, nodeTypes]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!graphData) return [];
@@ -2438,13 +2464,9 @@ export function ClanGraph({
           }
         };
 
-        return {
-          id: edgeId,
-          source: edge.from_person_id,
-          target: edge.to_person_id,
-          sourceHandle: edge.metadata?.sourceHandle,
-          targetHandle: edge.metadata?.targetHandle,
-          type: getRenderedEdgeType(edge.type, graphSettings.edgeLineStyle),
+        const requestedEdgeType = edge.metadata?.render?.edgeType || getRenderedEdgeType(edge.type, graphSettings.edgeLineStyle);
+        const resolvedEdgeRender = resolveGraphEdgeRender(edge, {
+          type: requestedEdgeType,
           animated: edge.type === 'spouse' || edge.type === 'sibling',
           markerEnd: { type: MarkerType.ArrowClosed },
           style: (() => {
@@ -2477,9 +2499,25 @@ export function ClanGraph({
           })(),
           zIndex: isSelected ? 1000 : (isConnectedToHoverNode ? 800 : 0),
           interactionWidth: isCoarsePointer ? 56 : 24,
+        }, graphRenderContext);
+
+        return {
+          id: edgeId,
+          source: edge.from_person_id,
+          target: edge.to_person_id,
+          sourceHandle: edge.metadata?.sourceHandle,
+          targetHandle: edge.metadata?.targetHandle,
+          type: resolvedEdgeRender.type,
+          animated: resolvedEdgeRender.animated,
+          markerEnd: resolvedEdgeRender.markerEnd,
+          style: resolvedEdgeRender.style,
+          label: resolvedEdgeRender.label,
+          labelStyle: resolvedEdgeRender.labelStyle,
+          zIndex: resolvedEdgeRender.zIndex,
+          interactionWidth: resolvedEdgeRender.interactionWidth,
         };
       });
-  }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings.edgeLineStyle, t]);
+  }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings.edgeLineStyle, t, graphRenderContext]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -2881,6 +2919,15 @@ export function ClanGraph({
     const toSurname = getSurname(toPerson?.name);
     return Boolean(fromSurname && toSurname && fromSurname !== toSurname);
   }, [pendingRelationshipChoice, graphData]);
+  const pendingSiblingOrderNames = useMemo(() => {
+    if (!pendingSiblingOrderChoice || !graphData) return null;
+    const fromPerson = graphData.nodes.find((node) => node.id === pendingSiblingOrderChoice.from);
+    const toPerson = graphData.nodes.find((node) => node.id === pendingSiblingOrderChoice.to);
+    return {
+      from: fromPerson?.name || pendingSiblingOrderChoice.from,
+      to: toPerson?.name || pendingSiblingOrderChoice.to,
+    };
+  }, [pendingSiblingOrderChoice, graphData]);
 
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node, draggingNodes: Node[] = []) => {
     if (isCoarsePointer) {
@@ -3745,6 +3792,32 @@ export function ClanGraph({
         </div>
       )}
 
+      {pendingSiblingOrderChoice && (
+        <div className="modal-overlay" onClick={() => setPendingSiblingOrderChoice(null)}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{t('graph.selectSiblingOrder')}</h3>
+            <p>{t('graph.siblingOrderPrompt')}</p>
+            <div className="relationship-choice-actions">
+              <button
+                className="relationship-choice-btn is-suggested"
+                onClick={() => confirmSiblingOrderChoice(pendingSiblingOrderChoice.from)}
+              >
+                {t('graph.siblingOlderThan', { name: pendingSiblingOrderNames?.from || pendingSiblingOrderChoice.from })}
+              </button>
+              <button
+                className="relationship-choice-btn"
+                onClick={() => confirmSiblingOrderChoice(pendingSiblingOrderChoice.to)}
+              >
+                {t('graph.siblingOlderThan', { name: pendingSiblingOrderNames?.to || pendingSiblingOrderChoice.to })}
+              </button>
+            </div>
+            <button className="relationship-choice-cancel" onClick={() => setPendingSiblingOrderChoice(null)}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {canManageUsers && showCreateUserModal && (
         <CreateUserModal
           onClose={() => setShowCreateUserModal(false)}
@@ -3762,10 +3835,22 @@ export function ClanGraph({
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const person = graphData.nodes.find(p => p.id === id);
             const existingMetadata = person?.metadata ?? {};
+            const focusZoom = reactFlowInstance?.getZoom?.() ?? 1.0;
+            const persistEditedNodeFocus = () => {
+              setLastEditedId(id);
+              try {
+                localStorage.setItem('clan.lastEditedId', id);
+                localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: focusZoom }));
+              } catch (error) {
+                console.warn('Failed to persist last edited id:', error);
+              }
+            };
             let avatarOperationApplied = false;
             let mergedMetadata = updates.metadata
               ? { ...existingMetadata, ...updates.metadata }
               : undefined;
+
+            persistEditedNodeFocus();
 
             const deleteAvatarIds = avatarActions?.deleteAvatarIds ?? [];
             if (deleteAvatarIds.length > 0) {
@@ -3842,37 +3927,30 @@ export function ClanGraph({
               if (avatarOperationApplied) {
                 await fetchGraph();
                 setEditingPersonId(null);
-              showToast(t('graph.saved'), 'success');
-              const viewport = getViewportForNode(id, 1.0);
-              if (viewport && reactFlowInstance?.setViewport) {
-                reactFlowInstance.setViewport(viewport);
-                persistViewportState(viewport, { pending: true });
-              }
-              focusNodeById(id, 1.0);
-              return;
+                showToast(t('graph.saved'), 'success');
+                const viewport = getViewportForNode(id, focusZoom);
+                if (viewport && reactFlowInstance?.setViewport) {
+                  reactFlowInstance.setViewport(viewport);
+                  persistViewportState(viewport, { pending: true });
+                }
+                focusNodeById(id, focusZoom);
+                return;
               }
               setEditingPersonId(null);
               showToast(t('graph.noChanges'), 'warning');
               return;
             }
 
-            setLastEditedId(id);
             try {
-              localStorage.setItem('clan.lastEditedId', id);
-            } catch (error) {
-              console.warn('Failed to persist last edited id:', error);
-            }
-
-            try {
-              await updatePerson(id, filteredUpdates);
+              await updatePerson(id, filteredUpdates, { focusZoom });
               setEditingPersonId(null);
               showToast(t('graph.saved'), 'success');
-              const viewport = getViewportForNode(id, 1.0);
+              const viewport = getViewportForNode(id, focusZoom);
               if (viewport && reactFlowInstance?.setViewport) {
                 reactFlowInstance.setViewport(viewport);
                 persistViewportState(viewport, { pending: true });
               }
-              focusNodeById(id, 1.0);
+              focusNodeById(id, focusZoom);
             } catch (error) {
               const message = error instanceof Error ? error.message : t('graph.saveFailed');
               showToast(message, 'warning');
