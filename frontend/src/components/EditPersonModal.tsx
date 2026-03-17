@@ -629,7 +629,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   onClick={handleUnlockNameEdit}
                   disabled={isSaving}
                 >
-                  {t('editPerson.unlockName')}
+                  <span className="name-lock-btn-icon" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M6.5 8V6.9a3.5 3.5 0 1 1 7 0" />
+                      <path d="M5.5 8h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z" />
+                      <path d="M9.9 11.35a1.45 1.45 0 1 0 0 2.9" />
+                    </svg>
+                  </span>
+                  <span className="name-lock-btn-label">{t('editPerson.unlockName')}</span>
                 </button>
               ) : (
                 <span className="name-lock-chip">{t('editPerson.nameUnlocked')}</span>

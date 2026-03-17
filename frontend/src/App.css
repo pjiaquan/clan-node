@@ -1,5 +1,7 @@
 :root {
   --header-control-height: 2.35rem;
+  --non-graph-page-bottom-space: max(2.75rem, env(safe-area-inset-bottom) + 1.5rem);
+  --non-graph-page-bottom-space-mobile: max(2rem, env(safe-area-inset-bottom) + 1rem);
 }
 
 .app {
@@ -120,7 +122,7 @@
 
 .user-admin-main {
   width: min(1180px, calc(100vw - 2rem));
-  margin: 1.2rem auto 1.5rem;
+  margin: 1.2rem auto var(--non-graph-page-bottom-space);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -368,7 +370,7 @@
 
 .session-main {
   width: min(1180px, calc(100vw - 2rem));
-  margin: 1.2rem auto 1.5rem;
+  margin: 1.2rem auto var(--non-graph-page-bottom-space);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -616,7 +618,7 @@
 
 .notice-main {
   width: min(1180px, calc(100vw - 2rem));
-  margin: 1.2rem auto 1.5rem;
+  margin: 1.2rem auto var(--non-graph-page-bottom-space);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -1043,7 +1045,7 @@
 
 .graph-settings-main {
   width: min(1180px, calc(100vw - 2rem));
-  margin: 1.2rem auto 1.5rem;
+  margin: 1.2rem auto var(--non-graph-page-bottom-space);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -2516,8 +2518,42 @@ button:disabled:hover {
 }
 
 .name-lock-btn {
-  padding: 0.2rem 0.55rem;
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(217, 119, 6, 0.32);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98) 0%, rgba(254, 240, 138, 0.92) 100%) !important;
+  color: #92400e !important;
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.18);
+}
+
+.name-lock-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 247, 237, 1) 0%, rgba(253, 224, 71, 0.98) 100%) !important;
+  color: #78350f !important;
+  box-shadow: 0 10px 22px rgba(245, 158, 11, 0.24);
+}
+
+.name-lock-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.name-lock-btn-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.name-lock-btn-label {
+  line-height: 1;
 }
 
 .name-lock-chip {
@@ -2897,7 +2933,7 @@ button:disabled:hover {
 
   .user-admin-main {
     width: calc(100vw - 1rem);
-    margin: 0.8rem auto 1rem;
+    margin: 0.8rem auto var(--non-graph-page-bottom-space-mobile);
   }
 
   .user-admin-stats {
@@ -2931,7 +2967,7 @@ button:disabled:hover {
 
   .session-main {
     width: calc(100vw - 1rem);
-    margin: 0.8rem auto 1rem;
+    margin: 0.8rem auto var(--non-graph-page-bottom-space-mobile);
   }
 
   .session-stats {
@@ -2965,7 +3001,7 @@ button:disabled:hover {
 
   .notice-main {
     width: calc(100vw - 1rem);
-    margin: 0.8rem auto 1rem;
+    margin: 0.8rem auto var(--non-graph-page-bottom-space-mobile);
   }
 
   .notice-stats {
@@ -3032,7 +3068,7 @@ button:disabled:hover {
 
   .graph-settings-main {
     width: calc(100vw - 1rem);
-    margin: 0.8rem auto 1rem;
+    margin: 0.8rem auto var(--non-graph-page-bottom-space-mobile);
   }
 
   .graph-settings-grid {
@@ -3569,6 +3605,18 @@ button:disabled:hover {
   color: #bfdbfe;
   background: rgba(30, 64, 175, 0.32);
   border-color: rgba(147, 197, 253, 0.35);
+}
+
+:root[data-theme='dark'] .name-lock-btn {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: linear-gradient(135deg, rgba(120, 53, 15, 0.95) 0%, rgba(180, 83, 9, 0.92) 100%) !important;
+  color: #fef3c7 !important;
+  box-shadow: 0 10px 24px rgba(120, 53, 15, 0.34);
+}
+
+:root[data-theme='dark'] .name-lock-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(146, 64, 14, 0.98) 0%, rgba(217, 119, 6, 0.95) 100%) !important;
+  color: #fffbeb !important;
 }
 
 :root[data-theme='dark'] .name-input-locked {

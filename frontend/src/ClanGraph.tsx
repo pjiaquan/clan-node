@@ -60,6 +60,7 @@ const XHTML_XMLNS = 'http://www.w3.org/1999/xhtml';
 const SCREENSHOT_EXPORT_SCALE = 2;
 const DARK_SCREENSHOT_BG = '#0b1220';
 const LIGHT_SCREENSHOT_BG = '#ffffff';
+const clampEdgeZIndexBelowNodes = (zIndex?: number) => Math.min(zIndex ?? 0, 0);
 
 const copyComputedStyles = (source: Element, target: Element) => {
   const sourceStyle = window.getComputedStyle(source);
@@ -2533,8 +2534,8 @@ export function ClanGraph({
               : baseOpacity;
             return { opacity: finalOpacity };
           })(),
-          // Keep highlighted edges below nodes so the connected people remain visually on top.
-          zIndex: isSelected ? 1 : (isConnectedToHoverNode ? 0 : 0),
+          // Edges should never be raised above node layer, even when highlighted.
+          zIndex: clampEdgeZIndexBelowNodes(),
           interactionWidth: isCoarsePointer ? 56 : 24,
         }, graphRenderContext);
 
@@ -2550,7 +2551,7 @@ export function ClanGraph({
           style: resolvedEdgeRender.style,
           label: resolvedEdgeRender.label,
           labelStyle: resolvedEdgeRender.labelStyle,
-          zIndex: resolvedEdgeRender.zIndex,
+          zIndex: clampEdgeZIndexBelowNodes(resolvedEdgeRender.zIndex),
           interactionWidth: resolvedEdgeRender.interactionWidth,
         };
       });
