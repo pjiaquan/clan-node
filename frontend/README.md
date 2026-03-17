@@ -1,5 +1,7 @@
 # Frontend
 
+![Family Tree logo](./public/family_tree_logo.png)
+
 Custom graph rendering hooks are documented in `../docs/graph-extensions.md`.
 
 # React + TypeScript + Vite
