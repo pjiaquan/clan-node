@@ -19,7 +19,18 @@ export type GraphSettings = {
   autoSpouseMinOverlapRatio: number;
   autoSpouseMinVerticalOverlapRatio: number;
   showBirthTimeOnNode: boolean;
+  showEdgeLabels: boolean;
   edgeLineStyle: EdgeLineStyle;
+  edgeOpacity: number;
+  edgeStrokeWidth: number;
+  selectedEdgeStrokeWidth: number;
+  edgeDashPattern: string;
+  selectedEdgeColor: string;
+  edgeParentChildColor: string;
+  edgeSpouseColor: string;
+  edgeExSpouseColor: string;
+  edgeSiblingColor: string;
+  edgeInLawColor: string;
 };
 
 export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
@@ -41,7 +52,18 @@ export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   autoSpouseMinOverlapRatio: 0.32,
   autoSpouseMinVerticalOverlapRatio: 0.45,
   showBirthTimeOnNode: false,
+  showEdgeLabels: true,
   edgeLineStyle: 'orthogonal',
+  edgeOpacity: 1,
+  edgeStrokeWidth: 2,
+  selectedEdgeStrokeWidth: 4,
+  edgeDashPattern: '',
+  selectedEdgeColor: '#ef4444',
+  edgeParentChildColor: '#6366f1',
+  edgeSpouseColor: '#ec4899',
+  edgeExSpouseColor: '#9ca3af',
+  edgeSiblingColor: '#10b981',
+  edgeInLawColor: '#f59e0b',
 };
 
 const STORAGE_KEY = 'clan.graphSettings';
@@ -69,6 +91,22 @@ const toBoolean = (value: unknown, fallback: boolean) => {
 const toEdgeLineStyle = (value: unknown, fallback: EdgeLineStyle): EdgeLineStyle => {
   if (value === 'orthogonal' || value === 'spline') return value;
   return fallback;
+};
+
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+const toHexColor = (value: unknown, fallback: string) => {
+  if (typeof value === 'string' && HEX_COLOR_RE.test(value.trim())) {
+    return value.trim().toLowerCase();
+  }
+  return fallback;
+};
+
+const toDashPattern = (value: unknown, fallback: string) => {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  return normalized.slice(0, 32);
 };
 
 const sanitizeGraphSettings = (value?: Partial<GraphSettings> | null): GraphSettings => {
@@ -144,7 +182,22 @@ const sanitizeGraphSettings = (value?: Partial<GraphSettings> | null): GraphSett
       1
     ),
     showBirthTimeOnNode: toBoolean(source.showBirthTimeOnNode, DEFAULT_GRAPH_SETTINGS.showBirthTimeOnNode),
+    showEdgeLabels: toBoolean(source.showEdgeLabels, DEFAULT_GRAPH_SETTINGS.showEdgeLabels),
     edgeLineStyle: toEdgeLineStyle(source.edgeLineStyle, DEFAULT_GRAPH_SETTINGS.edgeLineStyle),
+    edgeOpacity: clamp(toFiniteNumber(source.edgeOpacity, DEFAULT_GRAPH_SETTINGS.edgeOpacity), 0, 1),
+    edgeStrokeWidth: clamp(toFiniteNumber(source.edgeStrokeWidth, DEFAULT_GRAPH_SETTINGS.edgeStrokeWidth), 1, 16),
+    selectedEdgeStrokeWidth: clamp(
+      toFiniteNumber(source.selectedEdgeStrokeWidth, DEFAULT_GRAPH_SETTINGS.selectedEdgeStrokeWidth),
+      1,
+      24
+    ),
+    edgeDashPattern: toDashPattern(source.edgeDashPattern, DEFAULT_GRAPH_SETTINGS.edgeDashPattern),
+    selectedEdgeColor: toHexColor(source.selectedEdgeColor, DEFAULT_GRAPH_SETTINGS.selectedEdgeColor),
+    edgeParentChildColor: toHexColor(source.edgeParentChildColor, DEFAULT_GRAPH_SETTINGS.edgeParentChildColor),
+    edgeSpouseColor: toHexColor(source.edgeSpouseColor, DEFAULT_GRAPH_SETTINGS.edgeSpouseColor),
+    edgeExSpouseColor: toHexColor(source.edgeExSpouseColor, DEFAULT_GRAPH_SETTINGS.edgeExSpouseColor),
+    edgeSiblingColor: toHexColor(source.edgeSiblingColor, DEFAULT_GRAPH_SETTINGS.edgeSiblingColor),
+    edgeInLawColor: toHexColor(source.edgeInLawColor, DEFAULT_GRAPH_SETTINGS.edgeInLawColor),
   };
 };
 

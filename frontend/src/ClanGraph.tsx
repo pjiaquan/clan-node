@@ -2462,15 +2462,31 @@ export function ClanGraph({
         const isDimmedBySelectedEdgeFocus = isSelectedEdgeFocusActive && !selectedEdgeFocusEdgeIds.has(edgeId);
         const isDimmed = isDimmedByNode || isDimmedBySelectedEdgeFocus;
         const isConnectedToHoverNode = ctrlHoverConnectedEdgeIds.has(edgeId);
+        const customDashPattern = graphSettings.edgeDashPattern.trim();
 
         const getEdgeStyle = (type: string, selected: boolean) => {
-          if (selected) return { stroke: '#ef4444', strokeWidth: 4 };
+          if (selected) {
+            return {
+              stroke: graphSettings.selectedEdgeColor,
+              strokeWidth: graphSettings.selectedEdgeStrokeWidth,
+              ...(customDashPattern ? { strokeDasharray: customDashPattern } : {}),
+            };
+          }
+          const baseStrokeWidth = graphSettings.edgeStrokeWidth;
+          const baseDashPattern = customDashPattern || (
+            type === 'ex_spouse' || type === 'sibling' ? '6 4' : undefined
+          );
           switch (type) {
-            case 'spouse': return { stroke: '#ec4899', strokeWidth: 2 };
-            case 'ex_spouse': return { stroke: '#9ca3af', strokeWidth: 2, strokeDasharray: '6 4' };
-            case 'sibling': return { stroke: '#10b981', strokeWidth: 2, strokeDasharray: '6 4' };
-            case 'in_law': return { stroke: '#f59e0b', strokeWidth: 2 };
-            default: return { stroke: '#6366f1', strokeWidth: 2 };
+            case 'spouse':
+              return { stroke: graphSettings.edgeSpouseColor, strokeWidth: baseStrokeWidth, ...(baseDashPattern ? { strokeDasharray: baseDashPattern } : {}) };
+            case 'ex_spouse':
+              return { stroke: graphSettings.edgeExSpouseColor, strokeWidth: baseStrokeWidth, ...(baseDashPattern ? { strokeDasharray: baseDashPattern } : {}) };
+            case 'sibling':
+              return { stroke: graphSettings.edgeSiblingColor, strokeWidth: baseStrokeWidth, ...(baseDashPattern ? { strokeDasharray: baseDashPattern } : {}) };
+            case 'in_law':
+              return { stroke: graphSettings.edgeInLawColor, strokeWidth: baseStrokeWidth, ...(baseDashPattern ? { strokeDasharray: baseDashPattern } : {}) };
+            default:
+              return { stroke: graphSettings.edgeParentChildColor, strokeWidth: baseStrokeWidth, ...(baseDashPattern ? { strokeDasharray: baseDashPattern } : {}) };
           }
         };
 
@@ -2492,7 +2508,7 @@ export function ClanGraph({
           style: (() => {
             const baseStyle = getEdgeStyle(edge.type, isSelected);
             const dimOpacity = isDimmedBySelectedEdgeFocus ? EDGE_FOCUS_DIM_EDGE_OPACITY : 0.35;
-            const baseOpacity = isSelected ? 1 : (isDimmed ? dimOpacity : 1);
+            const baseOpacity = (isSelected ? 1 : (isDimmed ? dimOpacity : 1)) * graphSettings.edgeOpacity;
             if (!isCtrlHoverActive) {
               return { ...baseStyle, opacity: baseOpacity };
             }
@@ -2508,7 +2524,7 @@ export function ClanGraph({
               opacity: 1,
             };
           })(),
-          label: getLabel(edge.type),
+          label: graphSettings.showEdgeLabels ? getLabel(edge.type) : undefined,
           labelStyle: (() => {
             const dimOpacity = isDimmedBySelectedEdgeFocus ? EDGE_FOCUS_DIM_EDGE_OPACITY : 0.35;
             const baseOpacity = isSelected ? 1 : (isDimmed ? dimOpacity : 1);
@@ -2517,7 +2533,8 @@ export function ClanGraph({
               : baseOpacity;
             return { opacity: finalOpacity };
           })(),
-          zIndex: isSelected ? 1000 : (isConnectedToHoverNode ? 800 : 0),
+          // Keep highlighted edges below nodes so the connected people remain visually on top.
+          zIndex: isSelected ? 1 : (isConnectedToHoverNode ? 0 : 0),
           interactionWidth: isCoarsePointer ? 56 : 24,
         }, graphRenderContext);
 
@@ -2537,7 +2554,7 @@ export function ClanGraph({
           interactionWidth: resolvedEdgeRender.interactionWidth,
         };
       });
-  }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings.edgeLineStyle, t, graphRenderContext]);
+  }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings, t, graphRenderContext]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);

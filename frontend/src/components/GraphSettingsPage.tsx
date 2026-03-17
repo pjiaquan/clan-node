@@ -32,6 +32,10 @@ type NumericGraphSettingsKey = {
   [Key in keyof GraphSettings]: GraphSettings[Key] extends number ? Key : never;
 }[keyof GraphSettings];
 
+type StringGraphSettingsKey = {
+  [Key in keyof GraphSettings]: GraphSettings[Key] extends string ? Key : never;
+}[keyof GraphSettings];
+
 type FieldSpec = {
   key: NumericGraphSettingsKey;
   min: number;
@@ -152,6 +156,36 @@ const AUTO_LINK_FIELDS: FieldSpec[] = [
   },
 ];
 
+const LINE_NUMERIC_FIELDS: FieldSpec[] = [
+  {
+    key: 'edgeOpacity',
+    min: 0,
+    max: 1,
+    step: 0.05,
+  },
+  {
+    key: 'edgeStrokeWidth',
+    min: 1,
+    max: 16,
+    step: 0.5,
+  },
+  {
+    key: 'selectedEdgeStrokeWidth',
+    min: 1,
+    max: 24,
+    step: 0.5,
+  },
+];
+
+const LINE_COLOR_FIELDS: StringGraphSettingsKey[] = [
+  'selectedEdgeColor',
+  'edgeParentChildColor',
+  'edgeSpouseColor',
+  'edgeExSpouseColor',
+  'edgeSiblingColor',
+  'edgeInLawColor',
+];
+
 const renderField = (
   field: FieldSpec,
   t: (key: string, vars?: Record<string, string | number>) => string,
@@ -205,6 +239,13 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
     setDraft((prev) => ({
       ...prev,
       [key]: next,
+    }));
+  };
+
+  const onStringChange = (key: StringGraphSettingsKey, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      [key]: value,
     }));
   };
 
@@ -376,21 +417,73 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
 
         <section className="graph-settings-panel">
           <h2>{t('settings.lineDisplay')}</h2>
-          <label className="graph-settings-field">
-            <span className="graph-settings-field-label">{t('settings.field.edgeLineStyle.label')}</span>
-            <select
-              className="graph-settings-input"
-              value={draft.edgeLineStyle}
-              onChange={(event) => handleEdgeLineStyleChange(event.target.value)}
-            >
-              {EDGE_LINE_STYLE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {t(`settings.field.edgeLineStyle.option.${option}`)}
-                </option>
-              ))}
-            </select>
-            <small>{t('settings.field.edgeLineStyle.hint')}</small>
-          </label>
+          <div className="graph-settings-grid">
+            <label className="graph-settings-toggle">
+              <input
+                type="checkbox"
+                checked={draft.showEdgeLabels}
+                onChange={(event) => {
+                  const nextChecked = event.target.checked;
+                  const nextDraft = {
+                    ...draft,
+                    showEdgeLabels: nextChecked,
+                  };
+                  setDraft((prev) => ({
+                    ...prev,
+                    showEdgeLabels: nextChecked,
+                  }));
+                  onSave(normalizeGraphSettings(nextDraft), { navigate: false });
+                }}
+              />
+              <div>
+                <span className="graph-settings-field-label">{t('settings.showEdgeLabels')}</span>
+                <small>{t('settings.showEdgeLabelsHint')}</small>
+              </div>
+            </label>
+
+            <label className="graph-settings-field">
+              <span className="graph-settings-field-label">{t('settings.field.edgeLineStyle.label')}</span>
+              <select
+                className="graph-settings-input"
+                value={draft.edgeLineStyle}
+                onChange={(event) => handleEdgeLineStyleChange(event.target.value)}
+              >
+                {EDGE_LINE_STYLE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {t(`settings.field.edgeLineStyle.option.${option}`)}
+                  </option>
+                ))}
+              </select>
+              <small>{t('settings.field.edgeLineStyle.hint')}</small>
+            </label>
+
+            {LINE_NUMERIC_FIELDS.map((field) => renderField(field, t, draft, onNumberChange))}
+
+            <label className="graph-settings-field">
+              <span className="graph-settings-field-label">{t('settings.field.edgeDashPattern.label')}</span>
+              <input
+                className="graph-settings-input"
+                type="text"
+                value={draft.edgeDashPattern}
+                onChange={(event) => onStringChange('edgeDashPattern', event.target.value)}
+                placeholder="6 4"
+              />
+              <small>{t('settings.field.edgeDashPattern.hint')}</small>
+            </label>
+
+            {LINE_COLOR_FIELDS.map((fieldKey) => (
+              <label className="graph-settings-field" key={fieldKey}>
+                <span className="graph-settings-field-label">{t(`settings.field.${fieldKey}.label`)}</span>
+                <input
+                  className="graph-settings-input graph-settings-input-color"
+                  type="color"
+                  value={draft[fieldKey]}
+                  onChange={(event) => onStringChange(fieldKey, event.target.value)}
+                />
+                <small>{t(`settings.field.${fieldKey}.hint`)}</small>
+              </label>
+            ))}
+          </div>
         </section>
 
         <section className="graph-settings-panel">

@@ -1106,6 +1106,11 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
 }
 
+.graph-settings-input-color {
+  min-height: 42px;
+  padding: 0.25rem;
+}
+
 .graph-settings-toggle {
   display: flex;
   align-items: flex-start;
@@ -1757,6 +1762,7 @@
 
 .search-input {
   height: 2.25rem;
+  margin-inline: 0.25rem;
   padding: 0 0.75rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.4);
