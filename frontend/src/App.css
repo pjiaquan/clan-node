@@ -35,9 +35,14 @@
 }
 
 .user-admin-page {
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background: linear-gradient(165deg, #eef2ff 0%, #f8fafc 45%, #ffffff 100%);
   color: #0f172a;
 }
@@ -307,9 +312,14 @@
 }
 
 .session-page {
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background: linear-gradient(165deg, #eef2ff 0%, #f8fafc 40%, #ffffff 100%);
   color: #0f172a;
 }
@@ -555,9 +565,14 @@
 }
 
 .notice-page {
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 42%, #ffffff 100%);
   color: #0f172a;
 }
@@ -1245,11 +1260,21 @@
   text-align: center;
 }
 
+.login-logo-shell {
+  width: fit-content;
+  margin: 0 auto 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
 .login-logo {
   display: block;
   width: min(164px, 42vw);
   height: auto;
-  margin: 0 auto 1rem;
+  margin: 0 auto;
   object-fit: contain;
 }
 
@@ -3519,6 +3544,12 @@ button:disabled:hover {
   box-shadow: var(--app-shadow);
 }
 
+:root[data-theme='dark'] .login-logo-shell {
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.96) 0%, rgba(226, 232, 240, 0.9) 100%);
+  border-color: rgba(148, 163, 184, 0.42);
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.36);
+}
+
 :root[data-theme='dark'] .user-admin-stat-card,
 :root[data-theme='dark'] .session-stat-card,
 :root[data-theme='dark'] .notice-stat-card,
@@ -3931,11 +3962,35 @@ button:disabled:hover {
     right: 0.75rem;
     bottom: 0.75rem;
   }
+
+  .account-avatar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .account-avatar-frame {
+    margin: 0 auto;
+  }
+
+  .account-avatar-actions {
+    flex-direction: column;
+  }
+
+  .account-avatar-actions .session-btn,
+  .account-upload-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .account-meta-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .account-panel {
   display: grid;
   gap: 1rem;
+  overflow: hidden;
 }
 
 .account-form {
