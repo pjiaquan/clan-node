@@ -23,7 +23,7 @@ interface EditPersonModalProps {
     removeAvatar: boolean,
     avatarActions?: EditPersonAvatarActions
   ) => Promise<void> | void;
-  onInvite?: (id: string, email: string) => Promise<void> | void;
+  onInvite?: (id: string, email: string, role: 'admin' | 'readonly') => Promise<void> | void;
 }
 
 type CustomField = { label: string; value: string };
@@ -93,6 +93,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [email, setEmail] = useState(person.email || '');
   const [gender, setGender] = useState(person.gender);
   const [bloodType, setBloodType] = useState(person.blood_type || '');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'readonly'>('readonly');
   const initialDobParts = parsePartialDate(person.dob);
   const [dobYear, setDobYear] = useState(initialDobParts.year);
   const [dobMonth, setDobMonth] = useState(initialDobParts.month);
@@ -157,6 +158,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setAvatarImage(null);
     setIsSaving(false);
     setIsInviting(false);
+    setInviteRole('readonly');
     setSaveError(null);
     setInviteNotice(null);
     setZoom(1);
@@ -504,7 +506,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setSaveError(null);
     setInviteNotice(null);
     try {
-      await onInvite(person.id, normalizedEmail);
+      await onInvite(person.id, normalizedEmail, inviteRole);
       setEmail(normalizedEmail);
       setInviteNotice(t('editPerson.inviteSent', { email: normalizedEmail }));
     } catch (error) {
@@ -735,6 +737,20 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             </div>
             {isVerifiedEmailLocked && (
               <small className="person-email-hint">{t('editPerson.emailManagedInAccount')}</small>
+            )}
+            {!isVerifiedEmailLocked && canInvite && onInvite && (
+              <div className="form-group" style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                <label htmlFor="invite-role">{t('createUser.role')}</label>
+                <select
+                  id="invite-role"
+                  value={inviteRole}
+                  onChange={(event) => setInviteRole(event.target.value === 'admin' ? 'admin' : 'readonly')}
+                  disabled={isInviting || isSaving}
+                >
+                  <option value="readonly">{t('createUser.roleReadonly')}</option>
+                  <option value="admin">{t('createUser.roleAdmin')}</option>
+                </select>
+              </div>
             )}
             {inviteNotice && (
               <small className="person-email-hint is-success">{inviteNotice}</small>

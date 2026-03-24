@@ -13,6 +13,7 @@ type KinshipLabelManagementPageProps = {
   onManageUsers: () => void;
   onManageNotifications: () => void;
   onManageAuditLogs: () => void;
+  onManageData?: () => void;
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
@@ -60,6 +61,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
   onManageUsers,
   onManageNotifications,
   onManageAuditLogs,
+  onManageData,
   themeMode,
   onToggleTheme,
   onLogout,
@@ -261,6 +263,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
+            onManageData={onManageData}
             themeMode={themeMode}
             onToggleTheme={onToggleTheme}
             onLogout={onLogout}

@@ -552,34 +552,30 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
 
       validateRelations(layers, people, avatars, relationships, customFields);
 
-      await c.env.DB.prepare('BEGIN IMMEDIATE').run();
-      try {
-        await c.env.DB.prepare('DELETE FROM graph_layers').run();
-        await c.env.DB.prepare('DELETE FROM relationships').run();
-        await c.env.DB.prepare('DELETE FROM person_custom_fields').run();
-        await c.env.DB.prepare('DELETE FROM person_avatars').run();
-        await c.env.DB.prepare('DELETE FROM people').run();
-        if (hasRelationshipTypeLabels) {
-          await c.env.DB.prepare('DELETE FROM relationship_type_labels').run();
-        }
-        if (hasKinshipLabels) {
-          await c.env.DB.prepare('DELETE FROM kinship_labels').run();
-        }
+      // Pre-encrypt custom fields so we can batch them
+      const encryptedCustomFields = await Promise.all(
+        customFields.map(async (field) => ({
+          ...field,
+          encryptedValue: await encryptProtectedValue(c.env, field.value)
+        }))
+      );
 
-        for (const layer of layers) {
-          await c.env.DB.prepare(
-            `INSERT INTO graph_layers (id, name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?)`
-          ).bind(
-            layer.id,
-            layer.name,
-            layer.description,
-            layer.created_at,
-            layer.updated_at
-          ).run();
-        }
+      // Pre-compute primary avatars
+      const avatarPersonIds = [...new Set(avatars.map((avatar) => avatar.person_id))];
+      const primaryAvatars = new Map<string, string | null>();
+      for (const personId of avatarPersonIds) {
+        const personAvatars = avatars.filter(a => a.person_id === personId);
+        personAvatars.sort((a, b) => {
+          if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
+        primaryAvatars.set(personId, personAvatars[0]?.avatar_url ?? null);
+      }
 
-        for (const person of people) {
+      // Pre-protect people fields
+      const protectedPeople = await Promise.all(
+        people.map(async (person) => {
           const protectedFields = await protectPersonWriteFields(c.env, {
             blood_type: person.blood_type,
             dob: person.dob,
@@ -588,93 +584,120 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
             tod: person.tod,
             metadata: person.metadata
           });
-          await c.env.DB.prepare(
-            `INSERT INTO people (
-              id, name, english_name${peopleSchema.hasEmail ? ', email' : ''}, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
-            , layer_id) VALUES (${peopleSchema.hasEmail ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`
-          ).bind(
-            person.id,
-            person.name,
-            person.english_name,
-            ...(peopleSchema.hasEmail ? [person.email] : []),
-            person.gender,
-            protectedFields.blood_type ?? null,
-            protectedFields.dob ?? null,
-            protectedFields.dod ?? null,
-            protectedFields.tob ?? null,
-            protectedFields.tod ?? null,
-            person.avatar_url,
-            protectedFields.metadata ?? null,
-            person.created_at,
-            person.updated_at,
-            person.layer_id
-          ).run();
-        }
+          return { person, protectedFields };
+        })
+      );
 
-        for (const avatar of avatars) {
-          await c.env.DB.prepare(
-            `INSERT INTO person_avatars (
-              id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(
-            avatar.id,
-            avatar.person_id,
-            avatar.avatar_url,
-            avatar.storage_key,
-            avatar.is_primary ? 1 : 0,
-            avatar.sort_order,
-            avatar.created_at,
-            avatar.updated_at
-          ).run();
-        }
+      const stmts: any[] = [];
 
-        for (const field of customFields) {
-          if (field.id !== null) {
-            await c.env.DB.prepare(
-              `INSERT INTO person_custom_fields (
-                id, person_id, label, value, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?)`
-            ).bind(
-              field.id,
-              field.person_id,
-              field.label,
-              await encryptProtectedValue(c.env, field.value),
-              field.created_at,
-              field.updated_at
-            ).run();
-            continue;
-          }
-          await c.env.DB.prepare(
+      stmts.push(c.env.DB.prepare('DELETE FROM graph_layers'));
+      stmts.push(c.env.DB.prepare('DELETE FROM relationships'));
+      stmts.push(c.env.DB.prepare('DELETE FROM person_custom_fields'));
+      stmts.push(c.env.DB.prepare('DELETE FROM person_avatars'));
+      stmts.push(c.env.DB.prepare('DELETE FROM people'));
+      if (hasRelationshipTypeLabels) {
+        stmts.push(c.env.DB.prepare('DELETE FROM relationship_type_labels'));
+      }
+      if (hasKinshipLabels) {
+        stmts.push(c.env.DB.prepare('DELETE FROM kinship_labels'));
+      }
+
+      for (const layer of layers) {
+        stmts.push(c.env.DB.prepare(
+          `INSERT INTO graph_layers (id, name, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(
+          layer.id, layer.name, layer.description, layer.created_at, layer.updated_at
+        ));
+      }
+
+      for (const { person, protectedFields } of protectedPeople) {
+        stmts.push(c.env.DB.prepare(
+          `INSERT INTO people (
+            id, name, english_name${peopleSchema.hasEmail ? ', email' : ''}, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
+          , layer_id) VALUES (${peopleSchema.hasEmail ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`
+        ).bind(
+          person.id,
+          person.name,
+          person.english_name,
+          ...(peopleSchema.hasEmail ? [person.email] : []),
+          person.gender,
+          protectedFields.blood_type ?? null,
+          protectedFields.dob ?? null,
+          protectedFields.dod ?? null,
+          protectedFields.tob ?? null,
+          protectedFields.tod ?? null,
+          person.avatar_url,
+          protectedFields.metadata ?? null,
+          person.created_at,
+          person.updated_at,
+          person.layer_id
+        ));
+      }
+
+      for (const avatar of avatars) {
+        stmts.push(c.env.DB.prepare(
+          `INSERT INTO person_avatars (
+            id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          avatar.id,
+          avatar.person_id,
+          avatar.avatar_url,
+          avatar.storage_key,
+          avatar.is_primary ? 1 : 0,
+          avatar.sort_order,
+          avatar.created_at,
+          avatar.updated_at
+        ));
+      }
+
+      for (const field of encryptedCustomFields) {
+        if (field.id !== null) {
+          stmts.push(c.env.DB.prepare(
+            `INSERT INTO person_custom_fields (
+              id, person_id, label, value, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(
+            field.id,
+            field.person_id,
+            field.label,
+            field.encryptedValue,
+            field.created_at,
+            field.updated_at
+          ));
+        } else {
+          stmts.push(c.env.DB.prepare(
             `INSERT INTO person_custom_fields (
               person_id, label, value, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?)`
           ).bind(
             field.person_id,
             field.label,
-            await encryptProtectedValue(c.env, field.value),
+            field.encryptedValue,
             field.created_at,
             field.updated_at
-          ).run();
+          ));
         }
+      }
 
-        for (const relation of relationships) {
-          if (relation.id !== null) {
-            await c.env.DB.prepare(
-              `INSERT INTO relationships (
-                id, from_person_id, to_person_id, type, metadata, created_at
-              , layer_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
-            ).bind(
-              relation.id,
-              relation.from_person_id,
-              relation.to_person_id,
-              relation.type,
-              relation.metadata,
-              relation.created_at,
-              relation.layer_id
-            ).run();
-            continue;
-          }
-          await c.env.DB.prepare(
+      for (const relation of relationships) {
+        if (relation.id !== null) {
+          stmts.push(c.env.DB.prepare(
+            `INSERT INTO relationships (
+              id, from_person_id, to_person_id, type, metadata, created_at
+            , layer_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            relation.id,
+            relation.from_person_id,
+            relation.to_person_id,
+            relation.type,
+            relation.metadata,
+            relation.created_at,
+            relation.layer_id
+          ));
+        } else {
+          stmts.push(c.env.DB.prepare(
             `INSERT INTO relationships (
               from_person_id, to_person_id, type, metadata, created_at, layer_id
             ) VALUES (?, ?, ?, ?, ?, ?)`
@@ -685,62 +708,55 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
             relation.metadata,
             relation.created_at,
             relation.layer_id
-          ).run();
+          ));
         }
-
-        if (hasRelationshipTypeLabels) {
-          for (const item of relationshipTypeLabels) {
-            await c.env.DB.prepare(
-              `INSERT INTO relationship_type_labels (
-                type, label, description, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?)`
-            ).bind(
-              item.type,
-              item.label,
-              item.description,
-              item.created_at,
-              item.updated_at
-            ).run();
-          }
-        }
-
-        if (hasKinshipLabels) {
-          for (const item of kinshipLabels) {
-            await c.env.DB.prepare(
-              `INSERT INTO kinship_labels (
-                default_title, default_formal_title, custom_title, custom_formal_title, description, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-            ).bind(
-              item.default_title,
-              item.default_formal_title,
-              item.custom_title,
-              item.custom_formal_title,
-              item.description,
-              item.created_at,
-              item.updated_at
-            ).run();
-          }
-        }
-
-        const avatarPersonIds = [...new Set(avatars.map((avatar) => avatar.person_id))];
-        for (const personId of avatarPersonIds) {
-          const primary = await c.env.DB.prepare(
-            `SELECT avatar_url
-             FROM person_avatars
-             WHERE person_id = ?
-             ORDER BY is_primary DESC, sort_order ASC, created_at ASC
-             LIMIT 1`
-          ).bind(personId).first();
-          await c.env.DB.prepare(
-            'UPDATE people SET avatar_url = ? WHERE id = ?'
-          ).bind((primary as any)?.avatar_url ?? null, personId).run();
-        }
-
-        await c.env.DB.prepare('COMMIT').run();
-      } catch (error) {
-        await c.env.DB.prepare('ROLLBACK').run().catch(() => undefined);
-        throw error;
       }
+
+      if (hasRelationshipTypeLabels) {
+        for (const item of relationshipTypeLabels) {
+          stmts.push(c.env.DB.prepare(
+            `INSERT INTO relationship_type_labels (
+              type, label, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)`
+          ).bind(
+            item.type,
+            item.label,
+            item.description,
+            item.created_at,
+            item.updated_at
+          ));
+        }
+      }
+
+      if (hasKinshipLabels) {
+        for (const item of kinshipLabels) {
+          stmts.push(c.env.DB.prepare(
+            `INSERT INTO kinship_labels (
+              default_title, default_formal_title, custom_title, custom_formal_title, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            item.default_title,
+            item.default_formal_title,
+            item.custom_title,
+            item.custom_formal_title,
+            item.description,
+            item.created_at,
+            item.updated_at
+          ));
+        }
+      }
+
+      for (const [personId, avatarUrl] of primaryAvatars) {
+        stmts.push(c.env.DB.prepare(
+          'UPDATE people SET avatar_url = ? WHERE id = ?'
+        ).bind(avatarUrl, personId));
+      }
+
+      // Execute all statements in a single batch transaction
+      // Note: If backups become extremely large, this might need chunking. 
+      // But D1 batch is the required way for DO atomicity.
+      await c.env.DB.batch(stmts);
+
 
       await recordAuditLog(c, {
         action: 'import_backup',

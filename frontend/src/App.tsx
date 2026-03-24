@@ -748,6 +748,7 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
+          onManageData={() => navigateTo('data')}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -807,6 +808,7 @@ function App() {
         onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
         onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
         onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+        onManageData={authUser.role === 'admin' ? () => navigateTo('data') : undefined}
         onManageSessions={() => navigateTo('sessions')}
         onOpenAccount={() => navigateTo('account')}
         onOpenSettings={() => navigateTo('settings')}

@@ -1160,7 +1160,7 @@ export function ClanGraph({
     }
   }, [showToast, t]);
 
-  const handleInvitePerson = useCallback(async (id: string, email: string) => {
+  const handleInvitePerson = useCallback(async (id: string, email: string, role: 'admin' | 'readonly') => {
     const person = graphData?.nodes.find((node) => node.id === id);
     const normalizedEmail = email.trim().toLowerCase();
     if (!person) {
@@ -1169,7 +1169,7 @@ export function ClanGraph({
     if ((person.email ?? null) !== normalizedEmail) {
       await updatePerson(id, { email: normalizedEmail });
     }
-    await handleCreateUser(normalizedEmail, 'readonly');
+    await handleCreateUser(normalizedEmail, role);
   }, [graphData, handleCreateUser, t, updatePerson]);
 
   useEffect(() => {
