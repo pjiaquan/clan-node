@@ -1,8 +1,20 @@
 -- Family Tree Database Schema for Cloudflare D1
 
+CREATE TABLE IF NOT EXISTS graph_layers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+INSERT OR IGNORE INTO graph_layers (id, name, description) VALUES
+    ('default', 'Default Layer', 'Initial graph layer');
+
 -- People table: stores individual persons (nodes in the graph)
 CREATE TABLE IF NOT EXISTS people (
     id TEXT PRIMARY KEY,
+    layer_id TEXT NOT NULL DEFAULT 'default',
     name TEXT NOT NULL,
     english_name TEXT,
     email TEXT,
@@ -37,6 +49,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_person_primary_avatar ON person_avatars(p
 -- Relationships table: stores connections between people (edges in the graph)
 CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    layer_id TEXT NOT NULL DEFAULT 'default',
     from_person_id TEXT NOT NULL,
     to_person_id TEXT NOT NULL,
     type TEXT CHECK(type IN ('parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law')) NOT NULL,
@@ -51,6 +64,8 @@ CREATE TABLE IF NOT EXISTS relationships (
 CREATE INDEX IF NOT EXISTS idx_relationships_from ON relationships(from_person_id);
 CREATE INDEX IF NOT EXISTS idx_relationships_to ON relationships(to_person_id);
 CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(type);
+CREATE INDEX IF NOT EXISTS idx_people_layer_id ON people(layer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_relationships_layer_id ON relationships(layer_id, created_at);
 
 -- Relationship type labels table: stores editable display names for core relationship types
 CREATE TABLE IF NOT EXISTS relationship_type_labels (
@@ -250,14 +265,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);
 
 -- Sample data for testing
-INSERT OR IGNORE INTO people (id, name, gender, dob) VALUES
-    ('11111111-1111-4111-8111-111111111111', '我', 'M', '1990-01-01'),
-    ('22222222-2222-4222-8222-222222222222', '父親', 'M', '1965-05-15'),
-    ('33333333-3333-4333-8333-333333333333', '母親', 'F', '1968-08-20'),
-    ('44444444-4444-4444-8444-444444444444', '祖父', 'M', '1940-03-10'),
-    ('55555555-5555-4555-8555-555555555555', '祖母', 'F', '1942-07-25'),
-    ('66666666-6666-4666-8666-666666666666', '叔叔', 'M', '1970-12-01'),
-    ('77777777-7777-4777-8777-777777777777', '阿姨', 'F', '1972-04-12');
+INSERT OR IGNORE INTO people (id, layer_id, name, gender, dob) VALUES
+    ('11111111-1111-4111-8111-111111111111', 'default', '我', 'M', '1990-01-01'),
+    ('22222222-2222-4222-8222-222222222222', 'default', '父親', 'M', '1965-05-15'),
+    ('33333333-3333-4333-8333-333333333333', 'default', '母親', 'F', '1968-08-20'),
+    ('44444444-4444-4444-8444-444444444444', 'default', '祖父', 'M', '1940-03-10'),
+    ('55555555-5555-4555-8555-555555555555', 'default', '祖母', 'F', '1942-07-25'),
+    ('66666666-6666-4666-8666-666666666666', 'default', '叔叔', 'M', '1970-12-01'),
+    ('77777777-7777-4777-8777-777777777777', 'default', '阿姨', 'F', '1972-04-12');
 
 INSERT OR IGNORE INTO relationships (from_person_id, to_person_id, type) VALUES
     -- My parents

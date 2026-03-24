@@ -10,13 +10,23 @@ import {
   migratePlaintextPersonRow,
   protectPersonWriteFields
 } from './data_protection';
+import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, ensureLayerSchemaSupport } from './layers';
 
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 2;
 const RELATIONSHIP_TYPES = new Set(['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law']);
 const GENDERS = new Set(['M', 'F', 'O']);
 
+type BackupLayer = {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type BackupPerson = {
   id: string;
+  layer_id: string;
   name: string;
   english_name: string | null;
   email: string | null;
@@ -45,6 +55,7 @@ type BackupAvatar = {
 
 type BackupRelationship = {
   id: number | null;
+  layer_id: string;
   from_person_id: string;
   to_person_id: string;
   type: string;
@@ -164,6 +175,25 @@ const extractDataEnvelope = (body: unknown) => {
   return body;
 };
 
+const parseLayers = (input: unknown[], now: string): BackupLayer[] => {
+  const seen = new Set<string>();
+  return input.map((row, index) => {
+    if (!isRecord(row)) throw new Error(`Invalid layers[${index}]`);
+    const id = asString(row.id, `layers[${index}].id`);
+    if (seen.has(id)) {
+      throw new Error(`Duplicate layer id "${id}"`);
+    }
+    seen.add(id);
+    return {
+      id,
+      name: asString(row.name, `layers[${index}].name`),
+      description: asNullableString(row.description),
+      created_at: asOptionalTimestamp(row.created_at, now),
+      updated_at: asOptionalTimestamp(row.updated_at, now),
+    };
+  });
+};
+
 const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
   const seen = new Set<string>();
   return input.map((row, index) => {
@@ -181,6 +211,7 @@ const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
     }
     return {
       id,
+      layer_id: typeof row.layer_id === 'string' && row.layer_id.trim() ? row.layer_id.trim() : DEFAULT_LAYER_ID,
       name,
       english_name: asNullableString(row.english_name),
       email: asNullableString(row.email),
@@ -224,6 +255,7 @@ const parseRelationships = (input: unknown[], now: string): BackupRelationship[]
     }
     return {
       id: asNullableNumber(row.id),
+      layer_id: typeof row.layer_id === 'string' && row.layer_id.trim() ? row.layer_id.trim() : DEFAULT_LAYER_ID,
       from_person_id: asString(row.from_person_id, `relationships[${index}].from_person_id`),
       to_person_id: asString(row.to_person_id, `relationships[${index}].to_person_id`),
       type,
@@ -280,20 +312,35 @@ const parseKinshipLabels = (input: unknown[], now: string): BackupKinshipLabel[]
 };
 
 const validateRelations = (
+  layers: BackupLayer[],
   people: BackupPerson[],
   avatars: BackupAvatar[],
   relationships: BackupRelationship[],
   customFields: BackupCustomField[]
 ) => {
+  const layerIds = new Set(layers.map((layer) => layer.id));
   const personIds = new Set(people.map((person) => person.id));
+  for (const person of people) {
+    if (!layerIds.has(person.layer_id)) {
+      throw new Error(`Person "${person.id}" references unknown layer "${person.layer_id}"`);
+    }
+  }
   for (const avatar of avatars) {
     if (!personIds.has(avatar.person_id)) {
       throw new Error(`Avatar references unknown person "${avatar.person_id}"`);
     }
   }
   for (const relation of relationships) {
+    if (!layerIds.has(relation.layer_id)) {
+      throw new Error(`Relationship references unknown layer "${relation.layer_id}"`);
+    }
     if (!personIds.has(relation.from_person_id) || !personIds.has(relation.to_person_id)) {
       throw new Error(`Relationship references unknown person: ${relation.from_person_id} -> ${relation.to_person_id}`);
+    }
+    const fromPerson = people.find((person) => person.id === relation.from_person_id);
+    const toPerson = people.find((person) => person.id === relation.to_person_id);
+    if (!fromPerson || !toPerson || fromPerson.layer_id !== relation.layer_id || toPerson.layer_id !== relation.layer_id) {
+      throw new Error(`Relationship crosses layers: ${relation.from_person_id} -> ${relation.to_person_id}`);
     }
     if (relation.from_person_id === relation.to_person_id) {
       throw new Error('Relationship cannot reference the same person');
@@ -341,8 +388,10 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
+    await ensureLayerSchemaSupport(c.env.DB);
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const [
+      layersResult,
       peopleResult,
       avatarsResult,
       relationshipsResult,
@@ -351,13 +400,16 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       kinshipLabelsResult,
     ] = await Promise.all([
       c.env.DB.prepare(
-        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at ASC, id ASC`
+        'SELECT id, name, description, created_at, updated_at FROM graph_layers ORDER BY created_at ASC, id ASC'
+      ).all(),
+      c.env.DB.prepare(
+        `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY layer_id ASC, created_at ASC, id ASC`
       ).all(),
       c.env.DB.prepare(
         'SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at FROM person_avatars ORDER BY person_id ASC, sort_order ASC, created_at ASC'
       ).all(),
       c.env.DB.prepare(
-        'SELECT id, from_person_id, to_person_id, type, metadata, created_at FROM relationships ORDER BY id ASC'
+        'SELECT id, layer_id, from_person_id, to_person_id, type, metadata, created_at FROM relationships ORDER BY layer_id ASC, id ASC'
       ).all(),
       c.env.DB.prepare(
         'SELECT id, person_id, label, value, created_at, updated_at FROM person_custom_fields ORDER BY person_id ASC, id ASC'
@@ -379,8 +431,16 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       version: BACKUP_VERSION,
       exported_at: new Date().toISOString(),
       exported_by: sessionUser?.username || null,
+      layers: layersResult.results.map((row: any) => ({
+        id: String(row.id),
+        name: String(row.name),
+        description: row.description === null ? null : String(row.description),
+        created_at: String(row.created_at),
+        updated_at: String(row.updated_at),
+      })),
       people: decryptedPeople.map((row: any) => ({
         id: String(row.id),
+        layer_id: String(row.layer_id ?? DEFAULT_LAYER_ID),
         name: String(row.name),
         english_name: row.english_name === null ? null : String(row.english_name),
         email: row.email === null || row.email === undefined ? null : String(row.email),
@@ -407,6 +467,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       })),
       relationships: relationshipsResult.results.map((row: any) => ({
         id: Number(row.id),
+        layer_id: String(row.layer_id ?? DEFAULT_LAYER_ID),
         from_person_id: String(row.from_person_id),
         to_person_id: String(row.to_person_id),
         type: String(row.type),
@@ -444,8 +505,9 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       resourceType: 'graph',
       summary: `匯出節點備份（${payload.people.length} 節點）`,
       details: {
-        people: payload.people.length,
-        avatars: payload.person_avatars.length,
+          people: payload.people.length,
+          layers: payload.layers.length,
+          avatars: payload.person_avatars.length,
         relationships: payload.relationships.length,
         custom_fields: payload.person_custom_fields.length,
       }
@@ -464,7 +526,17 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
       const source = extractDataEnvelope(body);
       const now = new Date().toISOString();
+      await ensureLayerSchemaSupport(c.env.DB);
 
+      const layers = Array.isArray(source.layers)
+        ? parseLayers(source.layers as unknown[], now)
+        : [{
+          id: DEFAULT_LAYER_ID,
+          name: DEFAULT_LAYER_NAME,
+          description: 'Legacy backup default layer',
+          created_at: now,
+          updated_at: now,
+        }];
       const people = parsePeople(requireArrayField(source, 'people'), now);
       const avatars = parseAvatars(requireArrayField(source, 'person_avatars'), now);
       const relationships = parseRelationships(requireArrayField(source, 'relationships'), now);
@@ -478,10 +550,11 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         ? parseKinshipLabels(source.kinship_labels as unknown[], now)
         : [];
 
-      validateRelations(people, avatars, relationships, customFields);
+      validateRelations(layers, people, avatars, relationships, customFields);
 
       await c.env.DB.prepare('BEGIN IMMEDIATE').run();
       try {
+        await c.env.DB.prepare('DELETE FROM graph_layers').run();
         await c.env.DB.prepare('DELETE FROM relationships').run();
         await c.env.DB.prepare('DELETE FROM person_custom_fields').run();
         await c.env.DB.prepare('DELETE FROM person_avatars').run();
@@ -491,6 +564,19 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         }
         if (hasKinshipLabels) {
           await c.env.DB.prepare('DELETE FROM kinship_labels').run();
+        }
+
+        for (const layer of layers) {
+          await c.env.DB.prepare(
+            `INSERT INTO graph_layers (id, name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)`
+          ).bind(
+            layer.id,
+            layer.name,
+            layer.description,
+            layer.created_at,
+            layer.updated_at
+          ).run();
         }
 
         for (const person of people) {
@@ -505,7 +591,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
           await c.env.DB.prepare(
             `INSERT INTO people (
               id, name, english_name${peopleSchema.hasEmail ? ', email' : ''}, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
-            ) VALUES (${peopleSchema.hasEmail ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`
+            , layer_id) VALUES (${peopleSchema.hasEmail ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`
           ).bind(
             person.id,
             person.name,
@@ -520,7 +606,8 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
             person.avatar_url,
             protectedFields.metadata ?? null,
             person.created_at,
-            person.updated_at
+            person.updated_at,
+            person.layer_id
           ).run();
         }
 
@@ -575,27 +662,29 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
             await c.env.DB.prepare(
               `INSERT INTO relationships (
                 id, from_person_id, to_person_id, type, metadata, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?)`
+              , layer_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
             ).bind(
               relation.id,
               relation.from_person_id,
               relation.to_person_id,
               relation.type,
               relation.metadata,
-              relation.created_at
+              relation.created_at,
+              relation.layer_id
             ).run();
             continue;
           }
           await c.env.DB.prepare(
             `INSERT INTO relationships (
-              from_person_id, to_person_id, type, metadata, created_at
-            ) VALUES (?, ?, ?, ?, ?)`
+              from_person_id, to_person_id, type, metadata, created_at, layer_id
+            ) VALUES (?, ?, ?, ?, ?, ?)`
           ).bind(
             relation.from_person_id,
             relation.to_person_id,
             relation.type,
             relation.metadata,
-            relation.created_at
+            relation.created_at,
+            relation.layer_id
           ).run();
         }
 
@@ -659,6 +748,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         summary: `匯入節點備份（${people.length} 節點）`,
         details: {
           people: people.length,
+          layers: layers.length,
           avatars: avatars.length,
           relationships: relationships.length,
           custom_fields: customFields.length,
@@ -674,6 +764,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         version: BACKUP_VERSION,
         counts: {
           people: people.length,
+          layers: layers.length,
           avatars: avatars.length,
           relationships: relationships.length,
           custom_fields: customFields.length,

@@ -35,6 +35,8 @@ const MESSAGES: Record<Language, Record<string, string>> = {
     'app.langButtonZh': '中文',
 
     'header.searchPlaceholder': '搜尋姓名或自訂欄位',
+    'header.layerSelect': '圖層',
+    'header.newLayer': '新增圖層',
     'header.menu': '選單',
     'header.readOnly': '只讀',
     'header.sessionManagement': 'Session 管理',
@@ -609,6 +611,8 @@ const MESSAGES: Record<Language, Record<string, string>> = {
     'app.langButtonZh': '中文',
 
     'header.searchPlaceholder': 'Search name or custom field',
+    'header.layerSelect': 'Layer',
+    'header.newLayer': 'New layer',
     'header.menu': 'Menu',
     'header.readOnly': 'Read only',
     'header.sessionManagement': 'Sessions',

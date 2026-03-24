@@ -304,7 +304,11 @@ export function ClanGraph({
     createPerson,
     deletePerson,
     setCenterId,
-    centerId
+    centerId,
+    layers,
+    activeLayerId,
+    setActiveLayerId,
+    createLayer
   } = useClanGraph();
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -3166,12 +3170,14 @@ export function ClanGraph({
             entry.person.blood_type ?? undefined,
             entry.person.metadata ?? undefined,
             entry.person.id,
-            entry.person.avatar_url ?? undefined
+            entry.person.avatar_url ?? undefined,
+            entry.person.layer_id ?? activeLayerId
           );
           for (const rel of entry.relationships) {
             await api.createRelationship(
               rel.from_person_id,
               rel.to_person_id,
+              rel.layer_id ?? activeLayerId,
               rel.metadata ?? undefined,
               rel.type as 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law',
               true
@@ -3384,6 +3390,21 @@ export function ClanGraph({
   return (
     <div className="app">
       <Header
+        layers={layers}
+        activeLayerId={activeLayerId}
+        onSelectLayer={(layerId) => {
+          void setActiveLayerId(layerId);
+          setSelectedNode(null);
+          setSelectedEdge(null);
+        }}
+        onCreateLayer={() => {
+          if (!ensureEditable()) return;
+          const name = window.prompt(t('header.newLayer'));
+          if (!name || !name.trim()) return;
+          void createLayer(name.trim()).catch((error) => {
+            showToast(error instanceof Error ? error.message : t('graph.saveFailed'), 'warning');
+          });
+        }}
         readOnly={isReadOnly}
         isAdmin={canManageUsers}
         onManageUsers={canManageUsers ? onManageUsers : undefined}

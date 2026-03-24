@@ -10,6 +10,7 @@ import { registerAuditRoutes } from './audit';
 import { registerRelationshipTypeLabelRoutes } from './relationship_type_labels';
 import { registerKinshipLabelRoutes } from './kinship_labels';
 import { registerBackupRoutes } from './backup';
+import { registerLayerRoutes } from './layers';
 
 const app = new Hono<AppBindings>();
 
@@ -58,5 +59,6 @@ registerAuditRoutes(app);
 registerRelationshipTypeLabelRoutes(app);
 registerKinshipLabelRoutes(app);
 registerBackupRoutes(app);
+registerLayerRoutes(app);
 
 export default app;

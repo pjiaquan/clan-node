@@ -36,6 +36,7 @@ export type AppBindings = {
 
 export interface Relationship {
   id: number;
+  layer_id?: string;
   from_person_id: string;
   to_person_id: string;
   type: string;
@@ -43,6 +44,7 @@ export interface Relationship {
 
 export interface Person {
   id: string;
+  layer_id?: string;
   name: string;
   english_name?: string | null;
   email?: string | null;
@@ -51,4 +53,14 @@ export interface Person {
   dob?: string;
   title?: string;
   formal_title?: string;
+}
+
+export interface GraphLayer {
+  id: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  updated_at: string;
+  node_count: number;
+  relationship_count: number;
 }

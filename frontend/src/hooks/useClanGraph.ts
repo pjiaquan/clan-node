@@ -1,6 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
-import type { GraphData } from '../types';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import type { GraphData, GraphLayer } from '../types';
 import { api } from '../api';
+
+const ACTIVE_LAYER_STORAGE_KEY = 'clan.layer.active';
+const defaultCenterId = '296f7664-ec3c-49c4-946c-4c54e8ce96e4';
 
 const parseMetadata = (value: any) => {
   if (!value) return null;
@@ -13,39 +16,89 @@ const parseMetadata = (value: any) => {
   }
 };
 
+const readStoredActiveLayerId = () => {
+  try {
+    return localStorage.getItem(ACTIVE_LAYER_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+const getCenterStorageKey = (layerId: string) => `clan.centerId.${layerId}`;
+
 export function useClanGraph(options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
   const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const resolveInitialCenterId = () => {
-    try {
-      const storedCenter = localStorage.getItem('clan.centerId');
-      if (storedCenter) return storedCenter;
-    } catch {
-      // Ignore localStorage errors and fall back to default initialization.
-    }
-    return '';
-  };
-  const [centerId, setCenterIdState] = useState<string>(() => resolveInitialCenterId());
+  const [layers, setLayers] = useState<GraphLayer[]>([]);
+  const [activeLayerId, setActiveLayerIdState] = useState<string>(() => readStoredActiveLayerId());
+  const [centerId, setCenterIdState] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const centerStorageKey = 'clan.centerId';
-  const defaultCenterId = '296f7664-ec3c-49c4-946c-4c54e8ce96e4';
 
-  const setCenterId = useCallback((id: string) => {
-    setCenterIdState(id);
+  const activeLayer = useMemo(
+    () => layers.find((layer) => layer.id === activeLayerId) ?? null,
+    [layers, activeLayerId]
+  );
+
+  const persistActiveLayerId = useCallback((layerId: string) => {
+    setActiveLayerIdState(layerId);
     try {
-      if (id) localStorage.setItem(centerStorageKey, id);
+      if (layerId) localStorage.setItem(ACTIVE_LAYER_STORAGE_KEY, layerId);
     } catch (err) {
-      console.warn('Failed to persist centerId:', err);
+      console.warn('Failed to persist active layer id:', err);
     }
   }, []);
 
+  const setCenterId = useCallback((id: string) => {
+    setCenterIdState(id);
+    if (!activeLayerId || !id) return;
+    try {
+      localStorage.setItem(getCenterStorageKey(activeLayerId), id);
+    } catch (err) {
+      console.warn('Failed to persist centerId:', err);
+    }
+  }, [activeLayerId]);
+
+  const loadLayerCenter = useCallback(async (layerId: string) => {
+    try {
+      const storedCenter = localStorage.getItem(getCenterStorageKey(layerId));
+      if (storedCenter) {
+        setCenterIdState(storedCenter);
+        return;
+      }
+    } catch {
+      // Ignore localStorage errors and fall back to API initialization.
+    }
+
+    const people = await api.fetchPeople(layerId);
+    if (people.length) {
+      const hasDefault = people.some((person) => person.id === defaultCenterId);
+      const nextCenterId = hasDefault ? defaultCenterId : people[0].id;
+      setCenterIdState(nextCenterId);
+      try {
+        localStorage.setItem(getCenterStorageKey(layerId), nextCenterId);
+      } catch (error) {
+        console.warn('Failed to persist initialized centerId:', error);
+      }
+      return;
+    }
+
+    setCenterIdState('');
+    setError('No people found');
+  }, []);
+
+  const fetchLayers = useCallback(async () => {
+    const items = await api.fetchLayers();
+    setLayers(items);
+    return items;
+  }, []);
+
   const fetchGraph = useCallback(async () => {
-    if (!centerId || !enabled) return;
+    if (!centerId || !activeLayerId || !enabled) return;
     try {
       setLoading(true);
       setError(null);
-      const data = await api.fetchGraph(centerId);
+      const data = await api.fetchGraph(centerId, activeLayerId);
       setGraphData(data);
     } catch (err) {
       console.error('Failed to fetch graph:', err);
@@ -53,53 +106,65 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [centerId, enabled]);
+  }, [centerId, activeLayerId, enabled]);
 
   const refreshEdges = useCallback(async () => {
+    if (!activeLayerId) return;
     try {
-      const relationships = await api.fetchRelationships();
+      const relationships = await api.fetchRelationships(activeLayerId);
       setGraphData((prev) => (prev ? { ...prev, edges: relationships } : prev));
     } catch (error) {
       console.error('Failed to refresh edges:', error);
     }
-  }, []);
+  }, [activeLayerId]);
 
   const refreshNodes = useCallback(async () => {
-    if (!centerId) return;
+    if (!centerId || !activeLayerId) return;
     try {
-      const data = await api.fetchGraph(centerId);
+      const data = await api.fetchGraph(centerId, activeLayerId);
       setGraphData((prev) => (prev ? { ...prev, nodes: data.nodes } : data));
     } catch (error) {
       console.error('Failed to refresh nodes:', error);
     }
-  }, [centerId]);
+  }, [centerId, activeLayerId]);
 
   useEffect(() => {
-    if (!centerId || !enabled) return;
-    fetchGraph();
-  }, [fetchGraph, centerId, enabled]);
+    if (!enabled) return;
+    let cancelled = false;
+    const initLayers = async () => {
+      try {
+        setLoading(true);
+        const items = await fetchLayers();
+        if (cancelled) return;
+        if (!items.length) {
+          setError('No layers found');
+          setLoading(false);
+          return;
+        }
+        const preferredLayerId = items.some((layer) => layer.id === activeLayerId)
+          ? activeLayerId
+          : items[0].id;
+        persistActiveLayerId(preferredLayerId);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unknown error');
+          setLoading(false);
+        }
+      }
+    };
+    void initLayers();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLayerId, enabled, fetchLayers, persistActiveLayerId]);
 
   useEffect(() => {
-    if (centerId || !enabled) return;
+    if (!activeLayerId || !enabled) return;
     let cancelled = false;
     const initCenter = async () => {
       try {
-        setLoading(true);
-        const storedCenter = localStorage.getItem(centerStorageKey);
-        if (storedCenter) {
-          if (!cancelled) setCenterIdState(storedCenter);
-          return;
-        }
-        const people = await api.fetchPeople();
-        if (!cancelled) {
-          if (people.length) {
-            const hasDefault = people.some((person) => person.id === defaultCenterId);
-            setCenterId(hasDefault ? defaultCenterId : people[0].id);
-          } else {
-            setError('No people found');
-            setLoading(false);
-          }
-        }
+        setError(null);
+        await loadLayerCenter(activeLayerId);
       } catch (error) {
         if (!cancelled) {
           setError(error instanceof Error ? error.message : 'Unknown error');
@@ -107,11 +172,40 @@ export function useClanGraph(options?: { enabled?: boolean }) {
         }
       }
     };
-    initCenter();
+    void initCenter();
     return () => {
       cancelled = true;
     };
-  }, [centerId, enabled, setCenterId]);
+  }, [activeLayerId, enabled, loadLayerCenter]);
+
+  useEffect(() => {
+    if (!centerId || !activeLayerId || !enabled) return;
+    void fetchGraph();
+  }, [fetchGraph, centerId, activeLayerId, enabled]);
+
+  const setActiveLayerId = useCallback(async (layerId: string) => {
+    persistActiveLayerId(layerId);
+    setGraphData(null);
+    setCenterIdState('');
+  }, [persistActiveLayerId]);
+
+  const createLayer = useCallback(async (name: string) => {
+    const created = await api.createLayer(name);
+    const updatedLayers = await fetchLayers();
+    const nextLayerId = created.layer.id || updatedLayers[0]?.id || '';
+    if (nextLayerId) {
+      persistActiveLayerId(nextLayerId);
+      if (created.center_id) {
+        setCenterIdState(created.center_id);
+        try {
+          localStorage.setItem(getCenterStorageKey(nextLayerId), created.center_id);
+        } catch (error) {
+          console.warn('Failed to persist new layer centerId:', error);
+        }
+      }
+    }
+    return created;
+  }, [fetchLayers, persistActiveLayerId]);
 
   const updatePerson = useCallback(async (
     id: string,
@@ -122,7 +216,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       const focusZoom = options?.focusZoom ?? 1.0;
       try {
         localStorage.setItem('clan.lastEditedId', id);
-        localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: focusZoom }));
+        localStorage.setItem('clan.pendingFocus', JSON.stringify({ id, zoom: focusZoom, layerId: activeLayerId }));
       } catch (error) {
         console.warn('Failed to persist last edited id:', error);
       }
@@ -132,7 +226,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       console.error('Failed to update person:', error);
       throw error;
     }
-  }, [fetchGraph]);
+  }, [activeLayerId, fetchGraph]);
 
   const updatePersonPosition = useCallback(async (
     id: string,
@@ -161,16 +255,17 @@ export function useClanGraph(options?: { enabled?: boolean }) {
   }, [graphData]);
 
   const createRelationship = useCallback(async (
-    from: string, 
-    to: string, 
-    sourceHandle?: string | null, 
+    from: string,
+    to: string,
+    sourceHandle?: string | null,
     targetHandle?: string | null,
     type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     metadataOverride?: any
   ): Promise<number[]> => {
+    if (!activeLayerId) return [];
     try {
       const metadata = metadataOverride ?? ((sourceHandle || targetHandle) ? { sourceHandle, targetHandle } : undefined);
-      const created = await api.createRelationship(from, to, metadata, type);
+      const created = await api.createRelationship(from, to, activeLayerId, metadata, type);
       await Promise.all([refreshEdges(), refreshNodes()]);
       const rawIds = Array.isArray(created.created_relationship_ids) && created.created_relationship_ids.length
         ? created.created_relationship_ids
@@ -180,7 +275,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       console.error('Failed to create relationship:', error);
       return [];
     }
-  }, [refreshEdges, refreshNodes]);
+  }, [activeLayerId, refreshEdges, refreshNodes]);
 
   const updateRelationship = useCallback(async (edgeId: string, updates: any) => {
     try {
@@ -201,13 +296,8 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     try {
       const oldSourceHandle = edge.metadata?.sourceHandle || '';
       const oldTargetHandle = edge.metadata?.targetHandle || '';
-
-      // Convert old target handle (e.g. 'bottom-t') to new source handle ('bottom-s')
       const newSourceHandle = oldTargetHandle.replace('-t', '-s');
-      
-      // Convert old source handle (e.g. 'top-s') to new target handle ('top-t')
       const newTargetHandle = oldSourceHandle.replace('-s', '-t');
-
       const newMetadata = {
         ...edge.metadata,
         sourceHandle: newSourceHandle,
@@ -217,7 +307,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       await api.updateRelationship(edgeId, {
         from_person_id: edge.to_person_id,
         to_person_id: edge.from_person_id,
-        metadata: newMetadata // Send updated metadata
+        metadata: newMetadata
       });
       refreshEdges();
       refreshNodes();
@@ -258,8 +348,11 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     avatar_url?: string,
     options?: { skipFetch?: boolean }
   ) => {
+    if (!activeLayerId) {
+      throw new Error('No active layer selected');
+    }
     try {
-      const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, blood_type, metadata, id, avatar_url);
+      const person = await api.createPerson(name, english_name, gender, dob, dod, tob, tod, blood_type, metadata, id, avatar_url, activeLayerId);
       const normalizedPerson = {
         ...person,
         metadata: parseMetadata((person as any).metadata),
@@ -267,7 +360,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       if (options?.skipFetch) {
         setGraphData((prev) => {
           if (!prev) {
-            return { center: normalizedPerson.id, nodes: [normalizedPerson], edges: [] };
+            return { center: normalizedPerson.id, layer_id: activeLayerId, nodes: [normalizedPerson], edges: [] };
           }
           return { ...prev, nodes: [...prev.nodes, normalizedPerson] };
         });
@@ -309,6 +402,11 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     deleteRelationship,
     refreshEdges,
     createPerson,
-    deletePerson
+    deletePerson,
+    layers,
+    activeLayer,
+    activeLayerId,
+    setActiveLayerId,
+    createLayer,
   };
 }

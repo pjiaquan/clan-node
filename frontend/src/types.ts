@@ -11,6 +11,7 @@ export interface Avatar {
 
 export interface Person {
   id: string;
+  layer_id?: string | null;
   name: string;
   english_name?: string | null;
   email?: string | null;
@@ -39,6 +40,7 @@ export interface Person {
 
 export interface Relationship {
   id: number;
+  layer_id?: string | null;
   from_person_id: string;
   to_person_id: string;
   type: string;
@@ -77,9 +79,20 @@ export interface KinshipLabel {
 }
 
 export interface GraphData {
+  layer_id?: string;
   center: string;
   nodes: Person[];
   edges: Relationship[];
+}
+
+export interface GraphLayer {
+  id: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  updated_at: string;
+  node_count: number;
+  relationship_count: number;
 }
 
 export type UserRole = 'admin' | 'readonly';
@@ -208,8 +221,16 @@ export interface NodeBackupPayload {
   version: number;
   exported_at: string;
   exported_by?: string | null;
+  layers?: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+  }>;
   people: Array<{
     id: string;
+    layer_id?: string;
     name: string;
     english_name: string | null;
     email: string | null;
@@ -236,6 +257,7 @@ export interface NodeBackupPayload {
   }>;
   relationships: Array<{
     id: number | null;
+    layer_id?: string;
     from_person_id: string;
     to_person_id: string;
     type: string;

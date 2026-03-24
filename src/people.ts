@@ -14,6 +14,7 @@ import {
   protectPersonWriteFields,
   encryptProtectedValue
 } from './data_protection';
+import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 
 type UploadFile = Blob & {
   name?: string;
@@ -41,11 +42,11 @@ const isUploadFile = (value: unknown): value is UploadFile => (
   && typeof (value as Blob).stream === 'function'
 );
 
-async function updateSiblingOrdering(env: Env, personId: string) {
+async function updateSiblingOrdering(env: Env, personId: string, layerId: string) {
   const db = env.DB;
   const person = await db.prepare(
-    'SELECT id, dob FROM people WHERE id = ?'
-  ).bind(personId).first();
+    'SELECT id, dob FROM people WHERE id = ? AND layer_id = ?'
+  ).bind(personId, layerId).first();
 
   const personDob = person && (person as any).dob
     ? new Date((await decryptProtectedValue(env, (person as any).dob as string | null)) || '').getTime()
@@ -53,15 +54,15 @@ async function updateSiblingOrdering(env: Env, personId: string) {
   if (!personDob) return;
 
   const { results } = await db.prepare(
-    "SELECT id, from_person_id, to_person_id FROM relationships WHERE type = 'sibling' AND (from_person_id = ? OR to_person_id = ?)"
-  ).bind(personId, personId).all();
+    "SELECT id, from_person_id, to_person_id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND (from_person_id = ? OR to_person_id = ?)"
+  ).bind(layerId, personId, personId).all();
 
   for (const rel of results) {
     const relAny = rel as any;
     const otherId = relAny.from_person_id === personId ? relAny.to_person_id : relAny.from_person_id;
     const other = await db.prepare(
-      'SELECT id, dob FROM people WHERE id = ?'
-    ).bind(otherId).first();
+      'SELECT id, dob FROM people WHERE id = ? AND layer_id = ?'
+    ).bind(otherId, layerId).first();
     const otherDob = other && (other as any).dob
       ? new Date((await decryptProtectedValue(env, (other as any).dob as string | null)) || '').getTime()
       : 0;
@@ -70,8 +71,8 @@ async function updateSiblingOrdering(env: Env, personId: string) {
     const link = buildSiblingLinkMeta(personId, otherId, personDob, otherDob);
 
     await db.prepare(
-      'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ?'
-    ).bind(link.fromId, link.toId, link.metadata, relAny.id).run();
+      'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ? AND layer_id = ?'
+    ).bind(link.fromId, link.toId, link.metadata, relAny.id, layerId).run();
   }
 }
 
@@ -252,11 +253,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     return avatars;
   };
 
-  const loadCustomFields = async (env: Env) => {
+  const loadCustomFields = async (env: Env, layerId: string) => {
     const db = env.DB;
     const { results } = await db.prepare(
-      'SELECT id, person_id, label, value FROM person_custom_fields'
-    ).all();
+      `SELECT cf.id, cf.person_id, cf.label, cf.value
+       FROM person_custom_fields cf
+       INNER JOIN people p ON p.id = cf.person_id
+       WHERE p.layer_id = ?`
+    ).bind(layerId).all();
     await migratePlaintextCustomFieldRows(db, env, results as Array<Record<string, unknown>>);
     const decrypted = await decryptCustomFieldRows(env, results as Array<Record<string, unknown>>);
     const map = new Map<string, { label: string; value: string }[]>();
@@ -292,6 +296,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const primaryAvatar = resolvePrimaryAvatar(avatars);
     return {
       ...person,
+      layer_id: person.layer_id ?? null,
       avatar_url: primaryAvatar?.avatar_url || person.avatar_url || null,
       avatars,
       metadata: {
@@ -317,7 +322,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   const ensurePersonExists = async (db: Env['DB'], personId: string) => {
     const existing = await db.prepare(
-      'SELECT id, name, avatar_url FROM people WHERE id = ?'
+      'SELECT id, layer_id, name, avatar_url FROM people WHERE id = ?'
     ).bind(personId).first();
     if (!existing) return null;
     await ensureAvatarFromLegacy(db, existing as any);
@@ -411,12 +416,20 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Get all people
   app.get('/api/people', async (c) => {
+    const layerId = resolveLayerId(c);
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const { results } = await c.env.DB.prepare(
-      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at`
-    ).all();
+      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
+       FROM people
+       WHERE layer_id = ?
+       ORDER BY created_at`
+    ).bind(layerId).all();
     await Promise.all((results as any[]).map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row as Record<string, unknown>)));
-    const customFieldsMap = await loadCustomFields(c.env);
+    const customFieldsMap = await loadCustomFields(c.env, layerId);
     const avatarMap = await loadAvatarMap(c.env.DB);
 
     const parsedResults = await Promise.all(results.map(async (person: any) => {
@@ -433,7 +446,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const id = c.req.param('id');
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const person = await c.env.DB.prepare(
-      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
+      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     if (!person) {
@@ -469,10 +482,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   app.post('/api/people', async (c) => {
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const body = await c.req.json();
+    const layerId = resolveLayerId(c, body);
     const { id: providedId, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     if (!name) {
       return c.json({ error: 'Name is required' }, 400);
+    }
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
     }
 
     const id = providedId || crypto.randomUUID();
@@ -487,8 +505,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       metadata: metadata ? JSON.stringify(metadata) : null
     });
 
-    const insertColumns = ['id', 'name', 'english_name'];
-    const insertValues: unknown[] = [id, name, english_name || null];
+    const insertColumns = ['id', 'layer_id', 'name', 'english_name'];
+    const insertValues: unknown[] = [id, layerId, name, english_name || null];
     if (peopleSchema.hasEmail) {
       insertColumns.push('email');
       insertValues.push(normalizedEmail);
@@ -563,7 +581,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const person = await c.env.DB.prepare(
-      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
+      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env, id);
@@ -579,6 +597,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const avatarLink = avatar_url ? new URL(avatar_url, c.req.url).toString() : undefined;
     notifyUpdate(c, 'people:create', {
       id,
+      layer_id: layerId,
       name,
       english_name,
       email: normalizedEmail,
@@ -621,6 +640,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       tob: tob || null,
       tod: tod || null,
       avatar_url: avatar_url || null,
+      layer_id: layerId,
       avatars: avatars.map((avatar) => ({
         id: avatar.id,
         avatar_url: avatar.avatar_url,
@@ -645,7 +665,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     const existing = await c.env.DB.prepare(
-      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?`
+      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?`
     ).bind(id).first();
 
     if (!existing) {
@@ -789,11 +809,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     if (dob !== undefined && dob !== previousDob) {
-      await updateSiblingOrdering(c.env, id);
+      await updateSiblingOrdering(c.env, id, String(existingAny.layer_id || 'default'));
     }
 
     const person = await c.env.DB.prepare(
-      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
+      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env, id);

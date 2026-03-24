@@ -6,6 +6,7 @@ import type {
   AuthSession,
   AuthUser,
   GraphData,
+  GraphLayer,
   KinshipLabel,
   ManagedUser,
   MfaStatus,
@@ -93,23 +94,44 @@ export const api = {
     const blob = await res.blob();
     return URL.createObjectURL(blob);
   },
-  fetchGraph: async (centerId: string): Promise<GraphData> => {
-    const res = await fetchWithAuth(`${API_BASE}/api/graph?center=${centerId}`);
+  fetchLayers: async (): Promise<GraphLayer[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/layers`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data = await res.json() as { layers: GraphLayer[] };
+    return data.layers || [];
+  },
+
+  createLayer: async (name: string, description?: string | null): Promise<{ layer: GraphLayer; center_id: string | null }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/layers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  fetchGraph: async (centerId: string, layerId: string): Promise<GraphData> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/graph?center=${encodeURIComponent(centerId)}&layer=${encodeURIComponent(layerId)}`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
     return res.json();
   },
-  fetchRelationships: async (): Promise<Relationship[]> => {
-    const res = await fetchWithAuth(`${API_BASE}/api/relationships`);
+  fetchRelationships: async (layerId: string): Promise<Relationship[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/relationships?layer=${encodeURIComponent(layerId)}`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
     return res.json();
   },
 
-  fetchPeople: async (): Promise<Person[]> => {
-    const res = await fetchWithAuth(`${API_BASE}/api/people`);
+  fetchPeople: async (layerId: string): Promise<Person[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/people?layer=${encodeURIComponent(layerId)}`);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
@@ -127,12 +149,13 @@ export const api = {
     blood_type?: string,
     metadata?: any,
     id?: string,
-    avatar_url?: string
+    avatar_url?: string,
+    layer_id?: string
   ): Promise<Person> => {
     const res = await fetchWithAuth(`${API_BASE}/api/people`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name, english_name, gender, dob, dod, tob, tod, blood_type, avatar_url, metadata }),
+      body: JSON.stringify({ id, name, english_name, gender, dob, dod, tob, tod, blood_type, avatar_url, metadata, layer_id }),
     });
     return res.json();
   },
@@ -213,6 +236,7 @@ export const api = {
   createRelationship: async (
     from: string,
     to: string,
+    layerId: string,
     metadata?: any,
     type: 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law' = 'parent_child',
     skipAutoLink = false
@@ -223,6 +247,7 @@ export const api = {
       body: JSON.stringify({
         from_person_id: from,
         to_person_id: to,
+        layer_id: layerId,
         type,
         metadata,
         skipAutoLink,

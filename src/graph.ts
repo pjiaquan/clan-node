@@ -9,6 +9,7 @@ import {
   migratePlaintextCustomFieldRows,
   migratePlaintextPersonRow
 } from './data_protection';
+import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
   let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
@@ -30,12 +31,13 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
     return peopleSchemaSupportPromise;
   };
 
-  const loadAvatarMap = async (db: D1Database) => {
+  const loadAvatarMap = async (db: D1Database, layerId: string) => {
     const { results } = await db.prepare(
       `SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
        FROM person_avatars
+       WHERE person_id IN (SELECT id FROM people WHERE layer_id = ?)
        ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
-    ).all();
+    ).bind(layerId).all();
     const map = new Map<string, any[]>();
     results.forEach((row: any) => {
       const list = map.get(row.person_id) || [];
@@ -63,19 +65,26 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
   app.get('/api/graph', async (c) => {
     try {
       const centerId = c.req.query('center');
+      const layerId = resolveLayerId(c);
       console.log('GET /api/graph request for center:', centerId);
       const depth = parseInt(c.req.query('depth') || '3');
 
       if (!centerId) {
         return c.json({ error: 'center query parameter is required' }, 400);
       }
+      await ensureLayerSchemaSupport(c.env.DB);
+      if (!await assertLayerExists(c.env.DB, layerId)) {
+        return c.json({ error: 'Layer not found' }, 404);
+      }
       const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
 
       // Verify center person exists
       console.log('Verifying center person...');
       const center = await c.env.DB.prepare(
-        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod FROM people WHERE id = ?`
-      ).bind(centerId).first();
+        `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod
+         FROM people
+         WHERE id = ? AND layer_id = ?`
+      ).bind(centerId, layerId).first();
 
       if (!center) {
         console.log('Center person not found');
@@ -87,15 +96,21 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       // Get all people
       console.log('Fetching all people...');
       const { results: peopleRaw } = await c.env.DB.prepare(
-        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people`
-      ).all();
+        `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
+         FROM people
+         WHERE layer_id = ?
+         ORDER BY created_at`
+      ).bind(layerId).all();
       console.log(`Fetched ${peopleRaw.length} people`);
       await Promise.all((peopleRaw as any[]).map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)));
-      const avatarMap = await loadAvatarMap(c.env.DB);
+      const avatarMap = await loadAvatarMap(c.env.DB, layerId);
 
       const { results: customFieldRows } = await c.env.DB.prepare(
-        'SELECT id, person_id, label, value FROM person_custom_fields'
-      ).all();
+        `SELECT cf.id, cf.person_id, cf.label, cf.value
+         FROM person_custom_fields cf
+         INNER JOIN people p ON p.id = cf.person_id
+         WHERE p.layer_id = ?`
+      ).bind(layerId).all();
       await migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows as Array<Record<string, unknown>>);
       const decryptedCustomFieldRows = await decryptCustomFieldRows(c.env, customFieldRows as Array<Record<string, unknown>>);
       const customFieldMap = new Map<string, { label: string; value: string }[]>();
@@ -110,6 +125,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         const avatars = avatarMap.get(String(person.id)) || [];
         return {
           ...decryptedPerson,
+          layer_id: layerId,
           avatar_url: resolvePrimaryAvatarUrl(avatars, decryptedPerson.avatar_url as string | null | undefined),
           avatars,
           metadata: {
@@ -120,6 +136,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       }));
       const kinshipPeople: Person[] = people.map((person: any) => ({
         id: String(person.id),
+        layer_id: String(person.layer_id ?? layerId),
         name: String(person.name),
         english_name: person.english_name ?? null,
         email: person.email ?? null,
@@ -132,8 +149,8 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       // Get all relationships
       console.log('Fetching all relationships...');
       const { results: relationshipsRaw } = await c.env.DB.prepare(
-        'SELECT * FROM relationships'
-      ).all();
+        'SELECT * FROM relationships WHERE layer_id = ?'
+      ).bind(layerId).all();
       console.log(`Fetched ${relationshipsRaw.length} relationships`);
 
       const relationships = relationshipsRaw.map((rel: any) => ({
@@ -142,6 +159,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       }));
       const kinshipRelationships: Relationship[] = relationships.map((rel: any) => ({
         id: Number(rel.id),
+        layer_id: String(rel.layer_id ?? layerId),
         from_person_id: String(rel.from_person_id),
         to_person_id: String(rel.to_person_id),
         type: String(rel.type)
@@ -185,6 +203,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
 
       console.log('Graph data prepared successfully');
       return c.json({
+        layer_id: layerId,
         center: centerId,
         nodes: graphNodes,
         edges: relationships

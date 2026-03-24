@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { preloadNameSearchConverters } from '../utils/nameSearch';
 import { createPersonSearchMatcher, type SearchablePerson } from '../utils/personSearch';
-import type { RelationshipTypeKey } from '../types';
+import type { GraphLayer, RelationshipTypeKey } from '../types';
 import { useI18n } from '../i18n';
 
 type ActionIconName =
@@ -277,6 +277,10 @@ interface HeaderProps {
   onSearch: (query: string) => void;
   searchOptions: SearchablePerson[];
   relationshipTypeLabelMap?: Partial<Record<RelationshipTypeKey, string>>;
+  layers: GraphLayer[];
+  activeLayerId: string;
+  onSelectLayer: (layerId: string) => void;
+  onCreateLayer: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -319,6 +323,10 @@ export const Header: React.FC<HeaderProps> = ({
   onSearch,
   searchOptions,
   relationshipTypeLabelMap,
+  layers,
+  activeLayerId,
+  onSelectLayer,
+  onCreateLayer,
 }) => {
   const { language, toggleLanguage, t } = useI18n();
   const [searchText, setSearchText] = useState('');
@@ -512,6 +520,29 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </form>
+        <div className="layer-switcher desktop-visible">
+          <select
+            className="layer-select"
+            value={activeLayerId}
+            onChange={(event) => onSelectLayer(event.target.value)}
+            aria-label={t('header.layerSelect')}
+            title={t('header.layerSelect')}
+          >
+            {layers.map((layer) => (
+              <option key={layer.id} value={layer.id}>
+                {layer.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onCreateLayer}
+            disabled={editDisabled}
+          >
+            {t('header.newLayer')}
+          </button>
+        </div>
         <div className="header-mobile-menu mobile-visible" ref={mobileMenuRef}>
           <button
             type="button"
@@ -530,6 +561,33 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="header-mobile-panel">
               {username && <div className="header-mobile-label">{username}</div>}
               {editDisabled && <div className="header-mobile-label">{t('header.readOnly')}</div>}
+              {layers.length > 0 && (
+                <label className="header-mobile-layer-picker">
+                  <span className="header-mobile-label">{t('header.layerSelect')}</span>
+                  <select
+                    className="layer-select"
+                    value={activeLayerId}
+                    onChange={(event) => onSelectLayer(event.target.value)}
+                  >
+                    {layers.map((layer) => (
+                      <option key={layer.id} value={layer.id}>
+                        {layer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button
+                type="button"
+                className="header-action-item"
+                onClick={() => {
+                  onCreateLayer();
+                  closeMobileMenu();
+                }}
+                disabled={editDisabled}
+              >
+                <ActionLabel text={t('header.newLayer')} icon="addMember" />
+              </button>
               {onManageSessions && (
                 <button
                   type="button"
