@@ -10,6 +10,7 @@ type UserManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
   onManageSessions: () => void;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onManageNotifications: () => void;
   onManageAuditLogs: () => void;
@@ -21,6 +22,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
   currentUser,
   onBack,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onManageNotifications,
   onManageAuditLogs,
@@ -69,11 +71,17 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
     };
   }, [users]);
 
-  const handleCreateUser = useCallback(async (email: string, password: string, role: UserRole) => {
-    await api.createUser(email, password, role);
+  const handleCreateUser = useCallback(async (email: string, role: UserRole) => {
+    const created = await api.createUser(email, role);
     setShowCreateModal(false);
     await loadUsers(true);
-  }, [loadUsers]);
+    const debugSuffix = created.debug_invite_token ? ` (${created.debug_invite_token})` : '';
+    setNotice(
+      created.invitation_email_sent
+        ? `${t('userMgmt.inviteSent', { email })}${debugSuffix}`
+        : `${t('userMgmt.inviteDeliveryFailed', { email })}${debugSuffix}`
+    );
+  }, [loadUsers, t]);
 
   const handleRoleChange = useCallback(async (user: ManagedUser, role: UserRole) => {
     if (user.role === role) return;
@@ -151,6 +159,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
             isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
             onManageSessions={onManageSessions}
+            onOpenAccount={onOpenAccount}
             onOpenSettings={onOpenSettings}
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}

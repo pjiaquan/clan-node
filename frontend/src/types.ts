@@ -88,7 +88,13 @@ export interface AuthUser {
   username: string;
   email?: string;
   role: UserRole;
+  email_verified_at?: string | null;
+  avatar_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
+
+export interface AccountProfile extends AuthUser {}
 
 export interface PendingMfaChallenge {
   session_id: string;
@@ -121,6 +127,21 @@ export interface ManagedUser {
   role: UserRole;
   created_at: string;
   updated_at: string;
+}
+
+export interface UserInviteResult {
+  id: string;
+  username: string;
+  email: string;
+  role: UserRole;
+  email_verified_at: string | null;
+  invitation_email_sent: boolean;
+  debug_invite_token?: string;
+}
+
+export interface AcceptInviteResult {
+  ok: boolean;
+  email: string;
 }
 
 export interface AuthSession {

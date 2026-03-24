@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { AuthUser, PendingMfaChallenge } from './types';
+import { AcceptInvitePage } from './components/AcceptInvitePage';
+import { AccountPage } from './components/AccountPage';
+import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { LoginPage } from './components/LoginPage';
+import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { SetupPage } from './components/SetupPage';
 import { ClanGraph } from './ClanGraph';
 import { UserManagementPage } from './components/UserManagementPage';
@@ -19,12 +23,13 @@ import {
 import { useI18n } from './i18n';
 import './App.css';
 
-type AppView = 'graph' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
+type AppView = 'graph' | 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
 type ThemeMode = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'clan.theme.mode';
 
 const getViewFromHash = (): AppView => {
+  if (window.location.hash === '#/account') return 'account';
   if (window.location.hash === '#/users') return 'users';
   if (window.location.hash === '#/sessions') return 'sessions';
   if (window.location.hash === '#/notifications') return 'notifications';
@@ -75,6 +80,15 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(null);
   const [pendingMfaMethod, setPendingMfaMethod] = useState<'totp' | 'email'>('email');
+  const [inviteToken, setInviteToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URL(window.location.href).searchParams.get('invite_token');
+  });
+  const [resetPasswordToken, setResetPasswordToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URL(window.location.href).searchParams.get('reset_password_token');
+  });
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [view, setView] = useState<AppView>(() => getViewFromHash());
   const [graphSettings, setGraphSettings] = useState<GraphSettings>(DEFAULT_GRAPH_SETTINGS);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialTheme());
@@ -85,7 +99,9 @@ function App() {
   ));
 
   const navigateTo = useCallback((next: AppView) => {
-    const nextHash = next === 'users'
+    const nextHash = next === 'account'
+      ? '#/account'
+      : next === 'users'
       ? '#/users'
       : next === 'sessions'
         ? '#/sessions'
@@ -110,6 +126,12 @@ function App() {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const clearUrlQueryParam = useCallback((name: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete(name);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
   useEffect(() => {
@@ -153,6 +175,69 @@ function App() {
       cancelled = true;
     };
   }, [t]);
+
+  const handleAcceptInvite = useCallback(async (password: string) => {
+    if (!inviteToken) return;
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      const result = await api.acceptInvite(inviteToken, password);
+      clearUrlQueryParam('invite_token');
+      setInviteToken(null);
+      setAuthNotice(t('invite.acceptedNotice', { email: result.email }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('invite.failed');
+      setAuthError(message);
+    }
+  }, [clearUrlQueryParam, inviteToken, t]);
+
+  const handleCancelInvite = useCallback(() => {
+    clearUrlQueryParam('invite_token');
+    setInviteToken(null);
+    setAuthError(null);
+    setAuthNotice(null);
+  }, [clearUrlQueryParam]);
+
+  const handleForgotPassword = useCallback(async (email: string) => {
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      await api.forgotPassword(email);
+      setAuthNotice(t('forgotPassword.sent'));
+      setShowForgotPassword(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('forgotPassword.failed');
+      setAuthError(message);
+    }
+  }, [t]);
+
+  const handleCancelForgotPassword = useCallback(() => {
+    setShowForgotPassword(false);
+    setAuthError(null);
+    setAuthNotice(null);
+  }, []);
+
+  const handleResetPassword = useCallback(async (password: string) => {
+    if (!resetPasswordToken) return;
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      await api.resetPassword(resetPasswordToken, password);
+      clearUrlQueryParam('reset_password_token');
+      setResetPasswordToken(null);
+      setAuthNotice(t('resetPassword.success'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('resetPassword.failed');
+      setAuthError(message);
+    }
+  }, [clearUrlQueryParam, resetPasswordToken, t]);
+
+  const handleCancelResetPassword = useCallback(() => {
+    clearUrlQueryParam('reset_password_token');
+    setResetPasswordToken(null);
+    setAuthError(null);
+    setAuthNotice(null);
+  }, [clearUrlQueryParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -328,7 +413,11 @@ function App() {
     setAuthError(null);
     try {
       const result = await api.resendVerification(email);
-      const debugSuffix = result.debug_verify_token ? ` (${result.debug_verify_token})` : '';
+      const debugSuffix = result.debug_invite_token
+        ? ` (${result.debug_invite_token})`
+        : result.debug_verify_token
+          ? ` (${result.debug_verify_token})`
+          : '';
       setAuthNotice(`${t('login.verificationSent')}${debugSuffix}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : t('login.verificationFailed');
@@ -442,6 +531,35 @@ function App() {
       if (requiresSetup) {
         return <SetupPage error={authError} onSetup={handleSetupAdmin} />;
       }
+      if (inviteToken) {
+        return (
+          <AcceptInvitePage
+            error={authError}
+            onSubmit={handleAcceptInvite}
+            onCancel={handleCancelInvite}
+          />
+        );
+      }
+      if (resetPasswordToken) {
+        return (
+          <ResetPasswordPage
+            error={authError}
+            notice={authNotice}
+            onSubmit={handleResetPassword}
+            onCancel={handleCancelResetPassword}
+          />
+        );
+      }
+      if (showForgotPassword) {
+        return (
+          <ForgotPasswordPage
+            error={authError}
+            notice={authNotice}
+            onSubmit={handleForgotPassword}
+            onCancel={handleCancelForgotPassword}
+          />
+        );
+      }
       return (
         <LoginPage
           error={authError}
@@ -455,6 +573,11 @@ function App() {
           pendingMfaMethod={pendingMfaMethod}
           onResendVerification={handleResendVerification}
           resendBusy={resendingVerification}
+          onForgotPassword={() => {
+            setShowForgotPassword(true);
+            setAuthError(null);
+            setAuthNotice(null);
+          }}
         />
       );
     }
@@ -470,12 +593,30 @@ function App() {
       );
     }
 
+    if (view === 'account') {
+      return (
+        <AccountPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
+          onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
+          onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
+          onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          onLogout={handleLogout}
+          onAccountUpdated={setAuthUser}
+        />
+      );
+    }
+
     if (view === 'users' && authUser.role === 'admin') {
       return (
         <UserManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
           onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
           onOpenSettings={() => navigateTo('settings')}
           onManageNotifications={() => navigateTo('notifications')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
@@ -490,6 +631,7 @@ function App() {
         <SessionManagementPage
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
+          onOpenAccount={() => navigateTo('account')}
           onOpenSettings={() => navigateTo('settings')}
           onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
@@ -506,6 +648,7 @@ function App() {
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
           onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
           onOpenSettings={() => navigateTo('settings')}
           onManageUsers={() => navigateTo('users')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
@@ -521,6 +664,7 @@ function App() {
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
           onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
           onOpenSettings={() => navigateTo('settings')}
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
@@ -536,6 +680,7 @@ function App() {
           currentUser={authUser}
           onBack={() => navigateTo('graph')}
           onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
           onOpenSettings={() => navigateTo('settings')}
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
@@ -553,6 +698,7 @@ function App() {
           onSave={handleSaveGraphSettings}
           onBack={() => navigateTo('graph')}
           onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
           onManageUsers={authUser.role === 'admin' ? () => navigateTo('users') : undefined}
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
@@ -575,6 +721,7 @@ function App() {
         onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
         onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
         onManageSessions={() => navigateTo('sessions')}
+        onOpenAccount={() => navigateTo('account')}
         onOpenSettings={() => navigateTo('settings')}
         onLogout={handleLogout}
       />
@@ -587,11 +734,20 @@ function App() {
     authUser,
     pendingMfa,
     pendingMfaMethod,
+    inviteToken,
+    resetPasswordToken,
     requiresSetup,
+    showForgotPassword,
     view,
     graphSettings,
+    handleAcceptInvite,
+    handleCancelInvite,
+    handleCancelForgotPassword,
+    handleCancelResetPassword,
+    handleForgotPassword,
     handleLogin,
     handleLogout,
+    handleResetPassword,
     handleVerifyMfa,
     handleUseEmailMfa,
     handleUseTotpMfa,

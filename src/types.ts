@@ -6,6 +6,7 @@ export type Env = {
   FRONTEND_ORIGIN?: string;
   ENVIRONMENT?: string;
   EMAIL_VERIFICATION_URL_BASE?: string;
+  PASSWORD_RESET_URL_BASE?: string;
   BREVO_API_KEY?: string;
   BREVO_FROM_EMAIL?: string;
   BREVO_FROM_NAME?: string;

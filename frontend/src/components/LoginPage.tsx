@@ -14,6 +14,7 @@ interface LoginPageProps {
   pendingMfaMethod?: 'totp' | 'email';
   onResendVerification?: (email: string) => Promise<void>;
   resendBusy?: boolean;
+  onForgotPassword?: () => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
@@ -27,6 +28,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   pendingMfaMethod = 'email',
   onResendVerification,
   resendBusy = false,
+  onForgotPassword,
 }) => {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
@@ -169,6 +171,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <button type="submit" className="btn-primary" disabled={submitting}>
               {submitting ? t('login.signingIn') : t('login.signIn')}
             </button>
+            {onForgotPassword && (
+              <button type="button" className="auth-secondary-btn" onClick={onForgotPassword} disabled={submitting}>
+                {t('login.forgotPassword')}
+              </button>
+            )}
           </form>
         )}
       </div>

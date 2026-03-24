@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 
-export type PageHeaderView = 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
+export type PageHeaderView = 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
 
 type PageHeaderMenuProps = {
   username?: string | null;
@@ -10,6 +10,7 @@ type PageHeaderMenuProps = {
   isAdmin?: boolean;
   onBack: () => void;
   onManageSessions?: () => void;
+  onOpenAccount?: () => void;
   onOpenSettings?: () => void;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
@@ -39,6 +40,7 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   isAdmin = false,
   onBack,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onManageUsers,
   onManageNotifications,
@@ -122,6 +124,18 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
               }}
             >
               <MenuItemLabel text={t('header.sessionManagement')} />
+            </button>
+          )}
+          {currentPage !== 'account' && onOpenAccount && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onOpenAccount();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.accountProfile')} />
             </button>
           )}
           {currentPage !== 'settings' && onOpenSettings && (

@@ -3,13 +3,12 @@ import { useI18n } from '../i18n';
 
 interface CreateUserModalProps {
   onClose: () => void;
-  onSubmit: (email: string, password: string, role: 'admin' | 'readonly') => Promise<void>;
+  onSubmit: (email: string, role: 'admin' | 'readonly') => Promise<void>;
 }
 
 export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSubmit }) => {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'readonly'>('readonly');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -17,14 +16,14 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
-    if (!email.trim() || !password) {
+    if (!email.trim()) {
       setError(t('createUser.missing'));
       return;
     }
 
     setIsSaving(true);
     try {
-      await onSubmit(email.trim().toLowerCase(), password, role);
+      await onSubmit(email.trim().toLowerCase(), role);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('createUser.failed');
       setError(message);
@@ -51,19 +50,6 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
             />
           </div>
           <div className="form-group">
-            <label htmlFor="new-password">{t('createUser.password')}</label>
-            <input
-              id="new-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder={t('createUser.passwordPlaceholder')}
-              autoComplete="new-password"
-              minLength={12}
-            />
-            <small className="name-lock-hint">{t('createUser.passwordPolicy')}</small>
-          </div>
-          <div className="form-group">
             <label htmlFor="new-role">{t('createUser.role')}</label>
             <select
               id="new-role"
@@ -74,6 +60,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
               <option value="admin">{t('createUser.roleAdmin')}</option>
             </select>
           </div>
+          <p className="name-lock-hint">{t('createUser.inviteHelp')}</p>
           <button type="submit" className="btn-primary" disabled={isSaving}>
             {isSaving ? t('createUser.creating') : t('createUser.submit')}
           </button>

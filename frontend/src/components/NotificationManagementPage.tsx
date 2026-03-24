@@ -8,6 +8,7 @@ type NotificationManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
   onManageSessions: () => void;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onManageUsers: () => void;
   onManageAuditLogs: () => void;
@@ -34,6 +35,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
   currentUser,
   onBack,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onManageUsers,
   onManageAuditLogs,
@@ -176,6 +178,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
             isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
             onManageSessions={onManageSessions}
+            onOpenAccount={onOpenAccount}
             onOpenSettings={onOpenSettings}
             onManageUsers={onManageUsers}
             onManageAuditLogs={onManageAuditLogs}

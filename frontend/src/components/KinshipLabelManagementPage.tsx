@@ -8,6 +8,7 @@ type KinshipLabelManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
   onManageSessions: () => void;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onManageUsers: () => void;
   onManageNotifications: () => void;
@@ -52,6 +53,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
   currentUser,
   onBack,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onManageUsers,
   onManageNotifications,
@@ -250,6 +252,7 @@ export const KinshipLabelManagementPage: React.FC<KinshipLabelManagementPageProp
             isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
             onManageSessions={onManageSessions}
+            onOpenAccount={onOpenAccount}
             onOpenSettings={onOpenSettings}
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}

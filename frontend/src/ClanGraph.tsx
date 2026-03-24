@@ -266,6 +266,7 @@ type ClanGraphProps = {
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
   onManageSessions?: () => void;
+  onOpenAccount?: () => void;
   onOpenSettings?: () => void;
   onLogout: () => void;
 };
@@ -282,6 +283,7 @@ export function ClanGraph({
   onManageAuditLogs,
   onManageRelationshipNames,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onLogout
 }: ClanGraphProps) {
@@ -1133,10 +1135,16 @@ export function ClanGraph({
     return null as { from: string; to: string } | null;
   }, []);
 
-  const handleCreateUser = useCallback(async (username: string, password: string, role: 'admin' | 'readonly') => {
+  const handleCreateUser = useCallback(async (email: string, role: 'admin' | 'readonly') => {
     try {
-      await api.createUser(username, password, role);
-      showToast(t('graph.userCreated'), 'success');
+      const created = await api.createUser(email, role);
+      const debugSuffix = created.debug_invite_token ? ` (${created.debug_invite_token})` : '';
+      showToast(
+        created.invitation_email_sent
+          ? `${t('userMgmt.inviteSent', { email })}${debugSuffix}`
+          : `${t('userMgmt.inviteDeliveryFailed', { email })}${debugSuffix}`,
+        created.invitation_email_sent ? 'success' : 'warning'
+      );
       setShowCreateUserModal(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : t('graph.userCreateFailed');
@@ -3373,6 +3381,7 @@ export function ClanGraph({
         onManageRelationshipNames={canManageUsers ? onManageRelationshipNames : undefined}
         pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
+        onOpenAccount={onOpenAccount}
         onOpenSettings={onOpenSettings}
         onCreateUser={() => setShowCreateUserModal(true)}
         onAddMember={() => {

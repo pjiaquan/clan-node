@@ -8,6 +8,7 @@ import { useI18n } from '../i18n';
 type SessionManagementPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
@@ -39,6 +40,7 @@ const platformGroup = (session: AuthSession) => {
 export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
   currentUser,
   onBack,
+  onOpenAccount,
   onOpenSettings,
   onManageUsers,
   onManageNotifications,
@@ -228,6 +230,7 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
             currentPage="sessions"
             isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
+            onOpenAccount={onOpenAccount}
             onOpenSettings={onOpenSettings}
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}

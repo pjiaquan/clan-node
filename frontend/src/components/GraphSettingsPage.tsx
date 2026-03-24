@@ -21,6 +21,8 @@ type GraphSettingsPageProps = {
   onSave: (settings: GraphSettings, options?: { navigate?: boolean }) => void;
   onBack: () => void;
   onManageSessions: () => void;
+  onOpenAccount: () => void;
+  onOpenSettings?: () => void;
   onManageUsers?: () => void;
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
@@ -213,6 +215,8 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   onSave,
   onBack,
   onManageSessions,
+  onOpenAccount,
+  onOpenSettings,
   onManageUsers,
   onManageNotifications,
   onManageAuditLogs,
@@ -384,6 +388,8 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
             isAdmin={currentUser.role === 'admin'}
             onBack={handleBack}
             onManageSessions={onManageSessions}
+            onOpenAccount={onOpenAccount}
+            onOpenSettings={onOpenSettings}
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}

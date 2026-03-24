@@ -25,6 +25,8 @@ const TOTP_DIGITS = 6;
 const TOTP_WINDOW_STEPS = 1;
 const SESSION_TOKEN_BYTES = 32;
 const ENCRYPTED_SECRET_PREFIX = 'enc:v1';
+const INVITE_PENDING_PASSWORD_HASH = '__invite_pending__';
+const INVITE_PENDING_PASSWORD_SALT = '__invite_pending__';
 
 const toBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -176,6 +178,10 @@ const isValidEmail = (value: string): boolean => (
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 );
 
+const isInvitePendingPassword = (passwordHash: unknown, passwordSalt: unknown) => (
+  passwordHash === INVITE_PENDING_PASSWORD_HASH && passwordSalt === INVITE_PENDING_PASSWORD_SALT
+);
+
 const validatePasswordStrength = (password: string, relatedValues: string[] = []) => {
   if (password.length < PASSWORD_MIN_LENGTH) {
     return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
@@ -271,6 +277,7 @@ type UserSchemaSupport = {
   hasEmailVerifiedAt: boolean;
   hasEmailVerifyTokenHash: boolean;
   hasEmailVerifyExpiresAt: boolean;
+  hasAvatarUrl: boolean;
   hasMfaTotpSecret: boolean;
   hasMfaTotpEnabledAt: boolean;
   hasMfaTotpPendingSecret: boolean;
@@ -282,9 +289,19 @@ let userSchemaSupportCache: UserSchemaSupport | null = null;
 let authRateLimitTableReady = false;
 let authMfaTableReady = false;
 let authMfaSessionTableReady = false;
+let passwordResetTokenTableReady = false;
 let cachedEncryptionKeySource: string | null = null;
 let cachedEncryptionKey: CryptoKey | null = null;
 let encryptionKeyWarningShown = false;
+const PASSWORD_RESET_TTL_MS = 1000 * 60 * 60;
+const FORGOT_PASSWORD_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 5, blockMs: 30 * 60 * 1000 };
+const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
+const ALLOWED_AVATAR_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif'
+};
 
 const parseEncryptionKeyBytes = (value: string): Uint8Array => {
   const trimmed = value.trim();
@@ -478,6 +495,7 @@ const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSupport> 
   await addUserColumnIfMissing(db, names, 'email_verified_at', 'email_verified_at TEXT');
   await addUserColumnIfMissing(db, names, 'email_verify_token_hash', 'email_verify_token_hash TEXT');
   await addUserColumnIfMissing(db, names, 'email_verify_expires_at', 'email_verify_expires_at TEXT');
+  await addUserColumnIfMissing(db, names, 'avatar_url', 'avatar_url TEXT');
   await addUserColumnIfMissing(db, names, 'mfa_totp_secret', 'mfa_totp_secret TEXT');
   await addUserColumnIfMissing(db, names, 'mfa_totp_enabled_at', 'mfa_totp_enabled_at TEXT');
   await addUserColumnIfMissing(db, names, 'mfa_totp_pending_secret', 'mfa_totp_pending_secret TEXT');
@@ -491,6 +509,7 @@ const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSupport> 
     hasEmailVerifiedAt: names.has('email_verified_at'),
     hasEmailVerifyTokenHash: names.has('email_verify_token_hash'),
     hasEmailVerifyExpiresAt: names.has('email_verify_expires_at'),
+    hasAvatarUrl: names.has('avatar_url'),
     hasMfaTotpSecret: names.has('mfa_totp_secret'),
     hasMfaTotpEnabledAt: names.has('mfa_totp_enabled_at'),
     hasMfaTotpPendingSecret: names.has('mfa_totp_pending_secret'),
@@ -499,12 +518,28 @@ const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSupport> 
   return userSchemaSupportCache;
 };
 
-const buildVerificationUrl = (env: Env, token: string) => {
+const getEmailActionBaseUrl = (env: Env) => {
   const base = (env.EMAIL_VERIFICATION_URL_BASE || env.FRONTEND_ORIGIN || 'http://localhost:5173')
     .split(',')[0]
     ?.trim()
     .replace(/\/+$/, '');
-  return `${base}?verify_email_token=${encodeURIComponent(token)}`;
+  return base || 'http://localhost:5173';
+};
+
+const buildVerificationUrl = (env: Env, token: string) => (
+  `${getEmailActionBaseUrl(env)}?verify_email_token=${encodeURIComponent(token)}`
+);
+
+const buildInvitationUrl = (env: Env, token: string) => (
+  `${getEmailActionBaseUrl(env)}?invite_token=${encodeURIComponent(token)}`
+);
+
+const buildPasswordResetUrl = (env: Env, token: string) => {
+  const base = (env.PASSWORD_RESET_URL_BASE || env.EMAIL_VERIFICATION_URL_BASE || env.FRONTEND_ORIGIN || 'http://localhost:5173')
+    .split(',')[0]
+    ?.trim()
+    .replace(/\/+$/, '');
+  return `${base || 'http://localhost:5173'}?reset_password_token=${encodeURIComponent(token)}`;
 };
 
 const sendTransactionalEmail = async (
@@ -548,6 +583,13 @@ const sendVerificationEmail = async (env: Env, to: string, verifyUrl: string) =>
   htmlContent: `<p>Please verify your email:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`
 });
 
+const sendInvitationEmail = async (env: Env, to: string, inviteUrl: string) => sendTransactionalEmail(env, {
+  to,
+  subject: 'You are invited to Clan Node',
+  textContent: `You have been invited to Clan Node. Accept your invitation and set your password here: ${inviteUrl}`,
+  htmlContent: `<p>You have been invited to Clan Node.</p><p><a href="${inviteUrl}">Accept your invitation and set your password</a></p>`
+});
+
 const sendMfaCodeEmail = async (env: Env, to: string, code: string) => sendTransactionalEmail(env, {
   to,
   subject: 'Your sign-in code',
@@ -562,10 +604,24 @@ const sendPasswordChangedEmail = async (env: Env, to: string) => sendTransaction
   htmlContent: '<p>Your Family Tree password was changed.</p><p>If this was not you, contact an administrator immediately.</p>'
 });
 
+const sendPasswordResetEmail = async (env: Env, to: string, resetUrl: string) => sendTransactionalEmail(env, {
+  to,
+  subject: 'Reset your password',
+  textContent: `Reset your password by visiting: ${resetUrl}`,
+  htmlContent: `<p>Reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p>`
+});
+
 const createVerificationToken = async () => {
   const token = randomBase64(32).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   const tokenHash = await sha256Base64(token);
   const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString();
+  return { token, tokenHash, expiresAt };
+};
+
+const createPasswordResetToken = async () => {
+  const token = randomBase64(32).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const tokenHash = await sha256Base64(token);
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
   return { token, tokenHash, expiresAt };
 };
 
@@ -672,8 +728,32 @@ const ensureAuthMfaSessionTable = async (db: D1Database) => {
   authMfaSessionTableReady = true;
 };
 
+const ensurePasswordResetTokenTable = async (db: D1Database) => {
+  if (passwordResetTokenTableReady) return;
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      requested_ip TEXT,
+      requested_user_agent TEXT,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`
+  ).run();
+  await db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)'
+  ).run();
+  await db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)'
+  ).run();
+  passwordResetTokenTableReady = true;
+};
+
 type RateLimitInput = {
-  action: 'login' | 'login_account' | 'login_mfa_send' | 'resend_verification';
+  action: 'login' | 'login_account' | 'login_mfa_send' | 'resend_verification' | 'forgot_password';
   limiterKey: string;
   windowMs: number;
   maxAttempts: number;
@@ -739,6 +819,55 @@ const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) =
   ).bind(count + 1, nowIso, input.action, input.limiterKey).run();
 
   return { allowed: true as const };
+};
+
+type AccountRow = {
+  id: string;
+  username: string;
+  email: string;
+  email_verified_at: string | null;
+  role: UserRole;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const mapAccountRow = (row: any, userSchema: UserSchemaSupport): AccountRow => ({
+  id: String(row.id),
+  username: String(row.username),
+  email: userSchema.hasEmail ? String(row.email ?? row.username) : String(row.username),
+  email_verified_at: userSchema.hasEmailVerifiedAt ? ((row.email_verified_at as string | null) ?? null) : null,
+  role: normalizeRole(row.role),
+  avatar_url: userSchema.hasAvatarUrl ? ((row.avatar_url as string | null) ?? null) : null,
+  created_at: String(row.created_at),
+  updated_at: String(row.updated_at)
+});
+
+const getAccountById = async (db: D1Database, userId: string) => {
+  const userSchema = await getUserSchemaSupport(db);
+  const fields = ['id', 'username', 'role', 'created_at', 'updated_at'];
+  if (userSchema.hasEmail) fields.push('email');
+  if (userSchema.hasEmailVerifiedAt) fields.push('email_verified_at');
+  if (userSchema.hasAvatarUrl) fields.push('avatar_url');
+  const row = await db.prepare(
+    `SELECT ${fields.join(', ')} FROM users WHERE id = ?`
+  ).bind(userId).first();
+  if (!row) return null;
+  return { userSchema, account: mapAccountRow(row, userSchema) };
+};
+
+const revokeUserSessions = async (db: D1Database, userId: string, keepToken: string | null = null) => {
+  if (!keepToken) {
+    const result = await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+    return Number(result.meta?.changes ?? 0);
+  }
+  const keepIds = await getSessionLookupIds(keepToken);
+  const result = await db.prepare(
+    `DELETE FROM sessions
+     WHERE user_id = ?
+       AND id NOT IN (${keepIds.map(() => '?').join(', ')})`
+  ).bind(userId, ...keepIds).run();
+  return Number(result.meta?.changes ?? 0);
 };
 
 const clearRateLimit = async (
@@ -1017,9 +1146,12 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     || path.startsWith('/api/auth/mfa/send-email')
     || path.startsWith('/api/auth/mfa/verify-totp')
     || path.startsWith('/api/auth/setup')
+    || path.startsWith('/api/auth/accept-invite')
     || path.startsWith('/api/auth/verify-mfa')
     || path.startsWith('/api/auth/verify-email')
     || path.startsWith('/api/auth/resend-verification')
+    || path.startsWith('/api/auth/forgot-password')
+    || path.startsWith('/api/auth/reset-password')
   ) {
     return next();
   }
@@ -1086,11 +1218,15 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
     || path.startsWith('/api/auth/mfa/totp/setup')
     || path.startsWith('/api/auth/mfa/totp/confirm')
     || path.startsWith('/api/auth/setup')
+    || path.startsWith('/api/auth/accept-invite')
     || path.startsWith('/api/auth/verify-mfa')
     || path.startsWith('/api/auth/verify-email')
     || path.startsWith('/api/auth/resend-verification')
+    || path.startsWith('/api/auth/forgot-password')
+    || path.startsWith('/api/auth/reset-password')
     || path.startsWith('/api/auth/logout')
     || path.startsWith('/api/auth/sessions')
+    || path.startsWith('/api/auth/account')
     || (path.startsWith('/api/notifications') && method === 'POST')
   ) {
     return next();
@@ -1289,7 +1425,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const verifyField = userSchema.hasEmailVerifiedAt ? ', email_verified_at' : '';
     const totpField = userSchema.hasMfaTotpSecret ? ', mfa_totp_secret' : '';
     const user = await c.env.DB.prepare(
-      `SELECT id, username, password_hash, password_salt, role${verifyField}${totpField} FROM users WHERE ${loginField} = ?`
+      `SELECT id, username, password_hash, password_salt, role${verifyField}${totpField},
+              EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = users.id LIMIT 1) AS has_logged_in_before
+       FROM users
+       WHERE ${loginField} = ?`
     ).bind(email).first();
     if (!user) {
       await recordLoginAttempt(c, {
@@ -1327,7 +1466,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     const userRole = normalizeRole((user as any).role);
     const totpEnabled = Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret);
-    if (userRole === 'admin' && !totpEnabled) {
+    const hasLoggedInBefore = Boolean((user as any).has_logged_in_before);
+    if (userRole === 'admin' && !totpEnabled && hasLoggedInBefore) {
       await recordLoginAttempt(c, {
         email,
         success: false,
@@ -1556,12 +1696,14 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       role: userRole
     });
 
+    const accountData = await getAccountById(c.env.DB, (user as any).id as string);
     return c.json({
-      user: {
+      user: accountData?.account ?? {
         id: (user as any).id,
         username: (user as any).username,
         email: (user as any).username,
-        role: userRole
+        role: userRole,
+        avatar_url: null
       }
     });
   });
@@ -1681,12 +1823,14 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       role: userRole
     });
 
+    const accountData = await getAccountById(c.env.DB, (user as any).id as string);
     return c.json({
-      user: {
+      user: accountData?.account ?? {
         id: (user as any).id,
         username: (user as any).username,
         email: (user as any).username,
-        role: userRole
+        role: userRole,
+        avatar_url: null
       }
     });
   });
@@ -1735,6 +1879,62 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     return c.json({ ok: true, email: (user as any).email as string });
   });
 
+  app.post('/api/auth/accept-invite', async (c) => {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt || !userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt) {
+      return c.json({ error: 'Invitations are not available' }, 503);
+    }
+
+    const body = await c.req.json();
+    const token = normalizeIdentifier((body as any)?.token);
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    if (!token || !password) {
+      return c.json({ error: 'token and password are required' }, 400);
+    }
+
+    const tokenHash = await sha256Base64(token);
+    const now = new Date().toISOString();
+    const user = await c.env.DB.prepare(
+      `SELECT id, email, password_hash, password_salt
+       FROM users
+       WHERE email_verify_token_hash = ?
+         AND email_verify_expires_at IS NOT NULL
+         AND email_verify_expires_at > ?`
+    ).bind(tokenHash, now).first();
+    if (!user) {
+      return c.json({ error: 'Invalid or expired invite token' }, 400);
+    }
+    if (!isInvitePendingPassword((user as any).password_hash, (user as any).password_salt)) {
+      return c.json({ error: 'This invitation has already been accepted' }, 409);
+    }
+
+    const email = (user as any).email as string;
+    const passwordValidationError = validatePasswordStrength(password, [email]);
+    if (passwordValidationError) {
+      return c.json({ error: passwordValidationError }, 400);
+    }
+
+    const salt = randomBase64(16);
+    const passwordHash = await hashPassword(password, salt);
+    await c.env.DB.prepare(
+      `UPDATE users
+       SET password_hash = ?, password_salt = ?, email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+       WHERE id = ?`
+    ).bind(passwordHash, salt, now, now, (user as any).id as string).run();
+
+    await recordAuditLog(c, {
+      action: 'accept_invite',
+      resourceType: 'users',
+      resourceId: (user as any).id as string,
+      summary: `接受邀請 ${email}`,
+      details: {
+        email
+      }
+    });
+
+    return c.json({ ok: true, email });
+  });
+
   app.post('/api/auth/resend-verification', async (c) => {
     const userSchema = await getUserSchemaSupport(c.env.DB);
     if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt || !userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt) {
@@ -1761,7 +1961,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const user = await c.env.DB.prepare(
-      'SELECT id, email, email_verified_at FROM users WHERE email = ?'
+      'SELECT id, email, email_verified_at, password_hash, password_salt FROM users WHERE email = ?'
     ).bind(email).first();
     if (!user || (user as any).email_verified_at) {
       return c.json({ ok: true });
@@ -1775,22 +1975,155 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
        WHERE id = ?`
     ).bind(tokenHash, expiresAt, now, (user as any).id as string).run();
 
-    const verifyUrl = buildVerificationUrl(c.env, token);
-    const delivered = await sendVerificationEmail(c.env, email, verifyUrl);
+    const invitePending = isInvitePendingPassword((user as any).password_hash, (user as any).password_salt);
+    const actionUrl = invitePending ? buildInvitationUrl(c.env, token) : buildVerificationUrl(c.env, token);
+    const delivered = invitePending
+      ? await sendInvitationEmail(c.env, email, actionUrl)
+      : await sendVerificationEmail(c.env, email, actionUrl);
 
     await recordAuditLog(c, {
-      action: 'resend_verification',
+      action: invitePending ? 'resend_invite' : 'resend_verification',
       resourceType: 'users',
       resourceId: (user as any).id as string,
-      summary: `重送 Email 驗證信 ${email}`,
+      summary: invitePending ? `重送邀請信 ${email}` : `重送 Email 驗證信 ${email}`,
       details: {
         email,
-        delivered
+        delivered,
+        invite_pending: invitePending
       }
     });
 
     const debugToken = c.env.ENVIRONMENT === 'production' ? null : token;
-    return c.json({ ok: true, delivered, ...(debugToken ? { debug_verify_token: debugToken } : {}) });
+    return c.json({
+      ok: true,
+      delivered,
+      ...(invitePending
+        ? (debugToken ? { debug_invite_token: debugToken } : {})
+        : (debugToken ? { debug_verify_token: debugToken } : {}))
+    });
+  });
+
+  app.post('/api/auth/forgot-password', async (c) => {
+    const body = await c.req.json();
+    const email = normalizeEmail((body as any)?.email);
+    const responsePayload = { ok: true };
+    if (!email || !isValidEmail(email)) {
+      return c.json(responsePayload);
+    }
+
+    const forgotIp = getRequestIpAddress(c) || 'unknown-ip';
+    const forgotRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'forgot_password',
+      limiterKey: `${forgotIp}:${email}`,
+      ...FORGOT_PASSWORD_RATE_LIMIT
+    });
+    if (!forgotRateLimit.allowed) {
+      return c.json(responsePayload);
+    }
+
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    await ensurePasswordResetTokenTable(c.env.DB);
+    const nowIso = new Date().toISOString();
+    await c.env.DB.prepare(
+      'DELETE FROM password_reset_tokens WHERE expires_at <= ? OR used_at IS NOT NULL'
+    ).bind(nowIso).run();
+
+    const field = userSchema.hasEmail ? 'email' : 'username';
+    const user = await c.env.DB.prepare(
+      `SELECT id, username${userSchema.hasEmail ? ', email' : ''} FROM users WHERE ${field} = ?`
+    ).bind(email).first();
+    if (!user) {
+      return c.json(responsePayload);
+    }
+
+    const token = await createPasswordResetToken();
+    await c.env.DB.prepare(
+      'DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL'
+    ).bind((user as any).id as string).run();
+    await c.env.DB.prepare(
+      `INSERT INTO password_reset_tokens (
+        id, user_id, token_hash, requested_ip, requested_user_agent, expires_at, used_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`
+    ).bind(
+      crypto.randomUUID(),
+      (user as any).id as string,
+      token.tokenHash,
+      getRequestIpAddress(c),
+      getRequestUserAgent(c),
+      token.expiresAt,
+      nowIso
+    ).run();
+
+    const destinationEmail = (userSchema.hasEmail
+      ? ((user as any).email as string | null)
+      : ((user as any).username as string | null)) || email;
+    if (isValidEmail(destinationEmail)) {
+      await sendPasswordResetEmail(c.env, destinationEmail, buildPasswordResetUrl(c.env, token.token));
+    }
+
+    return c.json(responsePayload);
+  });
+
+  app.post('/api/auth/reset-password', async (c) => {
+    await ensurePasswordResetTokenTable(c.env.DB);
+    const body = await c.req.json();
+    const token = normalizeIdentifier((body as any)?.token);
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    if (!token || !password) {
+      return c.json({ error: 'token and password are required' }, 400);
+    }
+
+    const tokenHash = await sha256Base64(token);
+    const nowIso = new Date().toISOString();
+    await c.env.DB.prepare(
+      'DELETE FROM password_reset_tokens WHERE expires_at <= ?'
+    ).bind(nowIso).run();
+
+    const row = await c.env.DB.prepare(
+      `SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at,
+              u.username, u.password_hash, u.password_salt${(await getUserSchemaSupport(c.env.DB)).hasEmail ? ', u.email' : ''}
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token_hash = ?
+       LIMIT 1`
+    ).bind(tokenHash).first();
+    if (!row || ((row as any).used_at as string | null) || ((row as any).expires_at as string) <= nowIso) {
+      return c.json({ error: 'Invalid or expired reset token' }, 400);
+    }
+
+    const compareEmail = ((row as any).email as string | null) ?? ((row as any).username as string);
+    const passwordValidationError = validatePasswordStrength(password, [compareEmail]);
+    if (passwordValidationError) {
+      return c.json({ error: passwordValidationError }, 400);
+    }
+
+    const salt = randomBase64(16);
+    const passwordHash = await hashPassword(password, salt);
+    await c.env.DB.prepare(
+      'UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?'
+    ).bind(passwordHash, salt, nowIso, (row as any).user_id as string).run();
+    await c.env.DB.prepare(
+      'UPDATE password_reset_tokens SET used_at = ? WHERE id = ?'
+    ).bind(nowIso, (row as any).id as string).run();
+    await c.env.DB.prepare(
+      'DELETE FROM password_reset_tokens WHERE user_id = ? AND id != ?'
+    ).bind((row as any).user_id as string, (row as any).id as string).run();
+    const revokedSessions = await revokeUserSessions(c.env.DB, (row as any).user_id as string, null);
+    if (isValidEmail(compareEmail)) {
+      await sendPasswordChangedEmail(c.env, compareEmail);
+    }
+
+    await recordAuditLog(c, {
+      action: 'reset_password',
+      resourceType: 'account',
+      resourceId: (row as any).user_id as string,
+      summary: `重設密碼 ${compareEmail}`,
+      details: {
+        revoked_sessions: revokedSessions
+      }
+    });
+
+    return c.json({ ok: true });
   });
 
   app.get('/api/auth/mfa/status', async (c) => {
@@ -1962,14 +2295,235 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    return c.json({
-      user: {
-        id: sessionUser.userId,
-        username: sessionUser.username,
-        email: sessionUser.username,
-        role: sessionUser.role
+    const accountData = await getAccountById(c.env.DB, sessionUser.userId);
+    if (!accountData) {
+      clearSessionCookie(c);
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    return c.json({ user: accountData.account });
+  });
+
+  app.get('/api/auth/account', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const accountData = await getAccountById(c.env.DB, sessionUser.userId);
+    if (!accountData) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    return c.json(accountData.account);
+  });
+
+  app.put('/api/auth/account', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    const body = await c.req.json();
+    const hasEmailUpdate = typeof (body as any)?.email === 'string';
+    const nextEmail = hasEmailUpdate ? normalizeEmail((body as any).email) : '';
+    const hasAvatarUpdate = Object.prototype.hasOwnProperty.call(body as object, 'avatar_url');
+    const avatarUrlRaw = hasAvatarUpdate ? (body as any).avatar_url : undefined;
+    const nextAvatarUrl = typeof avatarUrlRaw === 'string' ? avatarUrlRaw.trim() : null;
+
+    if (!hasEmailUpdate && !hasAvatarUpdate) {
+      return c.json({ error: 'email or avatar_url is required' }, 400);
+    }
+    if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
+      return c.json({ error: 'Invalid email format' }, 400);
+    }
+
+    const existing = await c.env.DB.prepare(
+      `SELECT id, username${userSchema.hasEmail ? ', email' : ''}${userSchema.hasEmailVerifiedAt ? ', email_verified_at' : ''}${userSchema.hasAvatarUrl ? ', avatar_url' : ''}, password_hash, password_salt
+       FROM users WHERE id = ?`
+    ).bind(sessionUser.userId).first();
+    if (!existing) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+
+    const updates: string[] = ['updated_at = ?'];
+    const values: Array<string | null> = [new Date().toISOString()];
+    let delivered = false;
+    const changedFields: string[] = [];
+
+    if (hasEmailUpdate) {
+      const currentEmail = ((existing as any).email as string | null) ?? ((existing as any).username as string);
+      if (currentEmail !== nextEmail) {
+        const duplicateField = userSchema.hasEmail ? 'email' : 'username';
+        const duplicate = await c.env.DB.prepare(
+          `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
+        ).bind(nextEmail, sessionUser.userId).first();
+        if (duplicate) {
+          return c.json({ error: 'User already exists' }, 409);
+        }
+        updates.push('username = ?');
+        values.push(nextEmail);
+        if (userSchema.hasEmail) {
+          updates.push('email = ?');
+          values.push(nextEmail);
+        }
+        if (userSchema.hasEmailVerifiedAt) {
+          updates.push('email_verified_at = ?');
+          values.push(null);
+        }
+        if (userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt) {
+          const token = await createVerificationToken();
+          updates.push('email_verify_token_hash = ?', 'email_verify_expires_at = ?');
+          values.push(token.tokenHash, token.expiresAt);
+          const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
+          delivered = invitePending
+            ? await sendInvitationEmail(c.env, nextEmail, buildInvitationUrl(c.env, token.token))
+            : await sendVerificationEmail(c.env, nextEmail, buildVerificationUrl(c.env, token.token));
+        }
+        changedFields.push('email');
+      }
+    }
+
+    if (hasAvatarUpdate && userSchema.hasAvatarUrl) {
+      updates.push('avatar_url = ?');
+      values.push(nextAvatarUrl);
+      changedFields.push('avatar_url');
+    }
+
+    if (changedFields.length === 0) {
+      const accountData = await getAccountById(c.env.DB, sessionUser.userId);
+      return c.json(accountData?.account ?? { error: 'User not found' }, accountData ? 200 : 404);
+    }
+
+    values.push(sessionUser.userId);
+    await c.env.DB.prepare(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
+    ).bind(...values).run();
+
+    const accountData = await getAccountById(c.env.DB, sessionUser.userId);
+    if (!accountData) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+
+    await recordAuditLog(c, {
+      action: 'update',
+      resourceType: 'account',
+      resourceId: sessionUser.userId,
+      summary: `更新個人帳號 ${accountData.account.username}`,
+      details: {
+        changed_fields: changedFields,
+        verification_email_sent: delivered
       }
     });
+
+    return c.json(accountData.account);
+  });
+
+  app.post('/api/auth/account/avatar', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    if (!userSchema.hasAvatarUrl) {
+      return c.json({ error: 'Avatar storage unavailable' }, 503);
+    }
+
+    const form = await c.req.formData();
+    const file = form.get('file');
+    if (!file || typeof file === 'string' || typeof (file as Blob).arrayBuffer !== 'function') {
+      return c.json({ error: 'file is required' }, 400);
+    }
+    const upload = file as File;
+    if (upload.size > MAX_AVATAR_BYTES) {
+      return c.json({ error: 'file is too large' }, 413);
+    }
+    if (!upload.type || !upload.type.startsWith('image/')) {
+      return c.json({ error: 'unsupported file type' }, 400);
+    }
+    const ext = ALLOWED_AVATAR_TYPES[upload.type];
+    if (!ext) {
+      return c.json({ error: 'unsupported file type' }, 400);
+    }
+
+    const key = `user-${sessionUser.userId}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
+    await c.env.AVATARS.put(key, upload.stream(), {
+      httpMetadata: { contentType: upload.type }
+    });
+    const avatarUrl = `/api/avatars/${key}`;
+    await c.env.DB.prepare(
+      'UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?'
+    ).bind(avatarUrl, new Date().toISOString(), sessionUser.userId).run();
+
+    const accountData = await getAccountById(c.env.DB, sessionUser.userId);
+    if (!accountData) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+
+    await recordAuditLog(c, {
+      action: 'update_avatar',
+      resourceType: 'account',
+      resourceId: sessionUser.userId,
+      summary: `更新帳號頭像 ${accountData.account.username}`,
+      details: {
+        avatar_url: avatarUrl
+      }
+    });
+
+    return c.json(accountData.account);
+  });
+
+  app.post('/api/auth/account/change-password', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const body = await c.req.json();
+    const currentPassword = typeof (body as any)?.current_password === 'string' ? (body as any).current_password : '';
+    const nextPassword = typeof (body as any)?.new_password === 'string' ? (body as any).new_password : '';
+    if (!currentPassword || !nextPassword) {
+      return c.json({ error: 'current_password and new_password are required' }, 400);
+    }
+
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+    const user = await c.env.DB.prepare(
+      `SELECT id, username, password_hash, password_salt${userSchema.hasEmail ? ', email' : ''} FROM users WHERE id = ?`
+    ).bind(sessionUser.userId).first();
+    if (!user) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    const actualHash = await hashPassword(currentPassword, (user as any).password_salt as string);
+    if (!timingSafeEqual(actualHash, (user as any).password_hash as string)) {
+      return c.json({ error: 'Current password is incorrect' }, 400);
+    }
+
+    const compareEmail = ((user as any).email as string | null) ?? ((user as any).username as string);
+    const passwordValidationError = validatePasswordStrength(nextPassword, [compareEmail]);
+    if (passwordValidationError) {
+      return c.json({ error: passwordValidationError }, 400);
+    }
+
+    const salt = randomBase64(16);
+    const passwordHash = await hashPassword(nextPassword, salt);
+    await c.env.DB.prepare(
+      'UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?'
+    ).bind(passwordHash, salt, new Date().toISOString(), sessionUser.userId).run();
+
+    const currentSessionToken = getSessionIdFromRequest(c);
+    const revokedSessions = await revokeUserSessions(c.env.DB, sessionUser.userId, currentSessionToken);
+    if (isValidEmail(compareEmail)) {
+      await sendPasswordChangedEmail(c.env, compareEmail);
+    }
+
+    await recordAuditLog(c, {
+      action: 'change_password',
+      resourceType: 'account',
+      resourceId: sessionUser.userId,
+      summary: `變更個人密碼 ${compareEmail}`,
+      details: {
+        revoked_other_sessions: revokedSessions
+      }
+    });
+
+    return c.json({ ok: true, revoked_other_sessions: revokedSessions });
   });
 
   app.get('/api/auth/sessions', async (c) => {
@@ -2082,18 +2636,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const userSchema = await getUserSchemaSupport(c.env.DB);
 
     const body = await c.req.json();
-    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
     const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
     const role = (body as any)?.role as UserRole | undefined;
-    if (!email || !password) {
-      return c.json({ error: 'email and password are required' }, 400);
+    if (!email) {
+      return c.json({ error: 'email is required' }, 400);
     }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
-    }
-    const passwordValidationError = validatePasswordStrength(password, [email]);
-    if (passwordValidationError) {
-      return c.json({ error: passwordValidationError }, 400);
     }
 
     const finalRole: UserRole = role === 'admin' ? 'admin' : 'readonly';
@@ -2106,8 +2655,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const id = crypto.randomUUID();
-    const salt = randomBase64(16);
-    const passwordHash = await hashPassword(password, salt);
     const now = new Date().toISOString();
 
     let verifyToken: string | null = null;
@@ -2121,7 +2668,15 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const columns = ['id', 'username', 'password_hash', 'password_salt', 'role', 'created_at', 'updated_at'];
-    const values: Array<string | null> = [id, email, passwordHash, salt, finalRole, now, now];
+    const values: Array<string | null> = [
+      id,
+      email,
+      INVITE_PENDING_PASSWORD_HASH,
+      INVITE_PENDING_PASSWORD_SALT,
+      finalRole,
+      now,
+      now
+    ];
     if (userSchema.hasEmail) {
       columns.push('email');
       values.push(email);
@@ -2144,8 +2699,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     let delivered = false;
     if (verifyToken) {
-      const verifyUrl = buildVerificationUrl(c.env, verifyToken);
-      delivered = await sendVerificationEmail(c.env, email, verifyUrl);
+      const inviteUrl = buildInvitationUrl(c.env, verifyToken);
+      delivered = await sendInvitationEmail(c.env, email, inviteUrl);
     }
 
     notifyUpdate(c, 'user:create', {
@@ -2161,7 +2716,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       details: {
         username: email,
         role: finalRole,
-        verification_email_sent: delivered
+        invitation_email_sent: delivered
       }
     });
     const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
@@ -2171,8 +2726,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       email,
       role: finalRole,
       email_verified_at: null,
-      verification_email_sent: delivered,
-      ...(debugToken ? { debug_verify_token: debugToken } : {})
+      invitation_email_sent: delivered,
+      ...(debugToken ? { debug_invite_token: debugToken } : {})
     }, 201);
   });
 
@@ -2232,7 +2787,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const existing = await c.env.DB.prepare(
-      `SELECT id, username, role${userSchema.hasEmail ? ', email' : ''} FROM users WHERE id = ?`
+      `SELECT id, username, role, password_hash, password_salt${userSchema.hasEmail ? ', email' : ''} FROM users WHERE id = ?`
     ).bind(id).first();
     if (!existing) {
       return c.json({ error: 'User not found' }, 404);
@@ -2304,8 +2859,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
           const token = await createVerificationToken();
           updates.push('email_verify_token_hash = ?', 'email_verify_expires_at = ?');
           values.push(token.tokenHash, token.expiresAt);
-          const verifyUrl = buildVerificationUrl(c.env, token.token);
-          delivered = await sendVerificationEmail(c.env, nextEmail, verifyUrl);
+          const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
+          const actionUrl = invitePending ? buildInvitationUrl(c.env, token.token) : buildVerificationUrl(c.env, token.token);
+          delivered = invitePending
+            ? await sendInvitationEmail(c.env, nextEmail, actionUrl)
+            : await sendVerificationEmail(c.env, nextEmail, actionUrl);
         }
       }
     }

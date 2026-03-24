@@ -8,6 +8,7 @@ type AuditLogPageProps = {
   currentUser: AuthUser;
   onBack: () => void;
   onManageSessions: () => void;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onManageUsers: () => void;
   onManageNotifications: () => void;
@@ -41,6 +42,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
   currentUser,
   onBack,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onManageUsers,
   onManageNotifications,
@@ -137,6 +139,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
             isAdmin={currentUser.role === 'admin'}
             onBack={onBack}
             onManageSessions={onManageSessions}
+            onOpenAccount={onOpenAccount}
             onOpenSettings={onOpenSettings}
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}

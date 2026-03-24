@@ -267,6 +267,7 @@ interface HeaderProps {
   onManageRelationshipNames?: () => void;
   pendingNotificationCount?: number;
   onManageSessions?: () => void;
+  onOpenAccount?: () => void;
   onOpenSettings?: () => void;
   onCreateUser?: () => void;
   username?: string | null;
@@ -308,6 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
   onManageRelationshipNames,
   pendingNotificationCount,
   onManageSessions,
+  onOpenAccount,
   onOpenSettings,
   onCreateUser,
   username,
@@ -538,6 +540,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   <ActionLabel text={t('header.sessionManagement')} icon="sessions" />
+                </button>
+              )}
+              {onOpenAccount && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onOpenAccount();
+                    closeMobileMenu();
+                  }}
+                >
+                  <ActionLabel text={t('header.accountProfile')} icon="accounts" />
                 </button>
               )}
               {onOpenSettings && (
@@ -987,6 +1001,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   <ActionLabel text={t('header.sessionManagement')} icon="sessions" />
+                </button>
+              )}
+              {onOpenAccount && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onOpenAccount();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  <ActionLabel text={t('header.accountProfile')} icon="accounts" />
                 </button>
               )}
               {onOpenSettings && (
