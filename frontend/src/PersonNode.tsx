@@ -4,6 +4,8 @@ import { useI18n } from './i18n';
 
 const MOBILE_LONG_PRESS_MS = 180;
 const MOBILE_LONG_PRESS_CANCEL_DISTANCE = 30;
+const MOBILE_DOUBLE_TAP_MS = 320;
+const MOBILE_DOUBLE_TAP_MAX_DISTANCE = 24;
 
 const PersonNode = memo(({ data, selected }: NodeProps) => {
   const { t } = useI18n();
@@ -11,6 +13,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
   const [nameOverflow, setNameOverflow] = useState(false);
   const highlightHandles = new Set<string>(data.highlightHandles ?? []);
   const tapRef = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null);
+  const doubleTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
   const nameTextRef = useRef<HTMLSpanElement | null>(null);
   const touchLongPressRef = useRef<{
     touchId: number;
@@ -104,7 +107,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         className={`person-node nopan ${data.interactionLocked ? 'nodrag' : ''} ${selected ? 'selected' : ''} ${data.isCenter ? 'center' : ''} ${data.flashCenter ? 'center-flash' : ''} ${data.flashSearch ? 'search-flash' : ''} ${data.focusHover ? 'focus-hover' : ''} ${isFloating ? 'floating' : ''}`}
         style={{
           borderColor: data.genderColor,
-          touchAction: data.draggableMobile ? 'none' : undefined,
+          touchAction: data.draggableMobile ? 'none' : (data.allowNodeDoubleTap ? 'manipulation' : undefined),
           userSelect: data.draggableMobile ? 'none' : undefined,
           WebkitUserSelect: data.draggableMobile ? 'none' : undefined,
           WebkitTouchCallout: data.draggableMobile ? 'none' : undefined,
@@ -114,13 +117,13 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           '--highlight-color-18': `${data.genderColor}2E`,
         } as React.CSSProperties}
         onTouchStart={(event) => {
-          if (!data.draggableMobile) return;
           const touch = event.changedTouches[0];
           if (!touch) return;
           const target = event.target as HTMLElement | null;
-          if (target?.closest('.react-flow__handle')) {
+          if (target?.closest('.react-flow__handle') || target?.closest('.node-avatar')) {
             return;
           }
+          if (!data.draggableMobile) return;
           event.preventDefault();
           event.stopPropagation();
 
@@ -194,22 +197,51 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           }
         }}
         onTouchEnd={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest('.node-avatar')) {
+            return;
+          }
           const current = touchLongPressRef.current;
           const endedTouch = current
             ? Array.from(event.changedTouches).find((item) => item.identifier === current.touchId)
             : null;
-          if (!current || !endedTouch) {
+          if (current && endedTouch) {
+            if (current.active) {
+              event.preventDefault();
+              finishTouchDrag(current.touchId);
+            } else {
+              clearTouchLongPressTimer();
+              detachGlobalTouchHandlers();
+              touchLongPressRef.current = null;
+            }
+          }
+
+          if (!data.allowNodeDoubleTap || typeof data.onNodeDoubleTap !== 'function') {
             return;
           }
 
-          if (current.active) {
+          const touch = event.changedTouches[0];
+          if (!touch) return;
+          const now = Date.now();
+          const previousTap = doubleTapRef.current;
+          const isDoubleTap = previousTap
+            && now - previousTap.time <= MOBILE_DOUBLE_TAP_MS
+            && Math.abs(touch.clientX - previousTap.x) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE
+            && Math.abs(touch.clientY - previousTap.y) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE;
+
+          if (isDoubleTap) {
+            doubleTapRef.current = null;
             event.preventDefault();
-            finishTouchDrag(current.touchId);
-          } else {
-            clearTouchLongPressTimer();
-            detachGlobalTouchHandlers();
-            touchLongPressRef.current = null;
+            event.stopPropagation();
+            data.onNodeDoubleTap(touch.clientX, touch.clientY);
+            return;
           }
+
+          doubleTapRef.current = {
+            time: now,
+            x: touch.clientX,
+            y: touch.clientY,
+          };
         }}
         onTouchCancel={() => {
           const current = touchLongPressRef.current;
