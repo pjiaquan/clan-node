@@ -97,7 +97,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 onChange={(e) => setMfaCode(e.target.value.replace(/\D+/g, '').slice(0, 6))}
                 autoComplete="one-time-code"
                 data-1p-ignore="true"
-                data-bwignore="true"
                 data-lpignore="true"
                 autoFocus
                 required
