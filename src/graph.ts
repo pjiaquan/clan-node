@@ -11,6 +11,25 @@ import {
 } from './data_protection';
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
+  let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+  const getPeopleSchemaSupport = async (db: D1Database) => {
+    if (!peopleSchemaSupportPromise) {
+      peopleSchemaSupportPromise = (async () => {
+        const pragma = await db.prepare("PRAGMA table_info('people')").all();
+        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+        if (!names.has('email')) {
+          await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
+          names.add('email');
+        }
+        return { hasEmail: names.has('email') };
+      })().catch((error) => {
+        peopleSchemaSupportPromise = null;
+        throw error;
+      });
+    }
+    return peopleSchemaSupportPromise;
+  };
+
   const loadAvatarMap = async (db: D1Database) => {
     const { results } = await db.prepare(
       `SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
@@ -50,11 +69,12 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       if (!centerId) {
         return c.json({ error: 'center query parameter is required' }, 400);
       }
+      const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
 
       // Verify center person exists
       console.log('Verifying center person...');
       const center = await c.env.DB.prepare(
-        'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod FROM people WHERE id = ?'
+        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod FROM people WHERE id = ?`
       ).bind(centerId).first();
 
       if (!center) {
@@ -67,7 +87,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       // Get all people
       console.log('Fetching all people...');
       const { results: peopleRaw } = await c.env.DB.prepare(
-        'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people'
+        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people`
       ).all();
       console.log(`Fetched ${peopleRaw.length} people`);
       await Promise.all((peopleRaw as any[]).map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)));
@@ -102,6 +122,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         id: String(person.id),
         name: String(person.name),
         english_name: person.english_name ?? null,
+        email: person.email ?? null,
         gender: String(person.gender),
         dob: person.dob ?? undefined,
         title: person.title,

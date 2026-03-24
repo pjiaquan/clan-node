@@ -13,6 +13,8 @@ type NotificationManagementPageProps = {
   onManageUsers: () => void;
   onManageAuditLogs: () => void;
   onManageRelationshipNames: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -40,6 +42,8 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
   onManageUsers,
   onManageAuditLogs,
   onManageRelationshipNames,
+  themeMode,
+  onToggleTheme,
   onLogout,
 }) => {
   const { t, locale } = useI18n();
@@ -183,6 +187,8 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
             onManageUsers={onManageUsers}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            themeMode={themeMode}
+            onToggleTheme={onToggleTheme}
             onLogout={onLogout}
           />
         </div>

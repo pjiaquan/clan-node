@@ -14,17 +14,15 @@
 
 .loading {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  gap: 1.5rem;
 }
 
 .spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #e2e8f0;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #e2e8f0;
   border-top-color: #667eea;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -34,11 +32,6 @@
   to {
     transform: rotate(360deg);
   }
-}
-
-.loading p {
-  color: #64748b;
-  font-size: 0.95rem;
 }
 
 .user-admin-page {
@@ -2608,6 +2601,45 @@ button:disabled:hover {
   min-height: 110px;
 }
 
+.person-email-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.person-email-row input {
+  flex: 1;
+}
+
+.person-invite-btn {
+  flex: 0 0 auto;
+  min-width: 6.5rem;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
+  color: #1d4ed8 !important;
+  font-weight: 700;
+}
+
+.person-invite-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%) !important;
+}
+
+.person-invite-btn.is-loading {
+  cursor: wait;
+}
+
+.person-email-hint {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.person-email-hint.is-success {
+  color: #047857;
+}
+
 .report-issue-person {
   margin: -0.25rem 0 0.75rem;
   font-size: 0.9rem;
@@ -2854,6 +2886,14 @@ button:disabled:hover {
 
 /* Mobile Responsive */
 @media (max-width: 640px) {
+  .person-email-row {
+    flex-direction: column;
+  }
+
+  .person-invite-btn {
+    width: 100%;
+  }
+
   .date-input-row {
     flex-direction: column;
     align-items: stretch;

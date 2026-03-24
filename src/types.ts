@@ -45,6 +45,7 @@ export interface Person {
   id: string;
   name: string;
   english_name?: string | null;
+  email?: string | null;
   gender: string;
   blood_type?: string | null;
   dob?: string;

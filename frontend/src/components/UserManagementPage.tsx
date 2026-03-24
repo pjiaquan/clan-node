@@ -15,6 +15,8 @@ type UserManagementPageProps = {
   onManageNotifications: () => void;
   onManageAuditLogs: () => void;
   onManageRelationshipNames: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -27,6 +29,8 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  themeMode,
+  onToggleTheme,
   onLogout,
 }) => {
   const { t, locale } = useI18n();
@@ -164,6 +168,8 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            themeMode={themeMode}
+            onToggleTheme={onToggleTheme}
             onLogout={onLogout}
           />
         </div>
@@ -214,6 +220,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
               <table className="user-admin-table">
                 <thead>
                   <tr>
+                    <th>{t('userMgmt.member')}</th>
                     <th>{t('userMgmt.email')}</th>
                     <th>{t('userMgmt.emailStatus')}</th>
                     <th>{t('userMgmt.firstLoginAt')}</th>
@@ -230,6 +237,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
                     const rowBusy = busyUserId === user.id;
                     return (
                       <tr key={user.id}>
+                        <td>{user.linked_person_name || '-'}</td>
                         <td>
                           <div className="user-admin-username">
                             <span>{user.email || user.username}</span>

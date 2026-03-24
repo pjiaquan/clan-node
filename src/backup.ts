@@ -19,6 +19,7 @@ type BackupPerson = {
   id: string;
   name: string;
   english_name: string | null;
+  email: string | null;
   gender: 'M' | 'F' | 'O';
   blood_type: string | null;
   dob: string | null;
@@ -182,6 +183,7 @@ const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
       id,
       name,
       english_name: asNullableString(row.english_name),
+      email: asNullableString(row.email),
       gender: gender as 'M' | 'F' | 'O',
       blood_type: asNullableString(row.blood_type),
       dob: asNullableString(row.dob),
@@ -315,11 +317,31 @@ const validateRelations = (
 };
 
 export function registerBackupRoutes(app: Hono<AppBindings>) {
+  let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+  const getPeopleSchemaSupport = async (db: D1Database) => {
+    if (!peopleSchemaSupportPromise) {
+      peopleSchemaSupportPromise = (async () => {
+        const pragma = await db.prepare("PRAGMA table_info('people')").all();
+        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+        if (!names.has('email')) {
+          await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
+          names.add('email');
+        }
+        return { hasEmail: names.has('email') };
+      })().catch((error) => {
+        peopleSchemaSupportPromise = null;
+        throw error;
+      });
+    }
+    return peopleSchemaSupportPromise;
+  };
+
   app.get('/api/admin/backup/export', async (c) => {
     if (!ensureAdmin(c)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const [
       peopleResult,
       avatarsResult,
@@ -329,7 +351,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       kinshipLabelsResult,
     ] = await Promise.all([
       c.env.DB.prepare(
-        'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at ASC, id ASC'
+        `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at ASC, id ASC`
       ).all(),
       c.env.DB.prepare(
         'SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at FROM person_avatars ORDER BY person_id ASC, sort_order ASC, created_at ASC'
@@ -361,6 +383,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         id: String(row.id),
         name: String(row.name),
         english_name: row.english_name === null ? null : String(row.english_name),
+        email: row.email === null || row.email === undefined ? null : String(row.email),
         gender: row.gender === 'M' || row.gender === 'F' ? row.gender : 'O',
         blood_type: row.blood_type === null ? null : String(row.blood_type),
         dob: row.dob === null ? null : String(row.dob),
@@ -438,6 +461,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
 
     try {
       const body = await c.req.json();
+      const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
       const source = extractDataEnvelope(body);
       const now = new Date().toISOString();
 
@@ -480,12 +504,13 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
           });
           await c.env.DB.prepare(
             `INSERT INTO people (
-              id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              id, name, english_name${peopleSchema.hasEmail ? ', email' : ''}, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
+            ) VALUES (${peopleSchema.hasEmail ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`
           ).bind(
             person.id,
             person.name,
             person.english_name,
+            ...(peopleSchema.hasEmail ? [person.email] : []),
             person.gender,
             protectedFields.blood_type ?? null,
             protectedFields.dob ?? null,

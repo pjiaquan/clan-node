@@ -8,6 +8,7 @@ type PageHeaderMenuProps = {
   backLabel?: string;
   currentPage?: PageHeaderView;
   isAdmin?: boolean;
+  themeMode?: 'light' | 'dark';
   onBack: () => void;
   onManageSessions?: () => void;
   onOpenAccount?: () => void;
@@ -16,6 +17,7 @@ type PageHeaderMenuProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -38,6 +40,7 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   backLabel,
   currentPage,
   isAdmin = false,
+  themeMode,
   onBack,
   onManageSessions,
   onOpenAccount,
@@ -46,12 +49,14 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onToggleTheme,
   onLogout,
 }) => {
-  const { t } = useI18n();
+  const { toggleLanguage, t } = useI18n();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const resolvedBackLabel = backLabel || t('pageHeader.backToGraph');
+  const themeToggleLabel = themeMode === 'dark' ? t('header.switchToLight') : t('header.switchToDark');
 
   useEffect(() => {
     if (!open) return;
@@ -196,6 +201,28 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
               }}
             >
               <MenuItemLabel text={t('header.relationshipNameManagement')} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="header-action-item"
+            onClick={() => {
+              toggleLanguage();
+              setOpen(false);
+            }}
+          >
+            <MenuItemLabel text={t('header.switchLanguage')} />
+          </button>
+          {onToggleTheme && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onToggleTheme();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={themeToggleLabel} />
             </button>
           )}
           <button

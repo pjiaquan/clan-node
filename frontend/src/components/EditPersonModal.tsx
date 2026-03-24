@@ -13,6 +13,7 @@ export type EditPersonAvatarActions = {
 interface EditPersonModalProps {
   person: Person;
   showBirthTimeField?: boolean;
+  canInvite?: boolean;
   onClose: () => void;
   onUnsavedClose?: () => void;
   onSubmit: (
@@ -22,6 +23,7 @@ interface EditPersonModalProps {
     removeAvatar: boolean,
     avatarActions?: EditPersonAvatarActions
   ) => Promise<void> | void;
+  onInvite?: (id: string, email: string) => Promise<void> | void;
 }
 
 type CustomField = { label: string; value: string };
@@ -78,14 +80,17 @@ const formatSaveError = (
 export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   person,
   showBirthTimeField = true,
+  canInvite = false,
   onClose,
   onUnsavedClose,
   onSubmit,
+  onInvite,
 }) => {
   const { t } = useI18n();
   const [name, setName] = useState(person.name);
   const [isNameEditable, setIsNameEditable] = useState(false);
   const [englishName, setEnglishName] = useState(person.english_name || '');
+  const [email, setEmail] = useState(person.email || '');
   const [gender, setGender] = useState(person.gender);
   const [bloodType, setBloodType] = useState(person.blood_type || '');
   const initialDobParts = parsePartialDate(person.dob);
@@ -107,7 +112,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [removeAvatar, setRemoveAvatar] = useState(false);
   const [avatarImage, setAvatarImage] = useState<HTMLImageElement | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -128,6 +135,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setName(person.name);
     setIsNameEditable(false);
     setEnglishName(person.english_name || '');
+    setEmail(person.email || '');
     setGender(person.gender);
     setBloodType(person.blood_type || '');
     setDobYear(nextDobParts.year);
@@ -148,7 +156,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setRemoveAvatar(false);
     setAvatarImage(null);
     setIsSaving(false);
+    setIsInviting(false);
     setSaveError(null);
+    setInviteNotice(null);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
     setCustomFields(normalizeCustomFields(person.metadata?.customFields));
@@ -343,6 +353,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     const nextUpdates: Partial<Person> = {
       name,
       english_name: normalizedEnglish ? normalizedEnglish : null,
+      email: email.trim() ? email.trim().toLowerCase() : null,
       gender,
       blood_type: bloodType ? bloodType : null,
       dob: dobUnknown ? null : (dob ? dob : null),
@@ -396,6 +407,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     dobUnknown,
     dod,
     dodUnknown,
+    email,
     englishName,
     gender,
     bloodType,
@@ -415,6 +427,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const initialTob = normalizeTraditionalHour(person.tob || '');
   const initialTod = normalizeTraditionalHour(person.tod || '');
   const initialEnglish = person.english_name || '';
+  const initialEmail = person.email || '';
   const initialBloodType = person.blood_type || '';
   const normalizedCustomFields = customFields
     .map((field) => ({
@@ -433,6 +446,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const avatarDeleteDirty = deleteAvatarIds.length > 0;
   const isDirty = name !== person.name
     || englishName !== initialEnglish
+    || email !== initialEmail
     || gender !== person.gender
     || bloodType !== initialBloodType
     || dob !== initialDob
@@ -469,6 +483,35 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       setIsSaving(false);
     }
   };
+
+  const handleInvite = useCallback(async () => {
+    if (!onInvite || isInviting || isSaving) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setSaveError(t('editPerson.emailRequired'));
+      setInviteNotice(null);
+      return;
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(normalizedEmail)) {
+      setSaveError(t('editPerson.emailInvalid'));
+      setInviteNotice(null);
+      return;
+    }
+    setIsInviting(true);
+    setSaveError(null);
+    setInviteNotice(null);
+    try {
+      await onInvite(person.id, normalizedEmail);
+      setEmail(normalizedEmail);
+      setInviteNotice(t('editPerson.inviteSent', { email: normalizedEmail }));
+    } catch (error) {
+      console.error('Failed to invite person account:', error);
+      setSaveError(error instanceof Error ? error.message : t('editPerson.inviteFailed'));
+    } finally {
+      setIsInviting(false);
+    }
+  }, [email, isInviting, isSaving, onInvite, person.id, t]);
 
   const handleUnlockNameEdit = useCallback(() => {
     if (isNameEditable) return;
@@ -660,6 +703,37 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
               value={englishName}
               onChange={(e) => setEnglishName(e.target.value)}
             />
+          </div>
+          <div className="form-group">
+            <label>{t('personForm.email')}</label>
+            <div className="person-email-row">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setInviteNotice(null);
+                }}
+                placeholder={t('personForm.emailPlaceholder')}
+                autoComplete="email"
+              />
+              {canInvite && onInvite && (
+                <button
+                  type="button"
+                  className={`btn-secondary person-invite-btn${isInviting ? ' is-loading' : ''}`}
+                  onClick={handleInvite}
+                  disabled={isInviting || isSaving}
+                >
+                  {isInviting ? t('editPerson.inviting') : t('editPerson.invite')}
+                </button>
+              )}
+            </div>
+            {inviteNotice && (
+              <small className="person-email-hint is-success">{inviteNotice}</small>
+            )}
+            {!inviteNotice && canInvite && onInvite && (
+              <small className="person-email-hint">{t('editPerson.inviteHelp')}</small>
+            )}
           </div>
           <div className="form-group">
             <label>{t('editPerson.avatar')}</label>

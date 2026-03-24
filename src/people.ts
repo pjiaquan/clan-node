@@ -89,6 +89,25 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     FROM person_avatars
   `;
 
+  let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+  const getPeopleSchemaSupport = async (db: Env['DB']) => {
+    if (!peopleSchemaSupportPromise) {
+      peopleSchemaSupportPromise = (async () => {
+        const pragma = await db.prepare("PRAGMA table_info('people')").all();
+        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+        if (!names.has('email')) {
+          await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
+          names.add('email');
+        }
+        return { hasEmail: names.has('email') };
+      })().catch((error) => {
+        peopleSchemaSupportPromise = null;
+        throw error;
+      });
+    }
+    return peopleSchemaSupportPromise;
+  };
+
   const normalizeAvatar = (row: any): PersonAvatar => ({
     id: String(row.id),
     person_id: String(row.person_id),
@@ -282,6 +301,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     };
   };
 
+  const normalizeEmail = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized || null;
+  };
+
   const parseBoolean = (value: unknown, fallback = false) => {
     if (value === null || value === undefined) return fallback;
     const normalized = String(value).trim().toLowerCase();
@@ -386,8 +411,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Get all people
   app.get('/api/people', async (c) => {
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const { results } = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at'
+      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people ORDER BY created_at`
     ).all();
     await Promise.all((results as any[]).map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row as Record<string, unknown>)));
     const customFieldsMap = await loadCustomFields(c.env);
@@ -405,8 +431,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Get a single person by ID
   app.get('/api/people/:id', async (c) => {
     const id = c.req.param('id');
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     if (!person) {
@@ -440,8 +467,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Create a new person
   app.post('/api/people', async (c) => {
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const body = await c.req.json();
-    const { id: providedId, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { id: providedId, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     if (!name) {
       return c.json({ error: 'Name is required' }, 400);
@@ -449,6 +477,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     const id = providedId || crypto.randomUUID();
     const now = new Date().toISOString();
+    const normalizedEmail = normalizeEmail(email);
     const protectedFields = await protectPersonWriteFields(c.env, {
       blood_type: blood_type || null,
       dob: dob || null,
@@ -458,12 +487,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       metadata: metadata ? JSON.stringify(metadata) : null
     });
 
-    await c.env.DB.prepare(
-      'INSERT INTO people (id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(
-      id,
-      name,
-      english_name || null,
+    const insertColumns = ['id', 'name', 'english_name'];
+    const insertValues: unknown[] = [id, name, english_name || null];
+    if (peopleSchema.hasEmail) {
+      insertColumns.push('email');
+      insertValues.push(normalizedEmail);
+    }
+    insertColumns.push('gender', 'blood_type', 'dob', 'dod', 'tob', 'tod', 'avatar_url', 'metadata', 'created_at', 'updated_at');
+    insertValues.push(
       gender || 'O',
       protectedFields.blood_type ?? null,
       protectedFields.dob ?? null,
@@ -474,7 +505,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       protectedFields.metadata ?? null,
       now,
       now
-    ).run();
+    );
+    await c.env.DB.prepare(
+      `INSERT INTO people (${insertColumns.join(', ')}) VALUES (${insertColumns.map(() => '?').join(', ')})`
+    ).bind(...insertValues).run();
 
     const customFields = extractCustomFields(body, metadata);
     if (customFields) {
@@ -529,7 +563,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env, id);
@@ -547,6 +581,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       id,
       name,
       english_name,
+      email: normalizedEmail,
       gender,
       avatar_url,
       avatars_count: avatars.length,
@@ -563,6 +598,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       details: {
         name,
         english_name: english_name || null,
+        email: normalizedEmail,
         gender: gender || 'O',
         avatar_url: avatar_url || null,
         avatars_count: avatars.length,
@@ -577,6 +613,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       id,
       name,
       english_name: english_name || null,
+      email: normalizedEmail,
       gender: gender || 'O',
       blood_type: blood_type || null,
       dob: dob || null,
@@ -603,11 +640,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Update a person
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const body = await c.req.json();
-    const { name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+    const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
     const existing = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?'
+      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?`
     ).bind(id).first();
 
     if (!existing) {
@@ -641,6 +679,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       updates.push('english_name = ?');
       values.push(english_name);
       changedFields.push('english_name');
+    }
+    if (peopleSchema.hasEmail && email !== undefined) {
+      updates.push('email = ?');
+      values.push(normalizeEmail(email));
+      changedFields.push('email');
     }
     if (gender !== undefined) {
       updates.push('gender = ?');
@@ -750,7 +793,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const person = await c.env.DB.prepare(
-      'SELECT id, name, english_name, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?'
+      `SELECT id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
     ).bind(id).first();
 
     const customFieldsResult = await loadPersonCustomFields(c.env, id);
@@ -779,6 +822,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       updateDetails.english_name = {
         old: existingAny.english_name ?? null,
         new: english_name
+      };
+    }
+    if (peopleSchema.hasEmail && email !== undefined) {
+      updateDetails.email = {
+        old: existingAny.email ?? null,
+        new: normalizeEmail(email)
       };
     }
     if (gender !== undefined) updateDetails.gender = gender;

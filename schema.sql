@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS people (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     english_name TEXT,
+    email TEXT,
     gender TEXT CHECK(gender IN ('M', 'F', 'O')) NOT NULL DEFAULT 'O',
     blood_type TEXT, -- ABO blood type (A/B/O/AB), nullable
     dob TEXT, -- ISO date string for age comparison (older/younger sibling)

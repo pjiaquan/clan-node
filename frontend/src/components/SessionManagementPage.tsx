@@ -14,6 +14,8 @@ type SessionManagementPageProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -46,6 +48,8 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  themeMode,
+  onToggleTheme,
   onLogout,
 }) => {
   const { t, locale } = useI18n();
@@ -236,6 +240,8 @@ export const SessionManagementPage: React.FC<SessionManagementPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            themeMode={themeMode}
+            onToggleTheme={onToggleTheme}
             onLogout={onLogout}
           />
         </div>

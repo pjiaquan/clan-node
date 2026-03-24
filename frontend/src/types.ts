@@ -13,6 +13,7 @@ export interface Person {
   id: string;
   name: string;
   english_name?: string | null;
+  email?: string | null;
   gender: 'M' | 'F' | 'O';
   blood_type?: string | null;
   dob?: string | null;
@@ -90,6 +91,8 @@ export interface AuthUser {
   role: UserRole;
   email_verified_at?: string | null;
   avatar_url?: string | null;
+  linked_person_id?: string | null;
+  linked_person_name?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -121,6 +124,8 @@ export interface ManagedUser {
   id: string;
   username: string;
   email?: string;
+  linked_person_id?: string | null;
+  linked_person_name?: string | null;
   email_verified_at?: string | null;
   first_login_at?: string | null;
   latest_login_at?: string | null;
@@ -207,6 +212,7 @@ export interface NodeBackupPayload {
     id: string;
     name: string;
     english_name: string | null;
+    email: string | null;
     gender: 'M' | 'F' | 'O';
     blood_type: string | null;
     dob: string | null;

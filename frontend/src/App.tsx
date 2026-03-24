@@ -27,6 +27,13 @@ type AppView = 'graph' | 'account' | 'users' | 'sessions' | 'notifications' | 'a
 type ThemeMode = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'clan.theme.mode';
+const MFA_STORAGE_KEY = 'clan.auth.pendingMfa';
+
+type StoredPendingMfaState = {
+  pendingMfa: PendingMfaChallenge;
+  pendingMfaMethod: 'totp' | 'email';
+  authNotice: string | null;
+};
 
 const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/account') return 'account';
@@ -69,17 +76,50 @@ const hasStoredViewportState = () => {
   }
 };
 
+const loadStoredPendingMfaState = (): StoredPendingMfaState | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MFA_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPendingMfaState> | null;
+    if (!parsed?.pendingMfa || !parsed.pendingMfa.session_id) return null;
+    const pendingMfaMethod = parsed.pendingMfaMethod === 'totp' ? 'totp' : 'email';
+    return {
+      pendingMfa: parsed.pendingMfa,
+      pendingMfaMethod,
+      authNotice: typeof parsed.authNotice === 'string' ? parsed.authNotice : null,
+    };
+  } catch (error) {
+    console.warn('Failed to load pending MFA state:', error);
+    return null;
+  }
+};
+
+const persistPendingMfaState = (state: StoredPendingMfaState | null) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!state) {
+      localStorage.removeItem(MFA_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(MFA_STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Failed to persist pending MFA state:', error);
+  }
+};
+
 function App() {
   const { isZh, toggleLanguage, t } = useI18n();
+  const storedPendingMfaState = useMemo(() => loadStoredPendingMfaState(), []);
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(storedPendingMfaState?.authNotice ?? null);
   const [resendingVerification, setResendingVerification] = useState(false);
   const [requiresSetup, setRequiresSetup] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(null);
-  const [pendingMfaMethod, setPendingMfaMethod] = useState<'totp' | 'email'>('email');
+  const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(storedPendingMfaState?.pendingMfa ?? null);
+  const [pendingMfaMethod, setPendingMfaMethod] = useState<'totp' | 'email'>(storedPendingMfaState?.pendingMfaMethod ?? 'email');
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return new URL(window.location.href).searchParams.get('invite_token');
@@ -147,6 +187,14 @@ function App() {
     window.addEventListener('clan:unauthorized', onUnauthorized as EventListener);
     return () => window.removeEventListener('clan:unauthorized', onUnauthorized as EventListener);
   }, [isZh, navigateTo]);
+
+  useEffect(() => {
+    persistPendingMfaState(pendingMfa ? {
+      pendingMfa,
+      pendingMfaMethod,
+      authNotice,
+    } : null);
+  }, [authNotice, pendingMfa, pendingMfaMethod]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,8 +324,6 @@ function App() {
         if (!cancelled) {
           setIsAuthed(false);
           setAuthUser(null);
-          setPendingMfa(null);
-          setPendingMfaMethod('email');
         }
       } finally {
         if (!cancelled) setAuthChecked(true);
@@ -521,7 +567,6 @@ function App() {
         <div className="app">
           <div className="loading">
             <div className="spinner"></div>
-            <p>{t('app.verifying')}</p>
           </div>
         </div>
       );
@@ -587,7 +632,6 @@ function App() {
         <div className="app">
           <div className="loading">
             <div className="spinner"></div>
-            <p>{t('app.loadingProfile')}</p>
           </div>
         </div>
       );
@@ -604,6 +648,8 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
           onAccountUpdated={setAuthUser}
         />
@@ -621,6 +667,8 @@ function App() {
           onManageNotifications={() => navigateTo('notifications')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );
@@ -637,6 +685,8 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );
@@ -653,6 +703,8 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );
@@ -669,6 +721,8 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );
@@ -685,6 +739,8 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );
@@ -703,6 +759,8 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
         />
       );

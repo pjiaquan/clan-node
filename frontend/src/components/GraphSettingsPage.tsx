@@ -27,6 +27,8 @@ type GraphSettingsPageProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
 
@@ -221,6 +223,8 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  themeMode,
+  onToggleTheme,
   onLogout,
 }) => {
   const { t } = useI18n();
@@ -394,6 +398,8 @@ export const GraphSettingsPage: React.FC<GraphSettingsPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            themeMode={themeMode}
+            onToggleTheme={onToggleTheme}
             onLogout={onLogout}
           />
         </div>

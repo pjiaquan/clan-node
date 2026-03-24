@@ -828,6 +828,8 @@ type AccountRow = {
   email_verified_at: string | null;
   role: UserRole;
   avatar_url: string | null;
+  linked_person_id: string | null;
+  linked_person_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -839,6 +841,8 @@ const mapAccountRow = (row: any, userSchema: UserSchemaSupport): AccountRow => (
   email_verified_at: userSchema.hasEmailVerifiedAt ? ((row.email_verified_at as string | null) ?? null) : null,
   role: normalizeRole(row.role),
   avatar_url: userSchema.hasAvatarUrl ? ((row.avatar_url as string | null) ?? null) : null,
+  linked_person_id: ((row.linked_person_id as string | null) ?? null),
+  linked_person_name: ((row.linked_person_name as string | null) ?? null),
   created_at: String(row.created_at),
   updated_at: String(row.updated_at)
 });
@@ -849,11 +853,51 @@ const getAccountById = async (db: D1Database, userId: string) => {
   if (userSchema.hasEmail) fields.push('email');
   if (userSchema.hasEmailVerifiedAt) fields.push('email_verified_at');
   if (userSchema.hasAvatarUrl) fields.push('avatar_url');
+  const peoplePragma = await db.prepare("PRAGMA table_info('people')").all();
+  const peopleHasEmail = (peoplePragma.results as Array<Record<string, unknown>>)
+    .some((row) => String((row as any).name) === 'email');
+  const linkedPersonFields = peopleHasEmail
+    ? `, (
+          SELECT p.id
+          FROM people p
+          WHERE LOWER(TRIM(COALESCE(p.email, ''))) = LOWER(TRIM(COALESCE(users.${userSchema.hasEmail ? 'email' : 'username'}, '')))
+          ORDER BY p.updated_at DESC, p.created_at DESC, p.id DESC
+          LIMIT 1
+        ) AS linked_person_id,
+        (
+          SELECT p.name
+          FROM people p
+          WHERE LOWER(TRIM(COALESCE(p.email, ''))) = LOWER(TRIM(COALESCE(users.${userSchema.hasEmail ? 'email' : 'username'}, '')))
+          ORDER BY p.updated_at DESC, p.created_at DESC, p.id DESC
+          LIMIT 1
+        ) AS linked_person_name,
+        (
+          SELECT COALESCE(
+            (
+              SELECT pa.avatar_url
+              FROM person_avatars pa
+              WHERE pa.person_id = p.id
+              ORDER BY pa.is_primary DESC, pa.sort_order ASC, pa.created_at ASC
+              LIMIT 1
+            ),
+            p.avatar_url
+          )
+          FROM people p
+          WHERE LOWER(TRIM(COALESCE(p.email, ''))) = LOWER(TRIM(COALESCE(users.${userSchema.hasEmail ? 'email' : 'username'}, '')))
+          ORDER BY p.updated_at DESC, p.created_at DESC, p.id DESC
+          LIMIT 1
+        ) AS linked_person_avatar_url`
+    : ', NULL AS linked_person_id, NULL AS linked_person_name, NULL AS linked_person_avatar_url';
   const row = await db.prepare(
-    `SELECT ${fields.join(', ')} FROM users WHERE id = ?`
+    `SELECT ${fields.join(', ')}${linkedPersonFields} FROM users WHERE id = ?`
   ).bind(userId).first();
   if (!row) return null;
-  return { userSchema, account: mapAccountRow(row, userSchema) };
+  const account = mapAccountRow(row, userSchema);
+  const linkedAvatarUrl = ((row as any).linked_person_avatar_url as string | null) ?? null;
+  if (linkedAvatarUrl) {
+    account.avatar_url = linkedAvatarUrl;
+  }
+  return { userSchema, account };
 };
 
 const revokeUserSessions = async (db: D1Database, userId: string, keepToken: string | null = null) => {
@@ -2749,14 +2793,35 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     ];
     if (userSchema.hasEmail) fields.push('email');
     if (userSchema.hasEmailVerifiedAt) fields.push('email_verified_at');
+    const peoplePragma = await c.env.DB.prepare("PRAGMA table_info('people')").all();
+    const peopleHasEmail = (peoplePragma.results as Array<Record<string, unknown>>)
+      .some((row) => String((row as any).name) === 'email');
+    const linkedPersonFields = peopleHasEmail
+      ? `, (
+            SELECT p.id
+            FROM people p
+            WHERE LOWER(TRIM(COALESCE(p.email, ''))) = LOWER(TRIM(COALESCE(u.${userSchema.hasEmail ? 'email' : 'username'}, '')))
+            ORDER BY p.updated_at DESC, p.created_at DESC, p.id DESC
+            LIMIT 1
+          ) AS linked_person_id,
+          (
+            SELECT p.name
+            FROM people p
+            WHERE LOWER(TRIM(COALESCE(p.email, ''))) = LOWER(TRIM(COALESCE(u.${userSchema.hasEmail ? 'email' : 'username'}, '')))
+            ORDER BY p.updated_at DESC, p.created_at DESC, p.id DESC
+            LIMIT 1
+          ) AS linked_person_name`
+      : '';
     const { results } = await c.env.DB.prepare(
-      `SELECT ${fields.join(', ')} FROM users u ORDER BY u.created_at DESC`
+      `SELECT ${fields.join(', ')}${linkedPersonFields} FROM users u ORDER BY u.created_at DESC`
     ).all();
 
     return c.json(results.map((row) => ({
       id: (row as any).id as string,
       username: (row as any).username as string,
       email: ((row as any).email as string | null) ?? ((row as any).username as string),
+      linked_person_id: ((row as any).linked_person_id as string | null) ?? null,
+      linked_person_name: ((row as any).linked_person_name as string | null) ?? null,
       email_verified_at: userSchema.hasEmailVerifiedAt ? (((row as any).email_verified_at as string | null) ?? null) : null,
       first_login_at: ((row as any).first_login_at as string | null) ?? null,
       latest_login_at: ((row as any).latest_login_at as string | null) ?? null,

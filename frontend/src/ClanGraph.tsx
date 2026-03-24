@@ -1153,6 +1153,18 @@ export function ClanGraph({
     }
   }, [showToast, t]);
 
+  const handleInvitePerson = useCallback(async (id: string, email: string) => {
+    const person = graphData?.nodes.find((node) => node.id === id);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!person) {
+      throw new Error(t('editPerson.inviteFailed'));
+    }
+    if ((person.email ?? null) !== normalizedEmail) {
+      await updatePerson(id, { email: normalizedEmail });
+    }
+    await handleCreateUser(normalizedEmail, 'readonly');
+  }, [graphData, handleCreateUser, t, updatePerson]);
+
   useEffect(() => {
     if (!graphData) return;
 
@@ -3351,7 +3363,6 @@ export function ClanGraph({
       <div className="app">
         <div className="loading">
           <div className="spinner"></div>
-          <p>{t('graph.loading')}</p>
         </div>
       </div>
     );
@@ -3911,8 +3922,10 @@ export function ClanGraph({
         <EditPersonModal
           person={graphData.nodes.find(p => p.id === editingPersonId)!}
           showBirthTimeField={graphSettings.showBirthTimeOnNode}
+          canInvite={canManageUsers}
           onClose={() => setEditingPersonId(null)}
           onUnsavedClose={() => showToast(t('graph.unsavedChanges'), 'warning')}
+          onInvite={canManageUsers ? handleInvitePerson : undefined}
           onSubmit={async (id, updates, avatarFile, removeAvatar, avatarActions?: EditPersonAvatarActions) => {
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const person = graphData.nodes.find(p => p.id === id);
@@ -3989,6 +4002,7 @@ export function ClanGraph({
 
             assignIfChanged('name', nextUpdates.name, person?.name);
             assignIfChanged('english_name', nextUpdates.english_name, person?.english_name ?? null);
+            assignIfChanged('email', nextUpdates.email, person?.email ?? null);
             assignIfChanged('gender', nextUpdates.gender, person?.gender);
             assignIfChanged('blood_type', nextUpdates.blood_type, person?.blood_type ?? null);
             assignIfChanged('dob', nextUpdates.dob, person?.dob ?? null);

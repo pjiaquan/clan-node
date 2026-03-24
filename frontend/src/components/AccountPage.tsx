@@ -13,6 +13,8 @@ type AccountPageProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
   onAccountUpdated: (account: AccountProfile) => void;
 };
@@ -39,6 +41,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  themeMode,
+  onToggleTheme,
   onLogout,
   onAccountUpdated,
 }) => {
@@ -155,6 +159,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({
     () => api.resolveAvatarUrl(account?.avatar_url || currentUser.avatar_url || null),
     [account?.avatar_url, currentUser.avatar_url],
   );
+  const linkedPersonName = account?.linked_person_name || currentUser.linked_person_name || null;
+  const avatarLinkedToPerson = Boolean(account?.linked_person_id || currentUser.linked_person_id);
 
   return (
     <div className="session-page">
@@ -179,6 +185,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            themeMode={themeMode}
+            onToggleTheme={onToggleTheme}
             onLogout={onLogout}
           />
         </div>
@@ -201,14 +209,19 @@ export const AccountPage: React.FC<AccountPageProps> = ({
                 </div>
                 <div className="account-avatar-actions">
                   <label className="session-btn secondary account-upload-btn">
-                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleAvatarUpload} disabled={busy} />
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleAvatarUpload} disabled={busy || avatarLinkedToPerson} />
                     {t('account.uploadAvatar')}
                   </label>
-                  <button type="button" className="session-btn secondary" onClick={handleAvatarClear} disabled={busy || !account?.avatar_url}>
+                  <button type="button" className="session-btn secondary" onClick={handleAvatarClear} disabled={busy || !account?.avatar_url || avatarLinkedToPerson}>
                     {t('account.clearAvatar')}
                   </button>
                 </div>
               </div>
+              {avatarLinkedToPerson && (
+                <small className="name-lock-hint">
+                  {t('account.avatarLinkedToPerson', { name: linkedPersonName || '-' })}
+                </small>
+              )}
               <form className="account-form" onSubmit={handleSaveProfile}>
                 <div className="form-group">
                   <label htmlFor="account-email">{t('account.email')}</label>
