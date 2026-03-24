@@ -13,6 +13,7 @@ import { SessionManagementPage } from './components/SessionManagementPage';
 import { NotificationManagementPage } from './components/NotificationManagementPage';
 import { AuditLogPage } from './components/AuditLogPage';
 import { GraphSettingsPage } from './components/GraphSettingsPage';
+import { DataManagementPage } from './components/DataManagementPage';
 import { KinshipLabelManagementPage } from './components/KinshipLabelManagementPage';
 import {
   DEFAULT_GRAPH_SETTINGS,
@@ -23,7 +24,7 @@ import {
 import { useI18n } from './i18n';
 import './App.css';
 
-type AppView = 'graph' | 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
+type AppView = 'graph' | 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings' | 'data';
 type ThemeMode = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'clan.theme.mode';
@@ -43,6 +44,7 @@ const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/audit-logs') return 'auditLogs';
   if (window.location.hash === '#/kinship-labels' || window.location.hash === '#/relationship-names') return 'kinshipLabels';
   if (window.location.hash === '#/settings') return 'settings';
+  if (window.location.hash === '#/data-management') return 'data';
   return 'graph';
 };
 
@@ -153,6 +155,8 @@ function App() {
               ? '#/kinship-labels'
             : next === 'settings'
               ? '#/settings'
+              : next === 'data'
+                ? '#/data-management'
               : '#/graph';
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
@@ -648,6 +652,7 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          onManageData={authUser.role === 'admin' ? () => navigateTo('data') : undefined}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -667,6 +672,7 @@ function App() {
           onManageNotifications={() => navigateTo('notifications')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          onManageData={() => navigateTo('data')}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -685,6 +691,7 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          onManageData={authUser.role === 'admin' ? () => navigateTo('data') : undefined}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -703,6 +710,7 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageAuditLogs={() => navigateTo('auditLogs')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          onManageData={() => navigateTo('data')}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -721,6 +729,7 @@ function App() {
           onManageUsers={() => navigateTo('users')}
           onManageNotifications={() => navigateTo('notifications')}
           onManageRelationshipNames={() => navigateTo('kinshipLabels')}
+          onManageData={() => navigateTo('data')}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
@@ -759,6 +768,26 @@ function App() {
           onManageNotifications={authUser.role === 'admin' ? () => navigateTo('notifications') : undefined}
           onManageAuditLogs={authUser.role === 'admin' ? () => navigateTo('auditLogs') : undefined}
           onManageRelationshipNames={authUser.role === 'admin' ? () => navigateTo('kinshipLabels') : undefined}
+          onManageData={authUser.role === 'admin' ? () => navigateTo('data') : undefined}
+          themeMode={themeMode}
+          onToggleTheme={toggleTheme}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    if (view === 'data' && authUser.role === 'admin') {
+      return (
+        <DataManagementPage
+          currentUser={authUser}
+          onBack={() => navigateTo('graph')}
+          onManageSessions={() => navigateTo('sessions')}
+          onOpenAccount={() => navigateTo('account')}
+          onOpenSettings={() => navigateTo('settings')}
+          onManageUsers={() => navigateTo('users')}
+          onManageNotifications={() => navigateTo('notifications')}
+          onManageAuditLogs={() => navigateTo('auditLogs')}
+          onManageRelationshipNames={() => navigateTo('kinshipLabels')}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}

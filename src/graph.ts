@@ -13,6 +13,7 @@ import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './l
 
 export function registerGraphRoutes(app: Hono<AppBindings>) {
   let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+  let userSchemaSupportPromise: Promise<{ hasEmail: boolean; hasEmailVerifiedAt: boolean }> | null = null;
   const getPeopleSchemaSupport = async (db: D1Database) => {
     if (!peopleSchemaSupportPromise) {
       peopleSchemaSupportPromise = (async () => {
@@ -29,6 +30,63 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       });
     }
     return peopleSchemaSupportPromise;
+  };
+
+  const getUserSchemaSupport = async (db: D1Database) => {
+    if (!userSchemaSupportPromise) {
+      userSchemaSupportPromise = (async () => {
+        const pragma = await db.prepare("PRAGMA table_info('users')").all();
+        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+        if (!names.has('email')) {
+          await db.prepare('ALTER TABLE users ADD COLUMN email TEXT').run();
+          names.add('email');
+        }
+        if (!names.has('email_verified_at')) {
+          await db.prepare('ALTER TABLE users ADD COLUMN email_verified_at TEXT').run();
+          names.add('email_verified_at');
+        }
+        return {
+          hasEmail: names.has('email'),
+          hasEmailVerifiedAt: names.has('email_verified_at'),
+        };
+      })().catch((error) => {
+        userSchemaSupportPromise = null;
+        throw error;
+      });
+    }
+    return userSchemaSupportPromise;
+  };
+
+  const loadVerifiedEmailMap = async (db: D1Database, emails: Array<string | null | undefined>) => {
+    const userSchema = await getUserSchemaSupport(db);
+    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt) {
+      return new Map<string, string>();
+    }
+    const normalizedEmails = Array.from(new Set(
+      emails
+        .map((email) => typeof email === 'string' ? email.trim().toLowerCase() : '')
+        .filter(Boolean)
+    ));
+    if (!normalizedEmails.length) {
+      return new Map<string, string>();
+    }
+    const placeholders = normalizedEmails.map(() => '?').join(', ');
+    const { results } = await db.prepare(
+      `SELECT email, email_verified_at
+       FROM users
+       WHERE LOWER(TRIM(COALESCE(email, username))) IN (${placeholders})
+         AND email_verified_at IS NOT NULL
+         AND TRIM(email_verified_at) != ''`
+    ).bind(...normalizedEmails).all();
+    const map = new Map<string, string>();
+    (results as Array<Record<string, unknown>>).forEach((row) => {
+      const email = String((row as any).email ?? '').trim().toLowerCase();
+      const verifiedAt = String((row as any).email_verified_at ?? '').trim();
+      if (email && verifiedAt) {
+        map.set(email, verifiedAt);
+      }
+    });
+    return map;
   };
 
   const loadAvatarMap = async (db: D1Database, layerId: string) => {
@@ -104,6 +162,10 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       console.log(`Fetched ${peopleRaw.length} people`);
       await Promise.all((peopleRaw as any[]).map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)));
       const avatarMap = await loadAvatarMap(c.env.DB, layerId);
+      const verifiedEmailMap = await loadVerifiedEmailMap(
+        c.env.DB,
+        (peopleRaw as any[]).map((person) => (person as any).email as string | null | undefined)
+      );
 
       const { results: customFieldRows } = await c.env.DB.prepare(
         `SELECT cf.id, cf.person_id, cf.label, cf.value
@@ -126,6 +188,9 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         return {
           ...decryptedPerson,
           layer_id: layerId,
+          email_verified_at: decryptedPerson.email
+            ? (verifiedEmailMap.get(String(decryptedPerson.email).trim().toLowerCase()) ?? null)
+            : null,
           avatar_url: resolvePrimaryAvatarUrl(avatars, decryptedPerson.avatar_url as string | null | undefined),
           avatars,
           metadata: {

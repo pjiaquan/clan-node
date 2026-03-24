@@ -265,6 +265,7 @@ interface HeaderProps {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  onManageData?: () => void;
   pendingNotificationCount?: number;
   onManageSessions?: () => void;
   onOpenAccount?: () => void;
@@ -281,6 +282,7 @@ interface HeaderProps {
   activeLayerId: string;
   onSelectLayer: (layerId: string) => void;
   onCreateLayer: () => void;
+  onDeleteLayer?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -311,6 +313,7 @@ export const Header: React.FC<HeaderProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   pendingNotificationCount,
   onManageSessions,
   onOpenAccount,
@@ -327,6 +330,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeLayerId,
   onSelectLayer,
   onCreateLayer,
+  onDeleteLayer,
 }) => {
   const { language, toggleLanguage, t } = useI18n();
   const [searchText, setSearchText] = useState('');
@@ -542,6 +546,16 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {t('header.newLayer')}
           </button>
+          {isAdmin && onDeleteLayer && (
+            <button
+              type="button"
+              className="btn-secondary danger"
+              onClick={onDeleteLayer}
+              disabled={layers.length <= 1}
+            >
+              {t('header.deleteLayer')}
+            </button>
+          )}
         </div>
         <div className="header-mobile-menu mobile-visible" ref={mobileMenuRef}>
           <button
@@ -588,6 +602,19 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <ActionLabel text={t('header.newLayer')} icon="addMember" />
               </button>
+              {isAdmin && onDeleteLayer && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onDeleteLayer();
+                    closeMobileMenu();
+                  }}
+                  disabled={layers.length <= 1}
+                >
+                  <ActionLabel text={t('header.deleteLayer')} icon="delete" />
+                </button>
+              )}
               {onManageSessions && (
                 <button
                   type="button"
@@ -857,6 +884,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   <ActionLabel text={t('header.relationshipNameManagement')} icon="labels" />
+                </button>
+              )}
+              {isAdmin && onManageData && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageData();
+                    closeMobileMenu();
+                  }}
+                >
+                  <ActionLabel text={t('header.dataManagement')} icon="settings" />
                 </button>
               )}
               <button
@@ -1212,6 +1251,18 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                 >
                   <ActionLabel text={t('header.relationshipNameManagement')} icon="labels" />
+                </button>
+              )}
+              {isAdmin && onManageData && (
+                <button
+                  type="button"
+                  className="header-action-item"
+                  onClick={() => {
+                    onManageData();
+                    setDesktopMenuOpen(false);
+                  }}
+                >
+                  <ActionLabel text={t('header.dataManagement')} icon="settings" />
                 </button>
               )}
               <button

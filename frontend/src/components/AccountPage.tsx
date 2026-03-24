@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { AccountProfile, AuthUser } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
 import { useI18n } from '../i18n';
+import { MfaSettingsSection } from './MfaSettingsSection';
 
 type AccountPageProps = {
   currentUser: AuthUser;
@@ -13,6 +14,7 @@ type AccountPageProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  onManageData?: () => void;
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
@@ -41,6 +43,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   themeMode,
   onToggleTheme,
   onLogout,
@@ -185,6 +188,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            onManageData={onManageData}
             themeMode={themeMode}
             onToggleTheme={onToggleTheme}
             onLogout={onLogout}
@@ -298,6 +302,11 @@ export const AccountPage: React.FC<AccountPageProps> = ({
                 </button>
               </form>
             </section>
+
+            <MfaSettingsSection
+              currentUser={currentUser}
+              onError={setError}
+            />
           </>
         )}
       </main>

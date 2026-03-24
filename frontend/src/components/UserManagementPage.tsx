@@ -15,6 +15,7 @@ type UserManagementPageProps = {
   onManageNotifications: () => void;
   onManageAuditLogs: () => void;
   onManageRelationshipNames: () => void;
+  onManageData?: () => void;
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
@@ -29,6 +30,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   themeMode,
   onToggleTheme,
   onLogout,
@@ -168,6 +170,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
             onManageNotifications={onManageNotifications}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            onManageData={onManageData}
             themeMode={themeMode}
             onToggleTheme={onToggleTheme}
             onLogout={onLogout}

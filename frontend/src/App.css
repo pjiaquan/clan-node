@@ -4043,6 +4043,12 @@ button:disabled:hover {
   gap: 1rem;
 }
 
+.account-section-hint {
+  margin: 0.35rem 0 0;
+  color: var(--app-muted);
+  font-size: 0.9rem;
+}
+
 .account-avatar-row {
   display: flex;
   gap: 1rem;

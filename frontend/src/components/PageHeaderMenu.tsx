@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 
-export type PageHeaderView = 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings';
+export type PageHeaderView = 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings' | 'dataManagement';
 
 type PageHeaderMenuProps = {
   username?: string | null;
@@ -17,6 +17,7 @@ type PageHeaderMenuProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  onManageData?: () => void;
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
 };
@@ -49,6 +50,7 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   onToggleTheme,
   onLogout,
 }) => {
@@ -201,6 +203,18 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
               }}
             >
               <MenuItemLabel text={t('header.relationshipNameManagement')} />
+            </button>
+          )}
+          {isAdmin && currentPage !== 'dataManagement' && onManageData && (
+            <button
+              type="button"
+              className="header-action-item"
+              onClick={() => {
+                onManageData();
+                setOpen(false);
+              }}
+            >
+              <MenuItemLabel text={t('header.dataManagement')} />
             </button>
           )}
           <button

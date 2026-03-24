@@ -18,7 +18,7 @@ wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_a
 wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS people;"
 
 echo "Applying schema on remote..."
-wrangler d1 execute "$DB_NAME" --remote --file="./schema.sql"
+wrangler d1 execute "$DB_NAME" --remote --file="./migrations/schema.sql"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM relationships;"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_custom_fields;"
 wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_avatars;"

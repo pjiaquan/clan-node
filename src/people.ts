@@ -91,6 +91,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   `;
 
   let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+  let userSchemaSupportPromise: Promise<{ hasEmail: boolean; hasEmailVerifiedAt: boolean }> | null = null;
   const getPeopleSchemaSupport = async (db: Env['DB']) => {
     if (!peopleSchemaSupportPromise) {
       peopleSchemaSupportPromise = (async () => {
@@ -107,6 +108,47 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       });
     }
     return peopleSchemaSupportPromise;
+  };
+
+  const getUserSchemaSupport = async (db: Env['DB']) => {
+    if (!userSchemaSupportPromise) {
+      userSchemaSupportPromise = (async () => {
+        const pragma = await db.prepare("PRAGMA table_info('users')").all();
+        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+        if (!names.has('email')) {
+          await db.prepare('ALTER TABLE users ADD COLUMN email TEXT').run();
+          names.add('email');
+        }
+        if (!names.has('email_verified_at')) {
+          await db.prepare('ALTER TABLE users ADD COLUMN email_verified_at TEXT').run();
+          names.add('email_verified_at');
+        }
+        return {
+          hasEmail: names.has('email'),
+          hasEmailVerifiedAt: names.has('email_verified_at')
+        };
+      })().catch((error) => {
+        userSchemaSupportPromise = null;
+        throw error;
+      });
+    }
+    return userSchemaSupportPromise;
+  };
+
+  const lookupVerifiedEmailAt = async (db: Env['DB'], email: string | null | undefined) => {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) return null;
+    const userSchema = await getUserSchemaSupport(db);
+    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt) return null;
+    const user = await db.prepare(
+      `SELECT email_verified_at
+       FROM users
+       WHERE LOWER(TRIM(COALESCE(email, username))) = ?
+         AND email_verified_at IS NOT NULL
+         AND TRIM(email_verified_at) != ''
+       LIMIT 1`
+    ).bind(normalizedEmail).first();
+    return user ? String((user as any).email_verified_at ?? '') || null : null;
   };
 
   const normalizeAvatar = (row: any): PersonAvatar => ({
@@ -291,12 +333,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   const buildPersonPayload = (
     person: any,
     customFields: { label: string; value: string }[],
-    avatars: PersonAvatar[]
+    avatars: PersonAvatar[],
+    emailVerifiedAt: string | null = null
   ) => {
     const primaryAvatar = resolvePrimaryAvatar(avatars);
     return {
       ...person,
       layer_id: person.layer_id ?? null,
+      email_verified_at: emailVerifiedAt,
       avatar_url: primaryAvatar?.avatar_url || person.avatar_url || null,
       avatars,
       metadata: {
@@ -435,7 +479,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const parsedResults = await Promise.all(results.map(async (person: any) => {
       const decryptedPerson = await decryptPersonRow(c.env, person);
       const avatars = avatarMap.get(decryptedPerson.id) || await ensureAvatarFromLegacy(c.env.DB, decryptedPerson);
-      return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars);
+      const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
+      return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars, emailVerifiedAt);
     }));
 
     return c.json(parsedResults);
@@ -456,7 +501,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
     const customFields = await loadPersonCustomFields(c.env, id);
     const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
-    return c.json(buildPersonPayload(decryptedPerson, customFields, avatars));
+    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
+    return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, emailVerifiedAt));
   });
 
   // List avatars for a single person
@@ -654,7 +700,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     queueRemoteJson(c, 'POST', '/api/people', mirrorPayload);
 
-    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars), 201);
+    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, emailVerifiedAt), 201);
   });
 
   // Update a person
@@ -701,8 +748,14 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       changedFields.push('english_name');
     }
     if (peopleSchema.hasEmail && email !== undefined) {
+      const normalizedNextEmail = normalizeEmail(email);
+      const existingEmail = normalizeEmail(existingAny.email);
+      const verifiedEmailAt = await lookupVerifiedEmailAt(c.env.DB, existingEmail);
+      if (verifiedEmailAt && normalizedNextEmail !== existingEmail) {
+        return c.json({ error: 'Verified email can only be changed from the account page' }, 409);
+      }
       updates.push('email = ?');
-      values.push(normalizeEmail(email));
+      values.push(normalizedNextEmail);
       changedFields.push('email');
     }
     if (gender !== undefined) {
@@ -896,7 +949,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     });
     queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
-    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars));
+    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, emailVerifiedAt));
   });
 
   // Upload avatar for a person (multi-avatar API)

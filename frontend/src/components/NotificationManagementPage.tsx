@@ -13,6 +13,7 @@ type NotificationManagementPageProps = {
   onManageUsers: () => void;
   onManageAuditLogs: () => void;
   onManageRelationshipNames: () => void;
+  onManageData?: () => void;
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
@@ -42,6 +43,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
   onManageUsers,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   themeMode,
   onToggleTheme,
   onLogout,
@@ -187,6 +189,7 @@ export const NotificationManagementPage: React.FC<NotificationManagementPageProp
             onManageUsers={onManageUsers}
             onManageAuditLogs={onManageAuditLogs}
             onManageRelationshipNames={onManageRelationshipNames}
+            onManageData={onManageData}
             themeMode={themeMode}
             onToggleTheme={onToggleTheme}
             onLogout={onLogout}

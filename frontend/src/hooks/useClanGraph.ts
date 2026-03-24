@@ -25,6 +25,27 @@ const readStoredActiveLayerId = () => {
 };
 
 const getCenterStorageKey = (layerId: string) => `clan.centerId.${layerId}`;
+const clearStoredLayerState = (layerId: string) => {
+  try {
+    localStorage.removeItem(getCenterStorageKey(layerId));
+  } catch (error) {
+    console.warn('Failed to clear stored layer state:', error);
+  }
+};
+
+const queueLayerFocus = (layerId: string, centerId: string, zoom = 1) => {
+  try {
+    localStorage.setItem('clan.pendingFocus', JSON.stringify({
+      id: centerId,
+      zoom,
+      layerId,
+    }));
+    localStorage.removeItem('clan.pendingFocusPosition');
+    localStorage.removeItem('clan.pendingCenterId');
+  } catch (error) {
+    console.warn('Failed to queue layer focus:', error);
+  }
+};
 
 export function useClanGraph(options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true;
@@ -64,6 +85,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       const storedCenter = localStorage.getItem(getCenterStorageKey(layerId));
       if (storedCenter) {
         setCenterIdState(storedCenter);
+        queueLayerFocus(layerId, storedCenter);
         return;
       }
     } catch {
@@ -80,6 +102,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
       } catch (error) {
         console.warn('Failed to persist initialized centerId:', error);
       }
+      queueLayerFocus(layerId, nextCenterId);
       return;
     }
 
@@ -202,10 +225,34 @@ export function useClanGraph(options?: { enabled?: boolean }) {
         } catch (error) {
           console.warn('Failed to persist new layer centerId:', error);
         }
+        queueLayerFocus(nextLayerId, created.center_id);
       }
     }
     return created;
   }, [fetchLayers, persistActiveLayerId]);
+
+  const deleteLayer = useCallback(async (layerId: string) => {
+    await api.deleteLayer(layerId);
+    clearStoredLayerState(layerId);
+
+    const updatedLayers = await fetchLayers();
+    const nextLayerId = updatedLayers.find((layer) => layer.id !== layerId)?.id || updatedLayers[0]?.id || '';
+
+    if (activeLayerId === layerId) {
+      if (nextLayerId) {
+        persistActiveLayerId(nextLayerId);
+      } else {
+        setActiveLayerIdState('');
+      }
+      setCenterIdState('');
+      setGraphData(null);
+    }
+
+    return {
+      nextLayerId,
+      layers: updatedLayers,
+    };
+  }, [activeLayerId, fetchLayers, persistActiveLayerId]);
 
   const updatePerson = useCallback(async (
     id: string,
@@ -408,5 +455,6 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     activeLayerId,
     setActiveLayerId,
     createLayer,
+    deleteLayer,
   };
 }

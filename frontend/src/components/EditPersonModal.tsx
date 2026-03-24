@@ -350,10 +350,11 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       ? ((await createCroppedAvatar()) || avatarFile)
       : null;
     const normalizedEnglish = englishName.trim();
+    const verifiedEmailLocked = Boolean(person.email && person.email_verified_at);
     const nextUpdates: Partial<Person> = {
       name,
       english_name: normalizedEnglish ? normalizedEnglish : null,
-      email: email.trim() ? email.trim().toLowerCase() : null,
+      email: verifiedEmailLocked ? (person.email || null) : (email.trim() ? email.trim().toLowerCase() : null),
       gender,
       blood_type: bloodType ? bloodType : null,
       dob: dobUnknown ? null : (dob ? dob : null),
@@ -428,6 +429,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const initialTod = normalizeTraditionalHour(person.tod || '');
   const initialEnglish = person.english_name || '';
   const initialEmail = person.email || '';
+  const isVerifiedEmailLocked = Boolean(person.email && person.email_verified_at);
   const initialBloodType = person.blood_type || '';
   const normalizedCustomFields = customFields
     .map((field) => ({
@@ -446,7 +448,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const avatarDeleteDirty = deleteAvatarIds.length > 0;
   const isDirty = name !== person.name
     || englishName !== initialEnglish
-    || email !== initialEmail
+    || (!isVerifiedEmailLocked && email !== initialEmail)
     || gender !== person.gender
     || bloodType !== initialBloodType
     || dob !== initialDob
@@ -485,7 +487,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   };
 
   const handleInvite = useCallback(async () => {
-    if (!onInvite || isInviting || isSaving) return;
+    if (!onInvite || isInviting || isSaving || isVerifiedEmailLocked) return;
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setSaveError(t('editPerson.emailRequired'));
@@ -511,7 +513,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     } finally {
       setIsInviting(false);
     }
-  }, [email, isInviting, isSaving, onInvite, person.id, t]);
+  }, [email, isInviting, isSaving, isVerifiedEmailLocked, onInvite, person.id, t]);
 
   const handleUnlockNameEdit = useCallback(() => {
     if (isNameEditable) return;
@@ -714,6 +716,9 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   setEmail(e.target.value);
                   setInviteNotice(null);
                 }}
+                disabled={isVerifiedEmailLocked}
+                readOnly={isVerifiedEmailLocked}
+                className={isVerifiedEmailLocked ? 'name-input-locked' : undefined}
                 placeholder={t('personForm.emailPlaceholder')}
                 autoComplete="email"
               />
@@ -722,16 +727,19 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   type="button"
                   className={`btn-secondary person-invite-btn${isInviting ? ' is-loading' : ''}`}
                   onClick={handleInvite}
-                  disabled={isInviting || isSaving}
+                  disabled={isInviting || isSaving || isVerifiedEmailLocked}
                 >
                   {isInviting ? t('editPerson.inviting') : t('editPerson.invite')}
                 </button>
               )}
             </div>
+            {isVerifiedEmailLocked && (
+              <small className="person-email-hint">{t('editPerson.emailManagedInAccount')}</small>
+            )}
             {inviteNotice && (
               <small className="person-email-hint is-success">{inviteNotice}</small>
             )}
-            {!inviteNotice && canInvite && onInvite && (
+            {!inviteNotice && !isVerifiedEmailLocked && canInvite && onInvite && (
               <small className="person-email-hint">{t('editPerson.inviteHelp')}</small>
             )}
           </div>

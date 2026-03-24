@@ -15,6 +15,7 @@ export interface Person {
   name: string;
   english_name?: string | null;
   email?: string | null;
+  email_verified_at?: string | null;
   gender: 'M' | 'F' | 'O';
   blood_type?: string | null;
   dob?: string | null;

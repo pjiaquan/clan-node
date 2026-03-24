@@ -115,6 +115,16 @@ export const api = {
     return res.json();
   },
 
+  deleteLayer: async (id: string): Promise<{ success: boolean; id: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/layers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
   fetchGraph: async (centerId: string, layerId: string): Promise<GraphData> => {
     const res = await fetchWithAuth(`${API_BASE}/api/graph?center=${encodeURIComponent(centerId)}&layer=${encodeURIComponent(layerId)}`);
     if (!res.ok) {

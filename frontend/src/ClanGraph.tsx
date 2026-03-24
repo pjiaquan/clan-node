@@ -265,6 +265,7 @@ type ClanGraphProps = {
   onManageNotifications?: () => void;
   onManageAuditLogs?: () => void;
   onManageRelationshipNames?: () => void;
+  onManageData?: () => void;
   onManageSessions?: () => void;
   onOpenAccount?: () => void;
   onOpenSettings?: () => void;
@@ -282,6 +283,7 @@ export function ClanGraph({
   onManageNotifications,
   onManageAuditLogs,
   onManageRelationshipNames,
+  onManageData,
   onManageSessions,
   onOpenAccount,
   onOpenSettings,
@@ -308,7 +310,8 @@ export function ClanGraph({
     layers,
     activeLayerId,
     setActiveLayerId,
-    createLayer
+    createLayer,
+    deleteLayer
   } = useClanGraph();
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -3405,12 +3408,23 @@ export function ClanGraph({
             showToast(error instanceof Error ? error.message : t('graph.saveFailed'), 'warning');
           });
         }}
+        onDeleteLayer={() => {
+          if (!canManageUsers) return;
+          const activeLayer = layers.find((layer) => layer.id === activeLayerId);
+          if (!activeLayer) return;
+          const confirmed = window.confirm(t('header.deleteLayerConfirm', { name: activeLayer.name }));
+          if (!confirmed) return;
+          void deleteLayer(activeLayer.id).catch((error) => {
+            showToast(error instanceof Error ? error.message : t('graph.saveFailed'), 'warning');
+          });
+        }}
         readOnly={isReadOnly}
         isAdmin={canManageUsers}
         onManageUsers={canManageUsers ? onManageUsers : undefined}
         onManageNotifications={canManageUsers ? onManageNotifications : undefined}
         onManageAuditLogs={canManageUsers ? onManageAuditLogs : undefined}
         onManageRelationshipNames={canManageUsers ? onManageRelationshipNames : undefined}
+        onManageData={canManageUsers ? onManageData : undefined}
         pendingNotificationCount={pendingNotificationCount}
         onManageSessions={onManageSessions}
         onOpenAccount={onOpenAccount}

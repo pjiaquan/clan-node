@@ -13,6 +13,7 @@ type AuditLogPageProps = {
   onManageUsers: () => void;
   onManageNotifications: () => void;
   onManageRelationshipNames: () => void;
+  onManageData?: () => void;
   themeMode?: 'light' | 'dark';
   onToggleTheme?: () => void;
   onLogout: () => Promise<void> | void;
@@ -49,6 +50,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
   onManageUsers,
   onManageNotifications,
   onManageRelationshipNames,
+  onManageData,
   themeMode,
   onToggleTheme,
   onLogout,
@@ -148,6 +150,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
             onManageUsers={onManageUsers}
             onManageNotifications={onManageNotifications}
             onManageRelationshipNames={onManageRelationshipNames}
+            onManageData={onManageData}
             themeMode={themeMode}
             onToggleTheme={onToggleTheme}
             onLogout={onLogout}

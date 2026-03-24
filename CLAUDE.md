@@ -47,7 +47,7 @@ npx wrangler dev
 npx wrangler deploy
 
 # Run D1 database migrations
-npx wrangler d1 execute <DATABASE_NAME> --file=./schema.sql
+npx wrangler d1 execute <DATABASE_NAME> --file=./migrations/schema.sql
 
 # Query D1 locally
 npx wrangler d1 execute <DATABASE_NAME> --local --command="SELECT * FROM people"

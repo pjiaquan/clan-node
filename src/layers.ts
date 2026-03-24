@@ -32,11 +32,41 @@ const EXAMPLE_RELATIONSHIP_METADATA = JSON.stringify({
 });
 
 let layerSchemaSupportPromise: Promise<void> | null = null;
+let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
+
+const isAdmin = (c: Context<AppBindings>) => {
+  const sessionUser = c.get('sessionUser');
+  return Boolean(sessionUser && sessionUser.role === 'admin');
+};
+
+const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
+  if (!avatarUrl) return null;
+  if (!avatarUrl.startsWith('/api/avatars/')) return null;
+  return avatarUrl.replace('/api/avatars/', '');
+};
 
 const hasColumn = async (db: D1Database, table: string, column: string) => {
   const pragma = await db.prepare(`PRAGMA table_info('${table}')`).all();
   const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
   return names.has(column);
+};
+
+const getPeopleSchemaSupport = async (db: D1Database) => {
+  if (!peopleSchemaSupportPromise) {
+    peopleSchemaSupportPromise = (async () => {
+      const pragma = await db.prepare("PRAGMA table_info('people')").all();
+      const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
+      if (!names.has('email')) {
+        await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
+        names.add('email');
+      }
+      return { hasEmail: names.has('email') };
+    })().catch((error) => {
+      peopleSchemaSupportPromise = null;
+      throw error;
+    });
+  }
+  return peopleSchemaSupportPromise;
 };
 
 const createSeedNodes = (layerName: string): SeedNode[] => ([
@@ -153,22 +183,25 @@ export const assertLayerExists = async (db: D1Database, layerId: string) => {
   return Boolean(row);
 };
 
-const insertSeedGraph = async (env: Env, layerId: string, layerName: string, now: string) => {
+const buildSeedGraphStatements = async (env: Env, layerId: string, layerName: string, now: string) => {
+  const peopleSchema = await getPeopleSchemaSupport(env.DB);
   const [root, left, right] = createSeedNodes(layerName);
+  const statements: D1PreparedStatement[] = [];
   for (const person of [root, left, right]) {
     const protectedFields = await protectPersonWriteFields(env, {
       metadata: JSON.stringify(person.metadata),
     });
-    await env.DB.prepare(
-      `INSERT INTO people (
-        id, layer_id, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
+    const insertColumns = [
+      'id', 'layer_id', 'name', 'english_name',
+      ...(peopleSchema.hasEmail ? ['email'] : []),
+      'gender', 'blood_type', 'dob', 'dod', 'tob', 'tod', 'avatar_url', 'metadata', 'created_at', 'updated_at'
+    ];
+    const insertValues: Array<string | null> = [
       person.id,
       layerId,
       person.name,
       null,
-      null,
+      ...(peopleSchema.hasEmail ? [null] : []),
       person.gender,
       null,
       null,
@@ -179,22 +212,27 @@ const insertSeedGraph = async (env: Env, layerId: string, layerName: string, now
       protectedFields.metadata ?? null,
       now,
       now
-    ).run();
+    ];
+    statements.push(env.DB.prepare(
+      `INSERT INTO people (${insertColumns.join(', ')})
+       VALUES (${insertColumns.map(() => '?').join(', ')})`
+    ).bind(...insertValues));
   }
 
-  await env.DB.prepare(
+  statements.push(env.DB.prepare(
     `INSERT INTO relationships (
       layer_id, from_person_id, to_person_id, type, metadata, created_at
     ) VALUES (?, ?, ?, 'parent_child', ?, ?)`
-  ).bind(layerId, root.id, left.id, EXAMPLE_RELATIONSHIP_METADATA, now).run();
+  ).bind(layerId, root.id, left.id, EXAMPLE_RELATIONSHIP_METADATA, now));
 
-  await env.DB.prepare(
+  statements.push(env.DB.prepare(
     `INSERT INTO relationships (
       layer_id, from_person_id, to_person_id, type, metadata, created_at
     ) VALUES (?, ?, ?, 'parent_child', ?, ?)`
-  ).bind(layerId, root.id, right.id, EXAMPLE_RELATIONSHIP_METADATA, now).run();
+  ).bind(layerId, root.id, right.id, EXAMPLE_RELATIONSHIP_METADATA, now));
 
   return {
+    statements,
     center_id: root.id,
     node_count: 3,
     relationship_count: 2,
@@ -208,6 +246,10 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/layers', async (c) => {
+    if (!isAdmin(c)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const body = await c.req.json();
     const providedId = typeof body?.id === 'string' && body.id.trim() ? body.id.trim() : crypto.randomUUID();
     const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : 'New Layer';
@@ -224,19 +266,14 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Layer already exists' }, 409);
     }
 
-    await c.env.DB.prepare('BEGIN IMMEDIATE').run();
-    let seedSummary: { center_id: string; node_count: number; relationship_count: number } | null = null;
-    try {
-      await c.env.DB.prepare(
+    const seedSummary = await buildSeedGraphStatements(c.env, providedId, name, now);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
         `INSERT INTO graph_layers (id, name, description, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`
-      ).bind(providedId, name, description, now, now).run();
-      seedSummary = await insertSeedGraph(c.env, providedId, name, now);
-      await c.env.DB.prepare('COMMIT').run();
-    } catch (error) {
-      await c.env.DB.prepare('ROLLBACK').run().catch(() => undefined);
-      throw error;
-    }
+      ).bind(providedId, name, description, now, now),
+      ...seedSummary.statements,
+    ]);
 
     await recordAuditLog(c, {
       action: 'create',
@@ -264,5 +301,84 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
       layer: createdLayer,
       center_id: seedSummary?.center_id ?? null,
     }, 201);
+  });
+
+  app.delete('/api/layers/:id', async (c) => {
+    if (!isAdmin(c)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const layerId = c.req.param('id');
+    await ensureLayerSchemaSupport(c.env.DB);
+
+    const existing = await c.env.DB.prepare(
+      `SELECT id, name, description
+       FROM graph_layers
+       WHERE id = ?`
+    ).bind(layerId).first();
+    if (!existing) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
+
+    const allLayers = await listGraphLayers(c.env.DB);
+    if (allLayers.length <= 1) {
+      return c.json({ error: 'Cannot delete the last layer' }, 409);
+    }
+
+    const avatarRows = await c.env.DB.prepare(
+      `SELECT pa.avatar_url, pa.storage_key
+       FROM person_avatars pa
+       INNER JOIN people p ON p.id = pa.person_id
+       WHERE p.layer_id = ?`
+    ).bind(layerId).all();
+
+    for (const row of avatarRows.results as Array<Record<string, unknown>>) {
+      const key = String(row.storage_key ?? '') || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
+      if (!key) continue;
+      await c.env.AVATARS.delete(key);
+    }
+
+    const peopleCountRow = await c.env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM people WHERE layer_id = ?'
+    ).bind(layerId).first();
+    const relationshipCountRow = await c.env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM relationships WHERE layer_id = ?'
+    ).bind(layerId).first();
+
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `DELETE FROM person_avatars
+         WHERE person_id IN (
+           SELECT id FROM people WHERE layer_id = ?
+         )`
+      ).bind(layerId),
+      c.env.DB.prepare(
+        `DELETE FROM person_custom_fields
+         WHERE person_id IN (
+           SELECT id FROM people WHERE layer_id = ?
+         )`
+      ).bind(layerId),
+      c.env.DB.prepare('DELETE FROM relationships WHERE layer_id = ?').bind(layerId),
+      c.env.DB.prepare('DELETE FROM people WHERE layer_id = ?').bind(layerId),
+      c.env.DB.prepare('DELETE FROM graph_layers WHERE id = ?').bind(layerId),
+    ]);
+
+    await recordAuditLog(c, {
+      action: 'delete',
+      resourceType: 'layers',
+      resourceId: layerId,
+      summary: `刪除圖層 ${String((existing as any).name ?? layerId)}`,
+      details: {
+        name: String((existing as any).name ?? layerId),
+        description: ((existing as any).description as string | null) ?? null,
+        removed_node_count: Number((peopleCountRow as any)?.count ?? 0),
+        removed_relationship_count: Number((relationshipCountRow as any)?.count ?? 0),
+        removed_avatar_count: avatarRows.results.length,
+      }
+    });
+
+    queueRemoteJson(c, 'DELETE', `/api/layers/${layerId}`, undefined);
+
+    return c.json({ success: true, id: layerId });
   });
 }
