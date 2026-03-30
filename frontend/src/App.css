@@ -1242,11 +1242,16 @@
 }
 
 .login-page {
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   align-items: stretch;
   justify-content: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 28%),
     radial-gradient(circle at bottom right, rgba(15, 118, 110, 0.18), transparent 32%),
@@ -1256,6 +1261,7 @@
 
 .login-shell {
   width: min(1240px, 100%);
+  margin: auto 0;
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 420px);
   gap: clamp(1.25rem, 2vw, 2rem);
@@ -3202,7 +3208,7 @@ button:disabled:hover {
     align-items: flex-start;
     justify-content: center;
     padding: 1rem 0.75rem;
-    padding-top: 8dvh;
+    padding-top: 6dvh;
   }
 
   .login-shell {
