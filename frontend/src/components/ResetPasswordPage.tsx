@@ -15,6 +15,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
   onCancel,
 }) => {
   const { t } = useI18n();
+  const logoSrc = `${import.meta.env.BASE_URL}family_tree_logo.png`;
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
   return (
     <div className="login-page">
       <div className="login-card">
-        <img className="login-logo" src="/family_tree_logo.png" alt="Family Tree logo" />
+        <img className="login-logo" src={logoSrc} alt="Family Tree logo" />
         <h1>{t('resetPassword.title')}</h1>
         <p>{t('resetPassword.prompt')}</p>
         <form onSubmit={handleSubmit}>

@@ -15,6 +15,7 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
   onCancel,
 }) => {
   const { t } = useI18n();
+  const logoSrc = `${import.meta.env.BASE_URL}family_tree_logo.png`;
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -31,7 +32,7 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
   return (
     <div className="login-page">
       <div className="login-card">
-        <img className="login-logo" src="/family_tree_logo.png" alt="Family Tree logo" />
+        <img className="login-logo" src={logoSrc} alt="Family Tree logo" />
         <h1>{t('forgotPassword.title')}</h1>
         <p>{t('forgotPassword.prompt')}</p>
         <form onSubmit={handleSubmit}>
