@@ -3,6 +3,8 @@ import type { Env } from './types';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 export const ENCRYPTED_VALUE_PREFIX = 'enc:v1';
+const toBufferSource = (value: Uint8Array): ArrayBuffer =>
+  Uint8Array.from(value).buffer;
 
 let cachedEncryptionKeySource: string | null = null;
 let cachedEncryptionKey: CryptoKey | null = null;
@@ -70,7 +72,7 @@ const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keyBytes = parseEncryptionKeyBytes(keySource);
   cachedEncryptionKey = await crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    toBufferSource(keyBytes),
     { name: 'AES-GCM' },
     false,
     ['encrypt', 'decrypt']

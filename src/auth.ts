@@ -7,6 +7,8 @@ import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection'
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
+const toBufferSource = (value: Uint8Array): ArrayBuffer =>
+  Uint8Array.from(value).buffer;
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60;
 const LOGIN_RATE_LIMIT = { windowMs: 10 * 60 * 1000, maxAttempts: 5, blockMs: 15 * 60 * 1000 };
 const ACCOUNT_LOGIN_RATE_LIMIT = { windowMs: 30 * 60 * 1000, maxAttempts: 12, blockMs: 30 * 60 * 1000 };
@@ -140,12 +142,12 @@ async function sha256Base64Url(input: string) {
 async function hmacSha1(secret: Uint8Array, message: Uint8Array) {
   const key = await crypto.subtle.importKey(
     'raw',
-    secret,
+    toBufferSource(secret),
     { name: 'HMAC', hash: 'SHA-1' },
     false,
     ['sign']
   );
-  const signature = await crypto.subtle.sign('HMAC', key, message);
+  const signature = await crypto.subtle.sign('HMAC', key, toBufferSource(message));
   return new Uint8Array(signature);
 }
 
@@ -341,7 +343,7 @@ const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keyBytes = parseEncryptionKeyBytes(keySource);
   cachedEncryptionKey = await crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    toBufferSource(keyBytes),
     { name: 'AES-GCM' },
     false,
     ['encrypt', 'decrypt']

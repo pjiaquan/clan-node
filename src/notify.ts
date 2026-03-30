@@ -103,7 +103,7 @@ export const notifyUpdate = (
     }
   };
 
-  c.executionCtx?.waitUntil((async () => {
+  const task = (async () => {
     const lines: string[] = [
       `Event: ${snapshot.event}`,
       `Time: ${new Date().toISOString()}`,
@@ -131,5 +131,11 @@ export const notifyUpdate = (
     };
 
     await sendTelegramPayload(c.env, payload);
-  })());
+  })();
+
+  try {
+    c.executionCtx?.waitUntil(task);
+  } catch {
+    void task;
+  }
 };

@@ -5,7 +5,12 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev --ip 0.0.0.0",
+    "dev:selfhost": "PORT=8787 tsx src/selfhost/server.ts",
     "deploy": "wrangler deploy",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
     "deploy:build": "VITE_API_BASE=https://clan-node-production.pjiaquan.workers.dev npm --prefix frontend run build && wrangler deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master",
     "d1:create": "wrangler d1 create clan-db",
     "d1:migrate": "wrangler d1 execute clan-db --local --file=./migrations/schema.sql",
@@ -36,9 +41,14 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "hono": "^4.6.16"
+    "@hono/node-server": "^1.19.11",
+    "better-sqlite3": "^12.8.0",
+    "hono": "^4.6.16",
+    "tsx": "^4.20.6"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
     "@cloudflare/workers-types": "^4.20241227.0",
     "typescript": "^5.7.3",
     "wrangler": "^4.67.0"

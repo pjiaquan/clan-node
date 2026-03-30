@@ -39,10 +39,11 @@ const normalizeApiBase = (value: string) => {
   }
   return next;
 };
-const API_BASE = normalizeApiBase(
-  import.meta.env.VITE_API_BASE
-    || (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev')
-);
+const hasExplicitApiBase = Object.prototype.hasOwnProperty.call(import.meta.env, 'VITE_API_BASE');
+const configuredApiBase = hasExplicitApiBase
+  ? String(import.meta.env.VITE_API_BASE ?? '')
+  : (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev');
+const API_BASE = normalizeApiBase(configuredApiBase);
 
 const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;

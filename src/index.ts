@@ -12,7 +12,7 @@ import { registerKinshipLabelRoutes } from './kinship_labels';
 import { registerBackupRoutes } from './backup';
 import { registerLayerRoutes } from './layers';
 
-const app = new Hono<AppBindings>();
+export const app = new Hono<AppBindings>();
 
 app.use('*', async (c, next) => {
   await next();
@@ -43,7 +43,7 @@ app.use('*', cors({
 }));
 
 // Health check
-app.get('/', (c) => {
+app.get('/healthz', (c) => {
   return c.json({ status: 'ok', message: 'Clan Node API' });
 });
 

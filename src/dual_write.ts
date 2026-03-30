@@ -103,6 +103,14 @@ const shouldMirror = (c: Context<AppBindings>) => {
   return Boolean(getRemoteConfig(c.env));
 };
 
+const waitUntilIfAvailable = (c: Context<AppBindings>, promise: Promise<unknown>) => {
+  try {
+    c.executionCtx?.waitUntil(promise);
+  } catch {
+    void promise;
+  }
+};
+
 export const queueRemoteJson = (
   c: Context<AppBindings>,
   method: string,
@@ -115,7 +123,7 @@ export const queueRemoteJson = (
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   };
-  c.executionCtx?.waitUntil(executeRemote(c.env, path, init));
+  waitUntilIfAvailable(c, executeRemote(c.env, path, init));
 };
 
 export const queueRemoteFormData = (
@@ -128,5 +136,5 @@ export const queueRemoteFormData = (
     method: 'POST',
     body: formData
   };
-  c.executionCtx?.waitUntil(executeRemote(c.env, path, init));
+  waitUntilIfAvailable(c, executeRemote(c.env, path, init));
 };
