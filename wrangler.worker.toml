@@ -1,0 +1,55 @@
+# Cloudflare Workers configuration
+
+name = "clan-node"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "clan-db"
+database_id = "85073827-66a2-4647-b7ff-9d0cbdcc3e60" # Replace with actual database_id after running `wrangler d1 create`
+
+# R2 Binding (for avatars)
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "clan-avatars"
+
+[vars]
+ENVIRONMENT = "development"
+FRONTEND_ORIGIN = "http://localhost:5173,http://192.168.1.200:5173,https://clan-frontend.pages.dev,http://localhost:8787"
+EMAIL_VERIFICATION_URL_BASE = "http://localhost:5173"
+BREVO_FROM_EMAIL = "no-reply@hinoki.my"
+BREVO_FROM_NAME = "Family Tree"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+FRONTEND_ORIGIN = "https://clan-frontend.pages.dev"
+EMAIL_VERIFICATION_URL_BASE = "https://clan-frontend.pages.dev"
+BREVO_FROM_EMAIL = "no-reply@hinoki.my"
+BREVO_FROM_NAME = "Family Tree"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "clan-db"
+database_id = "85073827-66a2-4647-b7ff-9d0cbdcc3e60"
+
+[[env.production.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "clan-avatars"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = false
+head_sampling_rate = 1
+persist = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+persist = false
+head_sampling_rate = 1

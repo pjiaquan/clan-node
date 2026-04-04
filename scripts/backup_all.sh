@@ -24,7 +24,7 @@ mkdir -p "$BACKUP_DIR"
 
 DB_OUT="$BACKUP_DIR/d1-${TIMESTAMP}.sql"
 echo "Exporting D1 database to $DB_OUT"
-wrangler d1 export "$D1_NAME" --output "$DB_OUT"
+wrangler --config "${WRANGLER_CONFIG:-wrangler.worker.toml}" d1 export "$D1_NAME" --output "$DB_OUT"
 
 AVATAR_OUT="$BACKUP_DIR/avatars-${TIMESTAMP}"
 if command -v rclone >/dev/null 2>&1; then

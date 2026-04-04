@@ -4,18 +4,18 @@
   "description": "Family tree genealogy system with graph-based kinship calculations",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev --ip 0.0.0.0",
+    "dev": "wrangler --config wrangler.worker.toml dev --ip 0.0.0.0",
     "dev:selfhost": "PORT=8787 tsx src/selfhost/server.ts",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler --config wrangler.worker.toml deploy",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "deploy:build": "VITE_API_BASE=https://clan-node-production.pjiaquan.workers.dev npm --prefix frontend run build && wrangler deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master",
-    "d1:create": "wrangler d1 create clan-db",
-    "d1:migrate": "wrangler d1 execute clan-db --local --file=./migrations/schema.sql",
-    "d1:migrate:prod": "wrangler d1 execute clan-db --file=./migrations/schema.sql",
-    "d1:query": "wrangler d1 execute clan-db --local --command",
+    "deploy:build": "VITE_API_BASE=https://clan-node-production.pjiaquan.workers.dev npm --prefix frontend run build && npx wrangler --config wrangler.worker.toml deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master --commit-dirty=true",
+    "d1:create": "wrangler --config wrangler.worker.toml d1 create clan-db",
+    "d1:migrate": "wrangler --config wrangler.worker.toml d1 execute clan-db --local --file=./migrations/schema.sql",
+    "d1:migrate:prod": "wrangler --config wrangler.worker.toml d1 execute clan-db --file=./migrations/schema.sql",
+    "d1:query": "wrangler --config wrangler.worker.toml d1 execute clan-db --local --command",
     "d1:backup": "mkdir -p backups && cp -a .wrangler/state/v3/d1/miniflare-D1DatabaseObject backups/miniflare-D1DatabaseObject-$(date +%Y%m%d-%H%M%S)",
     "d1:restore": "ls -t backups/miniflare-D1DatabaseObject-* | head -n 1 | xargs -I{} sh -c 'rm -rf .wrangler/state/v3/d1/miniflare-D1DatabaseObject && cp -a {} .wrangler/state/v3/d1/miniflare-D1DatabaseObject'",
     "d1:push": "bash scripts/push_local_d1.sh",
@@ -48,10 +48,10 @@
     "tsx": "^4.20.6"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241227.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
-    "@cloudflare/workers-types": "^4.20241227.0",
     "typescript": "^5.7.3",
-    "wrangler": "^4.67.0"
+    "wrangler": "^4.80.0"
   }
 }

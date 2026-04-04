@@ -8,21 +8,23 @@ EXPORT_PATH="${EXPORT_PATH:-$BACKUP_DIR/${DB_NAME}-export-${TIMESTAMP}.sql}"
 
 mkdir -p "$BACKUP_DIR"
 
+WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.worker.toml}"
+
 echo "Exporting local D1 to $EXPORT_PATH..."
-wrangler d1 export "$DB_NAME" --local --output="$EXPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 export "$DB_NAME" --local --output="$EXPORT_PATH"
 
 echo "Dropping remote tables (keeping users/sessions)..."
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS relationships;"
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_custom_fields;"
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_avatars;"
-wrangler d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS people;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS relationships;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_custom_fields;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS person_avatars;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DROP TABLE IF EXISTS people;"
 
 echo "Applying schema on remote..."
-wrangler d1 execute "$DB_NAME" --remote --file="./migrations/schema.sql"
-wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM relationships;"
-wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_custom_fields;"
-wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM person_avatars;"
-wrangler d1 execute "$DB_NAME" --remote --command "DELETE FROM people;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --file="./migrations/schema.sql"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DELETE FROM relationships;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DELETE FROM person_custom_fields;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DELETE FROM person_avatars;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --command "DELETE FROM people;"
 
 echo "Importing into remote D1 (data only)..."
 DATA_PATH="$(mktemp)"
@@ -102,7 +104,7 @@ write_inserts(
 
 conn.close()
 PY
-wrangler d1 execute "$DB_NAME" --remote --file="$DATA_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --remote --file="$DATA_PATH"
 rm -f "$DATA_PATH"
 
 echo "Syncing avatars from local to remote..."

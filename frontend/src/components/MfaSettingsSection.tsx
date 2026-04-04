@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import QRCode from 'qrcode';
 import { api } from '../api';
 import type { AuthUser, MfaStatus } from '../types';
 import { useI18n } from '../i18n';
@@ -60,6 +59,7 @@ export const MfaSettingsSection: React.FC<MfaSettingsSectionProps> = ({
         return;
       }
       try {
+        const { default: QRCode } = await import('qrcode');
         const nextUrl = await QRCode.toDataURL(mfaSetupUrl, {
           errorCorrectionLevel: 'M',
           margin: 1,

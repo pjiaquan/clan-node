@@ -1,20 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { AuthUser, PendingMfaChallenge } from './types';
-import { AcceptInvitePage } from './components/AcceptInvitePage';
-import { AccountPage } from './components/AccountPage';
-import { ForgotPasswordPage } from './components/ForgotPasswordPage';
-import { LoginPage } from './components/LoginPage';
-import { ResetPasswordPage } from './components/ResetPasswordPage';
-import { SetupPage } from './components/SetupPage';
-import { ClanGraph } from './ClanGraph';
-import { UserManagementPage } from './components/UserManagementPage';
-import { SessionManagementPage } from './components/SessionManagementPage';
-import { NotificationManagementPage } from './components/NotificationManagementPage';
-import { AuditLogPage } from './components/AuditLogPage';
-import { GraphSettingsPage } from './components/GraphSettingsPage';
-import { DataManagementPage } from './components/DataManagementPage';
-import { KinshipLabelManagementPage } from './components/KinshipLabelManagementPage';
 import {
   DEFAULT_GRAPH_SETTINGS,
   loadGraphSettings,
@@ -35,6 +21,49 @@ type StoredPendingMfaState = {
   pendingMfaMethod: 'totp' | 'email';
   authNotice: string | null;
 };
+
+const AcceptInvitePage = lazy(async () => ({
+  default: (await import('./components/AcceptInvitePage')).AcceptInvitePage,
+}));
+const AccountPage = lazy(async () => ({
+  default: (await import('./components/AccountPage')).AccountPage,
+}));
+const ForgotPasswordPage = lazy(async () => ({
+  default: (await import('./components/ForgotPasswordPage')).ForgotPasswordPage,
+}));
+const LoginPage = lazy(async () => ({
+  default: (await import('./components/LoginPage')).LoginPage,
+}));
+const ResetPasswordPage = lazy(async () => ({
+  default: (await import('./components/ResetPasswordPage')).ResetPasswordPage,
+}));
+const SetupPage = lazy(async () => ({
+  default: (await import('./components/SetupPage')).SetupPage,
+}));
+const ClanGraph = lazy(async () => ({
+  default: (await import('./ClanGraph')).ClanGraph,
+}));
+const UserManagementPage = lazy(async () => ({
+  default: (await import('./components/UserManagementPage')).UserManagementPage,
+}));
+const SessionManagementPage = lazy(async () => ({
+  default: (await import('./components/SessionManagementPage')).SessionManagementPage,
+}));
+const NotificationManagementPage = lazy(async () => ({
+  default: (await import('./components/NotificationManagementPage')).NotificationManagementPage,
+}));
+const AuditLogPage = lazy(async () => ({
+  default: (await import('./components/AuditLogPage')).AuditLogPage,
+}));
+const GraphSettingsPage = lazy(async () => ({
+  default: (await import('./components/GraphSettingsPage')).GraphSettingsPage,
+}));
+const DataManagementPage = lazy(async () => ({
+  default: (await import('./components/DataManagementPage')).DataManagementPage,
+}));
+const KinshipLabelManagementPage = lazy(async () => ({
+  default: (await import('./components/KinshipLabelManagementPage')).KinshipLabelManagementPage,
+}));
 
 const getViewFromHash = (): AppView => {
   if (window.location.hash === '#/account') return 'account';
@@ -109,6 +138,14 @@ const persistPendingMfaState = (state: StoredPendingMfaState | null) => {
     console.warn('Failed to persist pending MFA state:', error);
   }
 };
+
+const LoadingScreen = () => (
+  <div className="app">
+    <div className="loading">
+      <div className="spinner"></div>
+    </div>
+  </div>
+);
 
 function App() {
   const { isZh, toggleLanguage, t } = useI18n();
@@ -567,13 +604,7 @@ function App() {
 
   const pageContent = useMemo(() => {
     if (!authChecked) {
-      return (
-        <div className="app">
-          <div className="loading">
-            <div className="spinner"></div>
-          </div>
-        </div>
-      );
+      return <LoadingScreen />;
     }
 
     if (!isAuthed) {
@@ -632,13 +663,7 @@ function App() {
     }
 
     if (!authUser) {
-      return (
-        <div className="app">
-          <div className="loading">
-            <div className="spinner"></div>
-          </div>
-        </div>
-      );
+      return <LoadingScreen />;
     }
 
     if (view === 'account') {
@@ -880,7 +905,9 @@ function App() {
           {themeMode === 'light' ? t('app.dark') : t('app.light')}
         </button>
       )}
-      {pageContent}
+      <Suspense fallback={<LoadingScreen />}>
+        {pageContent}
+      </Suspense>
     </>
   );
 }

@@ -9,8 +9,10 @@ SKIP_AUDIT_LOGS="${SKIP_AUDIT_LOGS:-1}"
 
 mkdir -p "$BACKUP_DIR"
 
+WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.worker.toml}"
+
 echo "Exporting remote D1 to $EXPORT_PATH..."
-wrangler d1 export "$DB_NAME" --remote --output="$EXPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 export "$DB_NAME" --remote --output="$EXPORT_PATH"
 
 IMPORT_PATH="$EXPORT_PATH"
 if [[ "$SKIP_AUDIT_LOGS" == "1" || "$SKIP_AUDIT_LOGS" == "true" || "$SKIP_AUDIT_LOGS" == "yes" ]]; then
@@ -44,15 +46,15 @@ if [[ "$SKIP_AUDIT_LOGS" == "1" || "$SKIP_AUDIT_LOGS" == "true" || "$SKIP_AUDIT_
 fi
 
 echo "Dropping local tables..."
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS relationships;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS person_custom_fields;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS notifications;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS audit_logs;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS sessions;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS users;"
-wrangler d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS people;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS relationships;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS person_custom_fields;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS notifications;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS audit_logs;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS sessions;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS users;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS people;"
 
 echo "Importing into local D1 from $IMPORT_PATH..."
-wrangler d1 execute "$DB_NAME" --local --file="$IMPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --file="$IMPORT_PATH"
 
 echo "Done. Local DB replaced using $IMPORT_PATH"
