@@ -1,8 +1,10 @@
 import type { Hono } from 'hono';
 import type { AppBindings } from './types';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { notifyUpdate } from './notify';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { readJsonObjectBody } from './http';
+import { RELATIONSHIP_LABEL_WRITE_RATE_LIMIT } from './rate_limits';
 
 type RelationshipType = 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law';
 
@@ -128,6 +130,26 @@ export function registerRelationshipTypeLabelRoutes(app: Hono<AppBindings>) {
 
   app.put('/api/relationship-type-labels/:type', async (c) => {
     const type = c.req.param('type');
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'relationship_label_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...RELATIONSHIP_LABEL_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'relationship_label_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: `/api/relationship-type-labels/${type}`,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `關係名稱寫入速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many relationship label write requests' }, 429);
+    }
     if (!isRelationshipType(type)) {
       return c.json({ error: 'invalid relationship type' }, 400);
     }
@@ -200,6 +222,26 @@ export function registerRelationshipTypeLabelRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/relationship-type-labels/reset', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'relationship_label_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...RELATIONSHIP_LABEL_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'relationship_label_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/relationship-type-labels/reset',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `關係名稱重設速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many relationship label write requests' }, 429);
+    }
     await ensureRelationshipTypeLabelTable(c.env.DB);
     const now = new Date().toISOString();
 

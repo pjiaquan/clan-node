@@ -1,7 +1,9 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { queueRemoteJson } from './dual_write';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
+import { BACKUP_EXPORT_RATE_LIMIT, BACKUP_IMPORT_RATE_LIMIT } from './rate_limits';
 import {
   decryptCustomFieldRows,
   decryptPersonRow,
@@ -13,6 +15,7 @@ import {
 import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, ensureLayerSchemaSupport } from './layers';
 
 const BACKUP_VERSION = 2;
+const IMPORT_CONFIRMATION_TEXT = 'DELETE';
 const RELATIONSHIP_TYPES = new Set(['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law']);
 const GENDERS = new Set(['M', 'F', 'O']);
 
@@ -387,6 +390,26 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     if (!ensureAdmin(c)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const exportRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'backup_export',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...BACKUP_EXPORT_RATE_LIMIT
+    });
+    if (!exportRateLimit.allowed) {
+      c.header('Retry-After', String(exportRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'backup_export',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/admin/backup/export',
+        retryAfterSeconds: exportRateLimit.retryAfterSeconds,
+        summary: `備份匯出速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many backup export requests' }, 429);
+    }
 
     await ensureLayerSchemaSupport(c.env.DB);
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
@@ -426,7 +449,6 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     const decryptedPeople = await Promise.all((peopleResult.results as any[]).map((row) => decryptPersonRow(c.env, row as Record<string, unknown>)));
     const decryptedCustomFields = await decryptCustomFieldRows(c.env, customFieldsResult.results as Array<Record<string, unknown>>);
 
-    const sessionUser = c.get('sessionUser');
     const payload = {
       version: BACKUP_VERSION,
       exported_at: new Date().toISOString(),
@@ -520,9 +542,40 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     if (!ensureAdmin(c)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const importRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'backup_import',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...BACKUP_IMPORT_RATE_LIMIT
+    });
+    if (!importRateLimit.allowed) {
+      c.header('Retry-After', String(importRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'backup_import',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/admin/backup/import',
+        retryAfterSeconds: importRateLimit.retryAfterSeconds,
+        summary: `備份匯入速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many backup import requests' }, 429);
+    }
 
     try {
+      const contentLengthHeader = c.req.header('content-length');
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (Number.isFinite(contentLength) && contentLength > 50 * 1024 * 1024) {
+          return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
+        }
+      }
+
       const body = await c.req.json();
+      if (!isRecord(body) || body.confirmation_text !== IMPORT_CONFIRMATION_TEXT) {
+        return c.json({ error: `confirmation_text must equal ${IMPORT_CONFIRMATION_TEXT}` }, 400);
+      }
       const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
       const source = extractDataEnvelope(body);
       const now = new Date().toISOString();

@@ -11,6 +11,7 @@ import { registerRelationshipTypeLabelRoutes } from './relationship_type_labels'
 import { registerKinshipLabelRoutes } from './kinship_labels';
 import { registerBackupRoutes } from './backup';
 import { registerLayerRoutes } from './layers';
+import { verifyDualWriteRequest } from './dual_write';
 
 export const app = new Hono<AppBindings>();
 
@@ -48,6 +49,13 @@ app.get('/healthz', (c) => {
 });
 
 app.use('/api/*', requireAuth);
+app.use('/api/*', async (c, next) => {
+  const result = await verifyDualWriteRequest(c.env, c.req.raw);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.status);
+  }
+  return next();
+});
 app.use('/api/*', requireCsrf);
 app.use('/api/*', requireWriteAccess);
 registerAuthRoutes(app);

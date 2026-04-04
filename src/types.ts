@@ -17,6 +17,7 @@ export type Env = {
   DUAL_WRITE_REMOTE_ORIGIN?: string;
   DUAL_WRITE_REMOTE_USER?: string;
   DUAL_WRITE_REMOTE_PASS?: string;
+  DUAL_WRITE_SHARED_SECRET?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';

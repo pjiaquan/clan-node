@@ -1,8 +1,10 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings, Env } from './types';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { protectPersonWriteFields } from './data_protection';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { queueRemoteJson } from './dual_write';
+import { LAYER_WRITE_RATE_LIMIT } from './rate_limits';
 
 export const DEFAULT_LAYER_ID = 'default';
 export const DEFAULT_LAYER_NAME = 'Default Layer';
@@ -249,6 +251,26 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
     if (!isAdmin(c)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'layer_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...LAYER_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'layer_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/layers',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `圖層寫入速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many layer write requests' }, 429);
+    }
 
     const body = await c.req.json();
     const providedId = typeof body?.id === 'string' && body.id.trim() ? body.id.trim() : crypto.randomUUID();
@@ -307,8 +329,27 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
     if (!isAdmin(c)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
-
     const layerId = c.req.param('id');
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'layer_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...LAYER_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'layer_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: `/api/layers/${layerId}`,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `圖層刪除速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many layer write requests' }, 429);
+    }
     await ensureLayerSchemaSupport(c.env.DB);
 
     const existing = await c.env.DB.prepare(

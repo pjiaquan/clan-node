@@ -10,6 +10,14 @@ type AuditLogInput = {
   details?: Record<string, unknown> | null;
 };
 
+type RateLimitAuditInput = {
+  limiterKey: string;
+  action: string;
+  route: string;
+  retryAfterSeconds?: number;
+  summary: string;
+};
+
 const normalizeRole = (value: unknown): UserRole | null => {
   if (value === 'admin' || value === 'readonly') return value;
   return null;
@@ -66,6 +74,21 @@ export const recordAuditLog = async (c: Context<AppBindings>, input: AuditLogInp
     }
     console.warn('Failed to write audit log:', error);
   }
+};
+
+export const recordRateLimitAudit = async (c: Context<AppBindings>, input: RateLimitAuditInput) => {
+  await recordAuditLog(c, {
+    action: 'rate_limit_block',
+    resourceType: 'security',
+    resourceId: input.action,
+    summary: input.summary,
+    details: {
+      limiter_key: input.limiterKey,
+      action: input.action,
+      route: input.route,
+      retry_after_seconds: input.retryAfterSeconds ?? null
+    }
+  });
 };
 
 export function registerAuditRoutes(app: Hono<AppBindings>) {

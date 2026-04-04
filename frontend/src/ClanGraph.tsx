@@ -225,6 +225,9 @@ const sameViewport = (a: StoredViewport | null, b: StoredViewport) => (
   && a!.zoom === b.zoom
 );
 
+const FLOW_RECOVERY_NODE_WIDTH = 220;
+const FLOW_RECOVERY_NODE_HEIGHT = 140;
+
 const readStoredViewport = (storageKey: string): StoredViewport | null => {
   try {
     const hasPendingFocus = Boolean(
@@ -374,7 +377,21 @@ export function ClanGraph({
     username ? `${baseLockStorageKey}.${username}` : baseLockStorageKey
   ), [username]);
   const getInitialNodePositions = () => {
-    return {};
+    try {
+      const raw = localStorage.getItem('clan.nodePositions');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as Record<string, { x: number; y: number }>;
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, position]) => (
+          Boolean(position)
+          && Number.isFinite(position.x)
+          && Number.isFinite(position.y)
+        ))
+      );
+    } catch (error) {
+      console.warn('Failed to restore node positions:', error);
+      return {};
+    }
   };
   const nodePositionMap = useRef<Record<string, { x: number; y: number }>>(getInitialNodePositions());
   const nodesRef = useRef<Node[]>([]);
@@ -398,6 +415,7 @@ export function ClanGraph({
   const lastPersistedViewportRef = useRef<StoredViewport | null>(null);
   const initialViewportRestoreDoneRef = useRef(false);
   const viewportPersistenceReadyRef = useRef(false);
+  const blankCanvasRecoveryDoneRef = useRef(false);
   const expandRelayoutTimer = useRef<number | null>(null);
   const avatarTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const avatarPreviewRequestRef = useRef(0);
@@ -1907,6 +1925,20 @@ export function ClanGraph({
     persistViewportState(viewport, { pending: true });
   }, [getViewportForNode, persistViewportState]);
 
+  const hasNodeVisibleInViewport = useCallback((viewport: StoredViewport) => {
+    const bounds = flowWrapperRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return true;
+    return nodesRef.current.some((node) => {
+      const width = (node.width ?? FLOW_RECOVERY_NODE_WIDTH) * viewport.zoom;
+      const height = (node.height ?? FLOW_RECOVERY_NODE_HEIGHT) * viewport.zoom;
+      const left = node.position.x * viewport.zoom + viewport.x;
+      const top = node.position.y * viewport.zoom + viewport.y;
+      const right = left + width;
+      const bottom = top + height;
+      return right >= 0 && bottom >= 0 && left <= bounds.width && top <= bounds.height;
+    });
+  }, []);
+
   const revealCollapsedNodeBySearch = useCallback((targetId: string) => {
     let changed = false;
     const expandedIds = new Set<string>();
@@ -2387,8 +2419,7 @@ export function ClanGraph({
         : baseOpacity;
 
       const storedPosition = nodePositionMap.current[person.id];
-      // Prefer server metadata so positions updated on other devices can be reflected after refresh.
-      const position = person.metadata?.position || storedPosition || (
+      const position = storedPosition || person.metadata?.position || (
         person.id === graphData.center
           ? { x: centerX, y: centerY }
           : {
@@ -2653,7 +2684,7 @@ export function ClanGraph({
     if (!graphData) return;
     const nextPositions = { ...nodePositionMap.current };
     graphData.nodes.forEach((person) => {
-      if (person.metadata?.position) {
+      if (!nextPositions[person.id] && person.metadata?.position) {
         nextPositions[person.id] = { ...person.metadata.position };
       }
     });
@@ -2668,6 +2699,10 @@ export function ClanGraph({
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  useEffect(() => {
+    blankCanvasRecoveryDoneRef.current = false;
+  }, [activeLayerId, centerId, graphData]);
 
   useEffect(() => {
     if (initialViewportRestoreDoneRef.current) return;
@@ -2907,6 +2942,59 @@ export function ClanGraph({
       attempts = 999;
     };
   }, [pendingFocus, reactFlowInstance, getViewportForNode, getFocusPosition, persistViewportState]);
+
+  useEffect(() => {
+    if (blankCanvasRecoveryDoneRef.current) return;
+    if (!graphData || !reactFlowInstance || nodes.length === 0) return;
+
+    let attempts = 0;
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const tryRecoverBlankCanvas = () => {
+      if (cancelled || blankCanvasRecoveryDoneRef.current) return;
+
+      const bounds = flowWrapperRef.current?.getBoundingClientRect();
+      if (!bounds || bounds.width < 32 || bounds.height < 32) {
+        if (attempts < 12) {
+          attempts += 1;
+          timer = window.setTimeout(tryRecoverBlankCanvas, 80);
+        }
+        return;
+      }
+
+      const viewport = reactFlowInstance.getViewport?.();
+      if (!viewport || !Number.isFinite(viewport.x) || !Number.isFinite(viewport.y) || !Number.isFinite(viewport.zoom)) {
+        if (attempts < 12) {
+          attempts += 1;
+          timer = window.setTimeout(tryRecoverBlankCanvas, 80);
+        }
+        return;
+      }
+
+      if (hasNodeVisibleInViewport(viewport)) {
+        blankCanvasRecoveryDoneRef.current = true;
+        return;
+      }
+
+      const recovered = graphData.center ? focusNodeById(graphData.center, 1.0) : false;
+      if (!recovered && reactFlowInstance.fitView) {
+        reactFlowInstance.fitView({ padding: 0.2, duration: 0, includeHiddenNodes: false });
+      }
+      blankCanvasRecoveryDoneRef.current = true;
+    };
+
+    timer = window.setTimeout(() => {
+      requestAnimationFrame(tryRecoverBlankCanvas);
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [graphData, reactFlowInstance, nodes, focusNodeById, hasNodeVisibleInViewport]);
 
   useEffect(() => {
     if (!lastEditedId) return;
@@ -3271,10 +3359,12 @@ export function ClanGraph({
 
   useEffect(() => {
     setNodes((prev) => {
-      const selectedMap = new Map(prev.map((node) => [node.id, node.selected]));
+      const prevNodeMap = new Map(prev.map((node) => [node.id, node]));
       return initialNodes.map((node) => ({
+        ...(prevNodeMap.get(node.id) ?? {}),
         ...node,
-        selected: selectedMap.get(node.id) ?? node.selected,
+        position: prevNodeMap.get(node.id)?.position ?? node.position,
+        selected: prevNodeMap.get(node.id)?.selected ?? node.selected,
       }));
     });
   }, [initialNodes, setNodes]);

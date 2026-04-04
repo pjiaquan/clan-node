@@ -2,18 +2,25 @@ import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
 import { notifyUpdate } from './notify';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
+import { validateAvatarUpload } from './avatar_validation';
+import {
+  ACCOUNT_AVATAR_RATE_LIMIT,
+  ACCOUNT_LOGIN_RATE_LIMIT,
+  FORGOT_PASSWORD_RATE_LIMIT,
+  INVITE_CREATE_RATE_LIMIT,
+  LOGIN_RATE_LIMIT,
+  MFA_SEND_RATE_LIMIT,
+  MFA_VERIFY_RATE_LIMIT,
+  RESEND_RATE_LIMIT
+} from './rate_limits';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
 const toBufferSource = (value: Uint8Array): ArrayBuffer =>
   Uint8Array.from(value).buffer;
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60;
-const LOGIN_RATE_LIMIT = { windowMs: 10 * 60 * 1000, maxAttempts: 5, blockMs: 15 * 60 * 1000 };
-const ACCOUNT_LOGIN_RATE_LIMIT = { windowMs: 30 * 60 * 1000, maxAttempts: 12, blockMs: 30 * 60 * 1000 };
-const MFA_SEND_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 3, blockMs: 15 * 60 * 1000 };
-const RESEND_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 3, blockMs: 30 * 60 * 1000 };
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_MAX_LENGTH = 128;
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
@@ -151,7 +158,7 @@ async function hmacSha1(secret: Uint8Array, message: Uint8Array) {
   return new Uint8Array(signature);
 }
 
-const timingSafeEqual = (left: string, right: string) => {
+export const timingSafeEqual = (left: string, right: string) => {
   if (left.length !== right.length) return false;
   let diff = 0;
   for (let i = 0; i < left.length; i += 1) {
@@ -296,14 +303,7 @@ let cachedEncryptionKeySource: string | null = null;
 let cachedEncryptionKey: CryptoKey | null = null;
 let encryptionKeyWarningShown = false;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 60;
-const FORGOT_PASSWORD_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 5, blockMs: 30 * 60 * 1000 };
 const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
-const ALLOWED_AVATAR_TYPES: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif'
-};
 
 const parseEncryptionKeyBytes = (value: string): Uint8Array => {
   const trimmed = value.trim();
@@ -331,7 +331,10 @@ const parseEncryptionKeyBytes = (value: string): Uint8Array => {
 const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keySource = env.AUTH_ENCRYPTION_KEY?.trim() || '';
   if (!keySource) {
-    if (env.ENVIRONMENT === 'production' && !encryptionKeyWarningShown) {
+    if (env.ENVIRONMENT === 'production') {
+      throw new Error('AUTH_ENCRYPTION_KEY must be set in production to protect sensitive data.');
+    }
+    if (!encryptionKeyWarningShown) {
       encryptionKeyWarningShown = true;
       console.warn('AUTH_ENCRYPTION_KEY is not set; MFA secrets will remain stored in plaintext.');
     }
@@ -755,14 +758,14 @@ const ensurePasswordResetTokenTable = async (db: D1Database) => {
 };
 
 type RateLimitInput = {
-  action: 'login' | 'login_account' | 'login_mfa_send' | 'resend_verification' | 'forgot_password';
+  action: string;
   limiterKey: string;
   windowMs: number;
   maxAttempts: number;
   blockMs: number;
 };
 
-const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) => {
+export const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) => {
   await ensureAuthRateLimitTable(db);
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -933,7 +936,7 @@ const getRequestUserAgent = (c: Context<AppBindings>) => (
   || null
 );
 
-const getRequestIpAddress = (c: Context<AppBindings>) => {
+export const getRequestIpAddress = (c: Context<AppBindings>) => {
   const cfIp = c.req.header('CF-Connecting-IP') || c.req.header('cf-connecting-ip');
   if (cfIp) return cfIp;
   const forwarded = c.req.header('x-forwarded-for');
@@ -1273,7 +1276,6 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
     || path.startsWith('/api/auth/logout')
     || path.startsWith('/api/auth/sessions')
     || path.startsWith('/api/auth/account')
-    || (path.startsWith('/api/notifications') && method === 'POST')
   ) {
     return next();
   }
@@ -1447,6 +1449,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         success: false,
         reason: 'account_rate_limited'
       });
+      await recordRateLimitAudit(c, {
+        action: 'login_account',
+        limiterKey: email,
+        route: '/api/auth/login',
+        retryAfterSeconds: accountRateLimit.retryAfterSeconds,
+        summary: `登入帳號速率限制：${email}`
+      });
       return c.json({ error: 'Too many login attempts. Please try again later.' }, 429);
     }
 
@@ -1464,6 +1473,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         success: false,
         reason: 'ip_rate_limited'
       });
+      await recordRateLimitAudit(c, {
+        action: 'login',
+        limiterKey: `${loginIp}:${email}`,
+        route: '/api/auth/login',
+        retryAfterSeconds: loginRateLimit.retryAfterSeconds,
+        summary: `登入 IP 速率限制：${email}`
+      });
       return c.json({ error: 'Too many login attempts. Please try again later.' }, 429);
     }
 
@@ -1477,15 +1493,17 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
        WHERE ${loginField} = ?`
     ).bind(email).first();
     if (!user) {
+      await hashPassword(password, 'dummy-salt-value-for-timing-attack-mitigation');
       await recordLoginAttempt(c, {
         email,
         success: false,
         reason: 'invalid_credentials'
       });
-      return c.json({ error: 'Invalid credentials' }, 401);
+      return c.json({ error: 'Invalid email or password' }, 401);
     }
 
     if (userSchema.hasEmailVerifiedAt && !(user as any).email_verified_at) {
+      await hashPassword(password, 'dummy-salt-value-for-timing-attack-mitigation');
       await recordLoginAttempt(c, {
         email,
         success: false,
@@ -1493,7 +1511,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         userId: (user as any).id as string,
         role: normalizeRole((user as any).role)
       });
-      return c.json({ error: 'Email not verified', email }, 403);
+      return c.json({ error: 'Invalid email or password' }, 401);
     }
 
     const salt = (user as any).password_salt as string;
@@ -1507,7 +1525,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         userId: (user as any).id as string,
         role: normalizeRole((user as any).role)
       });
-      return c.json({ error: 'Invalid credentials' }, 401);
+      return c.json({ error: 'Invalid email or password' }, 401);
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -1547,6 +1565,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
             reason: 'mfa_send_rate_limited',
             userId: (user as any).id as string,
             role: userRole
+          });
+          await recordRateLimitAudit(c, {
+            action: 'login_mfa_send',
+            limiterKey: email,
+            route: '/api/auth/login',
+            retryAfterSeconds: emailFallback.retryAfterSeconds,
+            summary: `登入 MFA 寄送速率限制：${email}`
           });
           return c.json({ error: 'Too many sign-in code requests. Please try again later.' }, 429);
         }
@@ -1610,6 +1635,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!emailFallback.ok) {
       if (emailFallback.retryAfterSeconds) {
         c.header('Retry-After', String(emailFallback.retryAfterSeconds));
+        await recordRateLimitAudit(c, {
+          action: 'login_mfa_send',
+          limiterKey: String((mfaSession as any).email as string),
+          route: '/api/auth/mfa/send-email',
+          retryAfterSeconds: emailFallback.retryAfterSeconds,
+          summary: `MFA 驗證碼寄送速率限制：${String((mfaSession as any).email as string)}`
+        });
         return c.json({ error: 'Too many sign-in code requests. Please try again later.' }, 429);
       }
       return c.json({ error: 'Unable to deliver sign-in code. Please try again later.' }, 503);
@@ -1637,6 +1669,24 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const code = normalizeOtpCode((body as any)?.code);
     if (!sessionId || !code) {
       return c.json({ error: 'session_id and code are required' }, 400);
+    }
+
+    const currentIp = getRequestIpAddress(c) || 'unknown-ip';
+    const mfaVerifyRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'mfa_verify',
+      limiterKey: currentIp,
+      ...MFA_VERIFY_RATE_LIMIT
+    });
+    if (!mfaVerifyRateLimit.allowed) {
+      c.header('Retry-After', String(mfaVerifyRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'mfa_verify',
+        limiterKey: currentIp,
+        route: '/api/auth/mfa/verify-totp',
+        retryAfterSeconds: mfaVerifyRateLimit.retryAfterSeconds,
+        summary: `TOTP 驗證速率限制：${currentIp}`
+      });
+      return c.json({ error: 'Too many verification attempts' }, 429);
     }
 
     const mfaSession = await getMfaSession(c.env.DB, sessionId);
@@ -2003,6 +2053,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     });
     if (!resendRateLimit.allowed) {
       c.header('Retry-After', String(resendRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'resend_verification',
+        limiterKey: `${resendIp}:${email}`,
+        route: '/api/auth/resend-verification',
+        retryAfterSeconds: resendRateLimit.retryAfterSeconds,
+        summary: `重寄驗證信速率限制：${email}`
+      });
       return c.json({ error: 'Too many resend requests. Please try again later.' }, 429);
     }
 
@@ -2079,6 +2136,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       `SELECT id, username${userSchema.hasEmail ? ', email' : ''} FROM users WHERE ${field} = ?`
     ).bind(email).first();
     if (!user) {
+      await hashPassword('dummy', 'dummy-salt-value-for-timing-attack-mitigation');
       return c.json(responsePayload);
     }
 
@@ -2468,6 +2526,22 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!sessionUser) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
+    const accountAvatarRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'account_avatar_upload',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...ACCOUNT_AVATAR_RATE_LIMIT
+    });
+    if (!accountAvatarRateLimit.allowed) {
+      c.header('Retry-After', String(accountAvatarRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'account_avatar_upload',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/auth/account/avatar',
+        retryAfterSeconds: accountAvatarRateLimit.retryAfterSeconds,
+        summary: `帳號頭像上傳速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many avatar uploads' }, 429);
+    }
     const userSchema = await getUserSchemaSupport(c.env.DB);
     if (!userSchema.hasAvatarUrl) {
       return c.json({ error: 'Avatar storage unavailable' }, 503);
@@ -2479,20 +2553,17 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'file is required' }, 400);
     }
     const upload = file as File;
-    if (upload.size > MAX_AVATAR_BYTES) {
-      return c.json({ error: 'file is too large' }, 413);
-    }
-    if (!upload.type || !upload.type.startsWith('image/')) {
-      return c.json({ error: 'unsupported file type' }, 400);
-    }
-    const ext = ALLOWED_AVATAR_TYPES[upload.type];
-    if (!ext) {
-      return c.json({ error: 'unsupported file type' }, 400);
+    let validated;
+    try {
+      validated = await validateAvatarUpload(upload, MAX_AVATAR_BYTES);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unsupported file type';
+      return c.json({ error: message }, message === 'file is too large' ? 413 : 400);
     }
 
-    const key = `user-${sessionUser.userId}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
-    await c.env.AVATARS.put(key, upload.stream(), {
-      httpMetadata: { contentType: upload.type }
+    const key = `user-${sessionUser.userId}-${Date.now()}-${crypto.randomUUID()}.${validated.extension}`;
+    await c.env.AVATARS.put(key, validated.bytes, {
+      httpMetadata: { contentType: validated.contentType }
     });
     const avatarUrl = `/api/avatars/${key}`;
     await c.env.DB.prepare(
@@ -2680,6 +2751,24 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Forbidden' }, 403);
     }
     const userSchema = await getUserSchemaSupport(c.env.DB);
+
+    const currentIp = getRequestIpAddress(c) || 'unknown-ip';
+    const inviteRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'invite_create',
+      limiterKey: `${sessionUser.userId}:${currentIp}`,
+      ...INVITE_CREATE_RATE_LIMIT
+    });
+    if (!inviteRateLimit.allowed) {
+      c.header('Retry-After', String(inviteRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'invite_create',
+        limiterKey: `${sessionUser.userId}:${currentIp}`,
+        route: '/api/auth/users',
+        retryAfterSeconds: inviteRateLimit.retryAfterSeconds,
+        summary: `邀請建立速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many invite requests' }, 429);
+    }
 
     const body = await c.req.json();
     const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
@@ -2945,6 +3034,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     ).bind(id).first();
 
     if (password && updated) {
+      await revokeUserSessions(c.env.DB, id, null);
       const destinationEmail = ((updated as any).email as string | null) ?? ((updated as any).username as string);
       if (destinationEmail && isValidEmail(destinationEmail)) {
         passwordNotificationSent = await sendPasswordChangedEmail(c.env, destinationEmail);

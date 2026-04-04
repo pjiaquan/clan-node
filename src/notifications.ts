@@ -1,8 +1,10 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { notifyUpdate } from './notify';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { readJsonObjectBody } from './http';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
+import { NOTIFICATION_CREATE_RATE_LIMIT } from './rate_limits';
 
 type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
 type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
@@ -61,8 +63,24 @@ const mapRow = (row: any): NotificationRow => ({
 export function registerNotificationRoutes(app: Hono<AppBindings>) {
   app.post('/api/notifications', async (c) => {
     const sessionUser = c.get('sessionUser');
-    if (!sessionUser) {
-      return c.json({ error: 'Unauthorized' }, 401);
+    if (!sessionUser || sessionUser.role !== 'admin') {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
+    const createRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'notification_create',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...NOTIFICATION_CREATE_RATE_LIMIT
+    });
+    if (!createRateLimit.allowed) {
+      c.header('Retry-After', String(createRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'notification_create',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/notifications',
+        retryAfterSeconds: createRateLimit.retryAfterSeconds,
+        summary: `通知建立速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many notification requests' }, 429);
     }
 
     const body = await readJsonObjectBody(c.req);

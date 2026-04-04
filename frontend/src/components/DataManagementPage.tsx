@@ -103,10 +103,12 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
 
   const handleImportBackup = async () => {
     if (!backupFile) return;
-    const confirmed = window.confirm(
-      t('settings.importConfirm')
-    );
-    if (!confirmed) return;
+    const confirmationText = window.prompt(t('settings.importConfirm'));
+    if (confirmationText === null) return;
+    if (confirmationText.trim() !== 'DELETE') {
+      setBackupError(t('settings.importConfirmMismatch'));
+      return;
+    }
 
     setBackupError(null);
     setBackupMessage(null);

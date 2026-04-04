@@ -60,7 +60,10 @@ export const hasConfiguredEncryptionKey = (env: Env) => Boolean(env.AUTH_ENCRYPT
 const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keySource = env.AUTH_ENCRYPTION_KEY?.trim() || '';
   if (!keySource) {
-    if (env.ENVIRONMENT === 'production' && !encryptionKeyWarningShown) {
+    if (env.ENVIRONMENT === 'production') {
+      throw new Error('AUTH_ENCRYPTION_KEY must be set in production to protect sensitive data.');
+    }
+    if (!encryptionKeyWarningShown) {
       encryptionKeyWarningShown = true;
       console.warn('AUTH_ENCRYPTION_KEY is not set; protected fields will remain stored in plaintext.');
     }

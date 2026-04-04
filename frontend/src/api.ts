@@ -757,7 +757,10 @@ export const api = {
     const res = await fetchWithAuth(`${API_BASE}/api/admin/backup/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        confirmation_text: 'DELETE',
+        data: payload,
+      }),
     });
     if (!res.ok) {
       const text = await res.text();

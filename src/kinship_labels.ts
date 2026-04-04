@@ -1,8 +1,10 @@
 import type { Hono } from 'hono';
 import type { AppBindings } from './types';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { notifyUpdate } from './notify';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { readJsonObjectBody } from './http';
+import { KINSHIP_LABEL_WRITE_RATE_LIMIT } from './rate_limits';
 
 export type KinshipLabelResolved = {
   title: string;
@@ -189,6 +191,26 @@ export function registerKinshipLabelRoutes(app: Hono<AppBindings>) {
   });
 
   app.put('/api/kinship-labels', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'kinship_label_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...KINSHIP_LABEL_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'kinship_label_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/kinship-labels',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `稱呼表寫入速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many kinship label write requests' }, 429);
+    }
     await ensureKinshipLabelsTable(c.env.DB);
     const body = await readJsonObjectBody(c.req);
     const defaultTitle = normalizeText((body as any).default_title);
@@ -294,6 +316,26 @@ export function registerKinshipLabelRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/kinship-labels/reset', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'kinship_label_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...KINSHIP_LABEL_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'kinship_label_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/kinship-labels/reset',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `稱呼表重設速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many kinship label write requests' }, 429);
+    }
     await ensureKinshipLabelsTable(c.env.DB);
     const now = new Date().toISOString();
     await c.env.DB.prepare(`

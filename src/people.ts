@@ -3,8 +3,11 @@ import type { AppBindings, Env } from './types';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 import { queueRemoteFormData, queueRemoteJson } from './dual_write';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { buildSiblingLinkMeta } from './relationship_utils';
+import { validateAvatarUpload } from './avatar_validation';
+import { PEOPLE_CREATE_RATE_LIMIT, PERSON_AVATAR_UPLOAD_RATE_LIMIT } from './rate_limits';
 import {
   decryptCustomFieldRows,
   decryptPersonRow,
@@ -78,13 +81,6 @@ async function updateSiblingOrdering(env: Env, personId: string, layerId: string
 
 export function registerPeopleRoutes(app: Hono<AppBindings>) {
   const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
-  const ALLOWED_AVATAR_TYPES: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif'
-  };
-
   const avatarSelectSql = `
     SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
     FROM person_avatars
@@ -165,7 +161,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
     if (!avatarUrl) return null;
     if (!avatarUrl.startsWith('/api/avatars/')) return null;
-    return avatarUrl.replace('/api/avatars/', '');
+    const key = avatarUrl.replace('/api/avatars/', '');
+    if (key.includes('/') || key.includes('\\') || key.includes('..')) return null;
+    return key;
   };
 
   const loadAvatarMap = async (db: Env['DB']) => {
@@ -384,17 +382,32 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       notifySource?: 'legacy' | 'multi';
     }
   ) => {
-    if (file.size > MAX_AVATAR_BYTES) {
-      return c.json({ error: 'file is too large' }, 413);
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
     }
-
-    if (!file.type || !file.type.startsWith('image/')) {
-      return c.json({ error: 'unsupported file type' }, 400);
+    const avatarRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'person_avatar_upload',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...PERSON_AVATAR_UPLOAD_RATE_LIMIT
+    });
+    if (!avatarRateLimit.allowed) {
+      c.header('Retry-After', String(avatarRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'person_avatar_upload',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: `/api/people/${personId}/avatars`,
+        retryAfterSeconds: avatarRateLimit.retryAfterSeconds,
+        summary: `人物頭像上傳速率限制：${personId}`
+      });
+      return c.json({ error: 'Too many avatar uploads' }, 429);
     }
-
-    const ext = ALLOWED_AVATAR_TYPES[file.type];
-    if (!ext) {
-      return c.json({ error: 'unsupported file type' }, 400);
+    let validated;
+    try {
+      validated = await validateAvatarUpload(file, MAX_AVATAR_BYTES);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unsupported file type';
+      return c.json({ error: message }, message === 'file is too large' ? 413 : 400);
     }
 
     const existing = await ensurePersonExists(c.env.DB, personId);
@@ -403,9 +416,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const now = new Date().toISOString();
-    const key = `person-${personId}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
-    await c.env.AVATARS.put(key, file.stream(), {
-      httpMetadata: { contentType: file.type }
+    const key = `person-${personId}-${Date.now()}-${crypto.randomUUID()}.${validated.extension}`;
+    await c.env.AVATARS.put(key, validated.bytes, {
+      httpMetadata: { contentType: validated.contentType }
     });
 
     const avatarUrl = `/api/avatars/${key}`;
@@ -443,9 +456,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    const avatarBuffer = await file.arrayBuffer();
     const mirrorForm = new FormData();
-    mirrorForm.set('file', new Blob([avatarBuffer], { type: file.type || 'application/octet-stream' }), file.name || 'avatar');
+    mirrorForm.set('file', new Blob([validated.buffer], { type: validated.contentType }), file.name || 'avatar');
     if (options?.mirrorSetPrimary !== undefined) {
       mirrorForm.set('set_primary', options.mirrorSetPrimary ? '1' : '0');
     }
@@ -526,6 +538,26 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Create a new person
   app.post('/api/people', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const peopleCreateRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'people_create',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...PEOPLE_CREATE_RATE_LIMIT
+    });
+    if (!peopleCreateRateLimit.allowed) {
+      c.header('Retry-After', String(peopleCreateRateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'people_create',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/people',
+        retryAfterSeconds: peopleCreateRateLimit.retryAfterSeconds,
+        summary: `人物建立速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many create requests' }, 429);
+    }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const body = await c.req.json();
     const layerId = resolveLayerId(c, body);
@@ -1116,8 +1148,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!object) {
       return c.json({ error: 'Avatar not found' }, 404);
     }
+    let contentType = object.httpMetadata?.contentType || 'application/octet-stream';
+    if (!contentType.startsWith('image/')) {
+      contentType = 'application/octet-stream';
+    }
     const headers = new Headers();
-    headers.set('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream');
+    headers.set('Content-Type', contentType);
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
     const origin = c.req.header('Origin') || '';
     const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')

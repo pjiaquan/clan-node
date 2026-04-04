@@ -1,8 +1,10 @@
 import type { Hono } from 'hono';
 import type { AppBindings, Env } from './types';
+import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
+import { RELATIONSHIP_WRITE_RATE_LIMIT } from './rate_limits';
 import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
-import { recordAuditLog } from './audit';
+import { recordAuditLog, recordRateLimitAudit } from './audit';
 import {
   buildSiblingLinkMeta,
   PARENT_CHILD_METADATA,
@@ -277,6 +279,26 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
   // Create a relationship (link two people)
   app.post('/api/relationships', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'relationship_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...RELATIONSHIP_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'relationship_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: '/api/relationships',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `關係寫入速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many relationship write requests' }, 429);
+    }
     const body = await c.req.json();
     const layerId = resolveLayerId(c, body);
     const { from_person_id, to_person_id, type, metadata, skipAutoLink, skip_auto_link } = body;
@@ -450,6 +472,26 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
   // Update a relationship
   app.put('/api/relationships/:id', async (c) => {
     const id = c.req.param('id');
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'relationship_write',
+      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+      ...RELATIONSHIP_WRITE_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'relationship_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        route: `/api/relationships/${id}`,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `關係更新速率限制：${sessionUser.username}`
+      });
+      return c.json({ error: 'Too many relationship write requests' }, 429);
+    }
     const body = await c.req.json();
     const { from_person_id, to_person_id, type, metadata, skipAutoLink, skip_auto_link } = body;
     const shouldSkipAutoLink = Boolean(skipAutoLink ?? skip_auto_link);
@@ -590,6 +632,26 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
   app.delete('/api/relationships/:id', async (c) => {
     try {
       const id = c.req.param('id');
+      const sessionUser = c.get('sessionUser');
+      if (!sessionUser) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+      const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+        action: 'relationship_write',
+        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+        ...RELATIONSHIP_WRITE_RATE_LIMIT
+      });
+      if (!rateLimit.allowed) {
+        c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+        await recordRateLimitAudit(c, {
+          action: 'relationship_write',
+          limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
+          route: `/api/relationships/${id}`,
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+          summary: `關係刪除速率限制：${sessionUser.username}`
+        });
+        return c.json({ error: 'Too many relationship write requests' }, 429);
+      }
       console.log(`DELETE /api/relationships/${id} request received`);
       await ensureLayerSchemaSupport(c.env.DB);
       const existing = await c.env.DB.prepare(
