@@ -1363,7 +1363,7 @@ export function ClanGraph({
 
     const requestId = avatarPreviewRequestRef.current + 1;
     avatarPreviewRequestRef.current = requestId;
-    void api.fetchPersonAvatars(person.id).then((payload) => {
+    void api.fetchPersonAvatars(person.id, person.layer_id || activeLayerId).then((payload) => {
       if (avatarPreviewRequestRef.current !== requestId) return;
       const fetchedUrls = payload.avatars
         .map((avatar) => avatar.avatar_url)
@@ -4075,14 +4075,14 @@ export function ClanGraph({
             const deleteAvatarIds = avatarActions?.deleteAvatarIds ?? [];
             if (deleteAvatarIds.length > 0) {
               for (const avatarId of deleteAvatarIds) {
-                await api.deletePersonAvatar(id, avatarId);
+                await api.deletePersonAvatar(id, avatarId, activeLayerId);
               }
               avatarOperationApplied = true;
             }
 
             if (avatarActions && Object.prototype.hasOwnProperty.call(avatarActions, 'setPrimaryAvatarId')) {
               if (avatarActions.setPrimaryAvatarId) {
-                await api.updatePersonAvatar(id, avatarActions.setPrimaryAvatarId, { is_primary: true });
+                await api.updatePersonAvatar(id, avatarActions.setPrimaryAvatarId, { is_primary: true, layer_id: activeLayerId });
                 avatarOperationApplied = true;
               } else {
                 nextUpdates.avatar_url = null;
@@ -4099,7 +4099,7 @@ export function ClanGraph({
 
             if (avatarFile) {
               const nextHash = await hashAvatarFile(avatarFile);
-              const { avatar_url } = await api.uploadPersonAvatar(id, avatarFile, { setPrimary: true });
+              const { avatar_url } = await api.uploadPersonAvatar(id, avatarFile, { setPrimary: true, layerId: activeLayerId });
               nextUpdates.avatar_url = avatar_url;
               avatarOperationApplied = true;
               if (!mergedMetadata) {

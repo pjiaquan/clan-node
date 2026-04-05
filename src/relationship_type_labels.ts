@@ -1,12 +1,10 @@
 import type { Hono } from 'hono';
-import type { AppBindings } from './types';
+import type { AppBindings, RelationshipType } from './types';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { readJsonObjectBody } from './http';
 import { RELATIONSHIP_LABEL_WRITE_RATE_LIMIT } from './rate_limits';
-
-type RelationshipType = 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law';
 
 type RelationshipTypeLabelRow = {
   type: RelationshipType;
@@ -155,6 +153,9 @@ export function registerRelationshipTypeLabelRoutes(app: Hono<AppBindings>) {
     }
 
     const body = await readJsonObjectBody(c.req);
+    if (!body) {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const hasLabel = Object.prototype.hasOwnProperty.call(body, 'label');
     const hasDescription = Object.prototype.hasOwnProperty.call(body, 'description');
     if (!hasLabel && !hasDescription) {

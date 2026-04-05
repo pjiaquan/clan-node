@@ -1,83 +1,44 @@
-import type { Context, Hono } from 'hono';
-import type { AppBindings, Env } from './types';
-import { safeParse } from './utils';
+import type { Hono } from 'hono';
+import type { AppBindings } from './types';
+import { createPeopleRepository } from './d1_repositories';
 import { notifyUpdate } from './notify';
-import { queueRemoteFormData, queueRemoteJson } from './dual_write';
+import { queueRemoteJson } from './dual_write';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
-import { buildSiblingLinkMeta } from './relationship_utils';
-import { validateAvatarUpload } from './avatar_validation';
-import { PEOPLE_CREATE_RATE_LIMIT, PERSON_AVATAR_UPLOAD_RATE_LIMIT } from './rate_limits';
+import { PEOPLE_CREATE_RATE_LIMIT } from './rate_limits';
 import {
-  decryptCustomFieldRows,
   decryptPersonRow,
-  decryptProtectedValue,
-  migratePlaintextCustomFieldRows,
   migratePlaintextPersonRow,
   protectPersonWriteFields,
   encryptProtectedValue
 } from './data_protection';
 import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
-
-type UploadFile = Blob & {
-  name?: string;
-  size: number;
-  type: string;
-  stream: () => ReadableStream;
-  arrayBuffer: () => Promise<ArrayBuffer>;
-};
-
-type PersonAvatar = {
-  id: string;
-  person_id: string;
-  avatar_url: string;
-  storage_key: string | null;
-  is_primary: boolean;
-  sort_order: number;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-const isUploadFile = (value: unknown): value is UploadFile => (
-  Boolean(value)
-  && typeof value !== 'string'
-  && typeof (value as Blob).arrayBuffer === 'function'
-  && typeof (value as Blob).stream === 'function'
-);
-
-async function updateSiblingOrdering(env: Env, personId: string, layerId: string) {
-  const db = env.DB;
-  const person = await db.prepare(
-    'SELECT id, dob FROM people WHERE id = ? AND layer_id = ?'
-  ).bind(personId, layerId).first();
-
-  const personDob = person && (person as any).dob
-    ? new Date((await decryptProtectedValue(env, (person as any).dob as string | null)) || '').getTime()
-    : 0;
-  if (!personDob) return;
-
-  const { results } = await db.prepare(
-    "SELECT id, from_person_id, to_person_id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND (from_person_id = ? OR to_person_id = ?)"
-  ).bind(layerId, personId, personId).all();
-
-  for (const rel of results) {
-    const relAny = rel as any;
-    const otherId = relAny.from_person_id === personId ? relAny.to_person_id : relAny.from_person_id;
-    const other = await db.prepare(
-      'SELECT id, dob FROM people WHERE id = ? AND layer_id = ?'
-    ).bind(otherId, layerId).first();
-    const otherDob = other && (other as any).dob
-      ? new Date((await decryptProtectedValue(env, (other as any).dob as string | null)) || '').getTime()
-      : 0;
-    if (!otherDob || otherDob === personDob) continue;
-
-    const link = buildSiblingLinkMeta(personId, otherId, personDob, otherDob);
-
-    await db.prepare(
-      'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ? AND layer_id = ?'
-    ).bind(link.fromId, link.toId, link.metadata, relAny.id, layerId).run();
-  }
-}
+import { getPeopleSchemaSupport } from './schema';
+import {
+  appendAvatar,
+  deriveStorageKeyFromUrl,
+  ensureAvatarFromLegacy,
+  handleAvatarUpload,
+  isUploadFile,
+  loadAvatarMap,
+  loadPersonAvatars,
+  normalizeAvatar,
+  resolvePrimaryAvatar,
+  syncPrimaryAvatar,
+  type PersonAvatar,
+} from './people/avatar_service';
+import {
+  buildPersonUpdatePayload,
+  buildPersonPayload,
+  ensurePersonExists,
+  extractCustomFields,
+  loadCustomFields,
+  loadPersonCustomFields,
+  lookupVerifiedEmailAtFromRepository,
+  normalizeEmail,
+  parseBoolean,
+  updateSiblingOrdering,
+} from './people/person_service';
 
 export function registerPeopleRoutes(app: Hono<AppBindings>) {
   const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
@@ -85,390 +46,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     SELECT id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
     FROM person_avatars
   `;
-
-  let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
-  let userSchemaSupportPromise: Promise<{ hasEmail: boolean; hasEmailVerifiedAt: boolean }> | null = null;
-  const getPeopleSchemaSupport = async (db: Env['DB']) => {
-    if (!peopleSchemaSupportPromise) {
-      peopleSchemaSupportPromise = (async () => {
-        const pragma = await db.prepare("PRAGMA table_info('people')").all();
-        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
-        if (!names.has('email')) {
-          await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
-          names.add('email');
-        }
-        return { hasEmail: names.has('email') };
-      })().catch((error) => {
-        peopleSchemaSupportPromise = null;
-        throw error;
-      });
-    }
-    return peopleSchemaSupportPromise;
-  };
-
-  const getUserSchemaSupport = async (db: Env['DB']) => {
-    if (!userSchemaSupportPromise) {
-      userSchemaSupportPromise = (async () => {
-        const pragma = await db.prepare("PRAGMA table_info('users')").all();
-        const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
-        if (!names.has('email')) {
-          await db.prepare('ALTER TABLE users ADD COLUMN email TEXT').run();
-          names.add('email');
-        }
-        if (!names.has('email_verified_at')) {
-          await db.prepare('ALTER TABLE users ADD COLUMN email_verified_at TEXT').run();
-          names.add('email_verified_at');
-        }
-        return {
-          hasEmail: names.has('email'),
-          hasEmailVerifiedAt: names.has('email_verified_at')
-        };
-      })().catch((error) => {
-        userSchemaSupportPromise = null;
-        throw error;
-      });
-    }
-    return userSchemaSupportPromise;
-  };
-
-  const lookupVerifiedEmailAt = async (db: Env['DB'], email: string | null | undefined) => {
-    const normalizedEmail = normalizeEmail(email);
-    if (!normalizedEmail) return null;
-    const userSchema = await getUserSchemaSupport(db);
-    if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt) return null;
-    const user = await db.prepare(
-      `SELECT email_verified_at
-       FROM users
-       WHERE LOWER(TRIM(COALESCE(email, username))) = ?
-         AND email_verified_at IS NOT NULL
-         AND TRIM(email_verified_at) != ''
-       LIMIT 1`
-    ).bind(normalizedEmail).first();
-    return user ? String((user as any).email_verified_at ?? '') || null : null;
-  };
-
-  const normalizeAvatar = (row: any): PersonAvatar => ({
-    id: String(row.id),
-    person_id: String(row.person_id),
-    avatar_url: String(row.avatar_url),
-    storage_key: row.storage_key ? String(row.storage_key) : null,
-    is_primary: Number(row.is_primary) === 1,
-    sort_order: Number(row.sort_order ?? 0),
-    created_at: row.created_at ? String(row.created_at) : null,
-    updated_at: row.updated_at ? String(row.updated_at) : null
-  });
-
-  const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
-    if (!avatarUrl) return null;
-    if (!avatarUrl.startsWith('/api/avatars/')) return null;
-    const key = avatarUrl.replace('/api/avatars/', '');
-    if (key.includes('/') || key.includes('\\') || key.includes('..')) return null;
-    return key;
-  };
-
-  const loadAvatarMap = async (db: Env['DB']) => {
-    const { results } = await db.prepare(
-      `${avatarSelectSql} ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
-    ).all();
-    const map = new Map<string, PersonAvatar[]>();
-    results.forEach((row: any) => {
-      const avatar = normalizeAvatar(row);
-      const list = map.get(avatar.person_id) || [];
-      list.push(avatar);
-      map.set(avatar.person_id, list);
-    });
-    return map;
-  };
-
-  const loadPersonAvatars = async (db: Env['DB'], personId: string) => {
-    const { results } = await db.prepare(
-      `${avatarSelectSql} WHERE person_id = ? ORDER BY is_primary DESC, sort_order ASC, created_at ASC`
-    ).bind(personId).all();
-    return results.map((row) => normalizeAvatar(row));
-  };
-
-  const resolvePrimaryAvatar = (avatars: PersonAvatar[]) => (
-    avatars.find((avatar) => avatar.is_primary) || avatars[0] || null
-  );
-
-  const syncPrimaryAvatar = async (
-    db: Env['DB'],
-    personId: string,
-    now: string,
-    preferredAvatarId?: string
-  ) => {
-    const avatars = await loadPersonAvatars(db, personId);
-    if (avatars.length === 0) {
-      await db.prepare(
-        'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-      ).bind(null, now, personId).run();
-      return { primary: null as PersonAvatar | null, avatars };
-    }
-
-    const preferred = preferredAvatarId
-      ? avatars.find((avatar) => avatar.id === preferredAvatarId)
-      : null;
-    const primary = preferred || resolvePrimaryAvatar(avatars) || avatars[0];
-
-    // Use two-step updates to avoid partial unique-index conflicts while switching primary avatar.
-    await db.prepare(
-      'UPDATE person_avatars SET is_primary = 0, updated_at = ? WHERE person_id = ? AND is_primary = 1'
-    ).bind(now, personId).run();
-
-    await db.prepare(
-      'UPDATE person_avatars SET is_primary = 1, updated_at = ? WHERE person_id = ? AND id = ?'
-    ).bind(now, personId, primary.id).run();
-
-    const synced = await loadPersonAvatars(db, personId);
-    const syncedPrimary = resolvePrimaryAvatar(synced);
-    await db.prepare(
-      'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-    ).bind(syncedPrimary?.avatar_url || null, now, personId).run();
-
-    return {
-      primary: syncedPrimary,
-      avatars: synced
-    };
-  };
-
-  const appendAvatar = async (
-    db: Env['DB'],
-    personId: string,
-    avatarUrl: string,
-    storageKey: string | null,
-    options?: { now?: string; isPrimary?: boolean; sortOrder?: number }
-  ) => {
-    const now = options?.now || new Date().toISOString();
-    const avatarId = crypto.randomUUID();
-    const isPrimary = options?.isPrimary !== false;
-
-    let sortOrder = options?.sortOrder;
-    if (sortOrder === undefined) {
-      const row = await db.prepare(
-        'SELECT COALESCE(MAX(sort_order), -1) AS max_sort FROM person_avatars WHERE person_id = ?'
-      ).bind(personId).first();
-      sortOrder = Number((row as any)?.max_sort ?? -1) + 1;
-    }
-
-    await db.prepare(
-      `INSERT INTO person_avatars (
-        id, person_id, avatar_url, storage_key, is_primary, sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      avatarId,
-      personId,
-      avatarUrl,
-      storageKey,
-      0,
-      sortOrder,
-      now,
-      now
-    ).run();
-
-    const synced = await syncPrimaryAvatar(db, personId, now, isPrimary ? avatarId : undefined);
-    return {
-      avatar: synced.avatars.find((item) => item.id === avatarId) || null,
-      primary: synced.primary,
-      avatars: synced.avatars
-    };
-  };
-
-  const ensureAvatarFromLegacy = async (db: Env['DB'], person: any) => {
-    const legacyUrl = person?.avatar_url as string | null | undefined;
-    const personId = person?.id as string;
-    let avatars = await loadPersonAvatars(db, personId);
-    if (avatars.length > 0 || !legacyUrl) {
-      return avatars;
-    }
-
-    const now = new Date().toISOString();
-    await appendAvatar(
-      db,
-      personId,
-      legacyUrl,
-      deriveStorageKeyFromUrl(legacyUrl),
-      { now, isPrimary: true, sortOrder: 0 }
-    );
-    avatars = await loadPersonAvatars(db, personId);
-    return avatars;
-  };
-
-  const loadCustomFields = async (env: Env, layerId: string) => {
-    const db = env.DB;
-    const { results } = await db.prepare(
-      `SELECT cf.id, cf.person_id, cf.label, cf.value
-       FROM person_custom_fields cf
-       INNER JOIN people p ON p.id = cf.person_id
-       WHERE p.layer_id = ?`
-    ).bind(layerId).all();
-    await migratePlaintextCustomFieldRows(db, env, results as Array<Record<string, unknown>>);
-    const decrypted = await decryptCustomFieldRows(env, results as Array<Record<string, unknown>>);
-    const map = new Map<string, { label: string; value: string }[]>();
-    decrypted.forEach((row: any) => {
-      const list = map.get(row.person_id) || [];
-      list.push({ label: row.label, value: row.value });
-      map.set(row.person_id, list);
-    });
-    return map;
-  };
-
-  const loadPersonCustomFields = async (env: Env, personId: string) => {
-    const db = env.DB;
-    const { results } = await db.prepare(
-      'SELECT id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
-    ).bind(personId).all();
-    await migratePlaintextCustomFieldRows(db, env, results as Array<Record<string, unknown>>);
-    const decrypted = await decryptCustomFieldRows(env, results as Array<Record<string, unknown>>);
-    return decrypted.map((row: any) => ({ label: row.label, value: row.value }));
-  };
-
-  const extractCustomFields = (body: any, metadata: any) => {
-    if (Array.isArray(body?.custom_fields)) return body.custom_fields;
-    if (Array.isArray(metadata?.customFields)) return metadata.customFields;
-    return null;
-  };
-
-  const buildPersonPayload = (
-    person: any,
-    customFields: { label: string; value: string }[],
-    avatars: PersonAvatar[],
-    emailVerifiedAt: string | null = null
-  ) => {
-    const primaryAvatar = resolvePrimaryAvatar(avatars);
-    return {
-      ...person,
-      layer_id: person.layer_id ?? null,
-      email_verified_at: emailVerifiedAt,
-      avatar_url: primaryAvatar?.avatar_url || person.avatar_url || null,
-      avatars,
-      metadata: {
-        ...safeParse(person.metadata as string),
-        customFields
-      }
-    };
-  };
-
-  const normalizeEmail = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim().toLowerCase();
-    return normalized || null;
-  };
-
-  const parseBoolean = (value: unknown, fallback = false) => {
-    if (value === null || value === undefined) return fallback;
-    const normalized = String(value).trim().toLowerCase();
-    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
-    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
-    return fallback;
-  };
-
-  const ensurePersonExists = async (db: Env['DB'], personId: string) => {
-    const existing = await db.prepare(
-      'SELECT id, layer_id, name, avatar_url FROM people WHERE id = ?'
-    ).bind(personId).first();
-    if (!existing) return null;
-    await ensureAvatarFromLegacy(db, existing as any);
-    return existing as any;
-  };
-
-  const handleAvatarUpload = async (
-    c: Context<AppBindings>,
-    personId: string,
-    file: UploadFile,
-    options?: {
-      setPrimary?: boolean;
-      mirrorPath?: string;
-      mirrorSetPrimary?: boolean;
-      notifySource?: 'legacy' | 'multi';
-    }
-  ) => {
-    const sessionUser = c.get('sessionUser');
-    if (!sessionUser) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-    const avatarRateLimit = await checkAndConsumeRateLimit(c.env.DB, {
-      action: 'person_avatar_upload',
-      limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
-      ...PERSON_AVATAR_UPLOAD_RATE_LIMIT
-    });
-    if (!avatarRateLimit.allowed) {
-      c.header('Retry-After', String(avatarRateLimit.retryAfterSeconds));
-      await recordRateLimitAudit(c, {
-        action: 'person_avatar_upload',
-        limiterKey: `${sessionUser.userId}:${getRequestIpAddress(c) || 'unknown-ip'}`,
-        route: `/api/people/${personId}/avatars`,
-        retryAfterSeconds: avatarRateLimit.retryAfterSeconds,
-        summary: `人物頭像上傳速率限制：${personId}`
-      });
-      return c.json({ error: 'Too many avatar uploads' }, 429);
-    }
-    let validated;
-    try {
-      validated = await validateAvatarUpload(file, MAX_AVATAR_BYTES);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'unsupported file type';
-      return c.json({ error: message }, message === 'file is too large' ? 413 : 400);
-    }
-
-    const existing = await ensurePersonExists(c.env.DB, personId);
-    if (!existing) {
-      return c.json({ error: 'Person not found' }, 404);
-    }
-
-    const now = new Date().toISOString();
-    const key = `person-${personId}-${Date.now()}-${crypto.randomUUID()}.${validated.extension}`;
-    await c.env.AVATARS.put(key, validated.bytes, {
-      httpMetadata: { contentType: validated.contentType }
-    });
-
-    const avatarUrl = `/api/avatars/${key}`;
-    const created = await appendAvatar(
-      c.env.DB,
-      personId,
-      avatarUrl,
-      key,
-      {
-        now,
-        isPrimary: options?.setPrimary !== false
-      }
-    );
-
-    const avatarLink = new URL(avatarUrl, c.req.url).toString();
-    notifyUpdate(c, 'people:avatar', {
-      id: personId,
-      name: existing.name ?? null,
-      avatar_url: created.primary?.avatar_url ?? avatarUrl,
-      avatar_id: created.avatar?.id ?? null,
-      avatar_count: created.avatars.length,
-      source: options?.notifySource || 'multi'
-    }, { photoUrl: avatarLink });
-
-    await recordAuditLog(c, {
-      action: 'update_avatar',
-      resourceType: 'people',
-      resourceId: personId,
-      summary: `更新人物頭像 ${String(existing.name ?? personId)}`,
-      details: {
-        avatar_url: avatarUrl,
-        avatar_id: created.avatar?.id ?? null,
-        set_primary: options?.setPrimary !== false,
-        avatar_count: created.avatars.length
-      }
-    });
-
-    const mirrorForm = new FormData();
-    mirrorForm.set('file', new Blob([validated.buffer], { type: validated.contentType }), file.name || 'avatar');
-    if (options?.mirrorSetPrimary !== undefined) {
-      mirrorForm.set('set_primary', options.mirrorSetPrimary ? '1' : '0');
-    }
-    queueRemoteFormData(c, options?.mirrorPath || `/api/people/${personId}/avatars`, mirrorForm);
-
-    return c.json({
-      avatar: created.avatar,
-      avatars: created.avatars,
-      avatar_url: created.primary?.avatar_url || null
-    });
-  };
 
   // Get all people
   app.get('/api/people', async (c) => {
@@ -478,51 +55,55 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Layer not found' }, 404);
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
-    const { results } = await c.env.DB.prepare(
-      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at
-       FROM people
-       WHERE layer_id = ?
-       ORDER BY created_at`
-    ).bind(layerId).all();
-    await Promise.all((results as any[]).map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row as Record<string, unknown>)));
-    const customFieldsMap = await loadCustomFields(c.env, layerId);
+    const repository = createPeopleRepository(c.env.DB);
+    const results = await repository.listPeople(layerId, peopleSchema.hasEmail);
+    await Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)));
+    const customFieldsMap = await loadCustomFields(c.env, repository, layerId);
     const avatarMap = await loadAvatarMap(c.env.DB);
 
     const parsedResults = await Promise.all(results.map(async (person: any) => {
       const decryptedPerson = await decryptPersonRow(c.env, person);
       const avatars = avatarMap.get(decryptedPerson.id) || await ensureAvatarFromLegacy(c.env.DB, decryptedPerson);
-      const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
-      return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars, emailVerifiedAt);
+      const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+      return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars, resolvePrimaryAvatar, emailVerifiedAt);
     }));
 
-    return c.json(parsedResults);
+    return c.json({ people: parsedResults });
   });
 
   // Get a single person by ID
   app.get('/api/people/:id', async (c) => {
     const id = c.req.param('id');
+    const layerId = resolveLayerId(c);
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
-    const person = await c.env.DB.prepare(
-      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
-    ).bind(id).first();
+    const repository = createPeopleRepository(c.env.DB);
+    const person = await repository.getPersonByIdInLayerDetailed(id, layerId, peopleSchema.hasEmail);
 
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
     await migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>);
     const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
-    const customFields = await loadPersonCustomFields(c.env, id);
+    const customFields = await loadPersonCustomFields(c.env, repository, id);
     const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
-    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
-    return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, emailVerifiedAt));
+    const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+    return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, resolvePrimaryAvatar, emailVerifiedAt));
   });
 
   // List avatars for a single person
   app.get('/api/people/:id/avatars', async (c) => {
     const id = c.req.param('id');
-    const existing = await c.env.DB.prepare(
-      'SELECT id, avatar_url FROM people WHERE id = ?'
-    ).bind(id).first();
+    const layerId = resolveLayerId(c);
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
+    const repository = createPeopleRepository(c.env.DB);
+    const existing = await repository.getPersonSummaryByIdInLayer(id, layerId);
 
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
@@ -559,6 +140,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Too many create requests' }, 429);
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
+    const repository = createPeopleRepository(c.env.DB);
     const body = await c.req.json();
     const layerId = resolveLayerId(c, body);
     const { id: providedId, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
@@ -602,23 +184,19 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       now,
       now
     );
-    await c.env.DB.prepare(
-      `INSERT INTO people (${insertColumns.join(', ')}) VALUES (${insertColumns.map(() => '?').join(', ')})`
-    ).bind(...insertValues).run();
+    await repository.insertPerson(Object.fromEntries(insertColumns.map((column, index) => [column, insertValues[index]])));
 
     const customFields = extractCustomFields(body, metadata);
     if (customFields) {
       for (const field of customFields) {
         if (!field?.label && !field?.value) continue;
-        await c.env.DB.prepare(
-          'INSERT INTO person_custom_fields (person_id, label, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-        ).bind(
-          id,
-          field.label || '',
-          await encryptProtectedValue(c.env, field.value || ''),
-          now,
-          now
-        ).run();
+        await repository.insertCustomField({
+          personId: id,
+          label: field.label || '',
+          value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+          createdAt: now,
+          updatedAt: now,
+        });
       }
     }
 
@@ -658,11 +236,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       );
     }
 
-    const person = await c.env.DB.prepare(
-      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
-    ).bind(id).first();
+    const person = await repository.getPersonById(id, peopleSchema.hasEmail);
 
-    const customFieldsResult = await loadPersonCustomFields(c.env, id);
+    const customFieldsResult = await loadPersonCustomFields(c.env, repository, id);
     const decryptedPerson = person ? await decryptPersonRow(c.env, person as Record<string, unknown>) : null;
     const avatars = decryptedPerson ? await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any) : [];
     const metadataKeys = metadata && typeof metadata === 'object'
@@ -732,20 +308,27 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     queueRemoteJson(c, 'POST', '/api/people', mirrorPayload);
 
-    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
-    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, emailVerifiedAt), 201);
+    const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+    if (!decryptedPerson) {
+      return c.json({ error: 'Failed to load created person' }, 500);
+    }
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, resolvePrimaryAvatar, emailVerifiedAt), 201);
   });
 
   // Update a person
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
-    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const body = await c.req.json();
+    const layerId = resolveLayerId(c, body);
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
+    const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
+    const repository = createPeopleRepository(c.env.DB);
     const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
 
-    const existing = await c.env.DB.prepare(
-      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata FROM people WHERE id = ?`
-    ).bind(id).first();
+    const existing = await repository.getPersonByIdInLayerDetailed(id, layerId, peopleSchema.hasEmail);
 
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
@@ -753,13 +336,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     await migratePlaintextPersonRow(c.env.DB, c.env, existing as Record<string, unknown>);
     const existingAny = await decryptPersonRow(c.env, existing as Record<string, unknown>) as any;
     const previousDob = existingAny.dob as string | null;
-    const existingCustomFields = await loadPersonCustomFields(c.env, id);
+    const existingCustomFields = await loadPersonCustomFields(c.env, repository, id);
     await ensureAvatarFromLegacy(c.env.DB, existingAny);
 
     const now = new Date().toISOString();
-    const updates: string[] = [];
-    const values: unknown[] = [];
-    const changedFields: string[] = [];
     const protectedUpdates = await protectPersonWriteFields(c.env, {
       blood_type: blood_type !== undefined ? (blood_type as string | null) : undefined,
       dob: dob !== undefined ? (dob as string | null) : undefined,
@@ -768,102 +348,48 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       tod: tod !== undefined ? (tod as string | null) : undefined,
       metadata: metadata !== undefined ? (metadata ? JSON.stringify(metadata) : null) : undefined
     });
+    const normalizedNextEmail = peopleSchema.hasEmail && email !== undefined ? normalizeEmail(email) : undefined;
 
-    if (name !== undefined) {
-      updates.push('name = ?');
-      values.push(name);
-      changedFields.push('name');
-    }
-    if (english_name !== undefined) {
-      updates.push('english_name = ?');
-      values.push(english_name);
-      changedFields.push('english_name');
-    }
     if (peopleSchema.hasEmail && email !== undefined) {
-      const normalizedNextEmail = normalizeEmail(email);
       const existingEmail = normalizeEmail(existingAny.email);
-      const verifiedEmailAt = await lookupVerifiedEmailAt(c.env.DB, existingEmail);
+      const verifiedEmailAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, existingEmail);
       if (verifiedEmailAt && normalizedNextEmail !== existingEmail) {
         return c.json({ error: 'Verified email can only be changed from the account page' }, 409);
       }
-      updates.push('email = ?');
-      values.push(normalizedNextEmail);
-      changedFields.push('email');
     }
-    if (gender !== undefined) {
-      updates.push('gender = ?');
-      values.push(gender);
-      changedFields.push('gender');
-    }
-    if (blood_type !== undefined) {
-      updates.push('blood_type = ?');
-      values.push(protectedUpdates.blood_type ?? null);
-      changedFields.push('blood_type');
-    }
-    if (dob !== undefined) {
-      updates.push('dob = ?');
-      values.push(protectedUpdates.dob ?? null);
-      changedFields.push('dob');
-    }
-    if (dod !== undefined) {
-      updates.push('dod = ?');
-      values.push(protectedUpdates.dod ?? null);
-      changedFields.push('dod');
-    }
-    if (tob !== undefined) {
-      updates.push('tob = ?');
-      values.push(protectedUpdates.tob ?? null);
-      changedFields.push('tob');
-    }
-    if (tod !== undefined) {
-      updates.push('tod = ?');
-      values.push(protectedUpdates.tod ?? null);
-      changedFields.push('tod');
-    }
-    if (avatar_url !== undefined) {
-      updates.push('avatar_url = ?');
-      values.push(avatar_url);
-      changedFields.push('avatar_url');
-    }
-    if (metadata !== undefined) {
-      updates.push('metadata = ?');
-      values.push(protectedUpdates.metadata ?? null);
-      changedFields.push('metadata');
-    }
+    const { updatePayload, changedFields } = buildPersonUpdatePayload({
+      name,
+      english_name,
+      normalizedEmail: normalizedNextEmail,
+      includeEmail: peopleSchema.hasEmail,
+      gender,
+      avatar_url,
+      metadataProtected: metadata !== undefined ? (protectedUpdates.metadata ?? null) : undefined,
+      protectedUpdates,
+      now,
+    });
 
     const customFields = extractCustomFields(body, metadata);
 
-    if (updates.length > 0) {
-      updates.push('updated_at = ?');
-      values.push(now);
-      values.push(id);
-
-      await c.env.DB.prepare(
-        `UPDATE people SET ${updates.join(', ')} WHERE id = ?`
-      ).bind(...values).run();
+    if (Object.keys(updatePayload).length > 0) {
+      await repository.updatePersonById(id, updatePayload);
     } else if (customFields !== null) {
-      await c.env.DB.prepare(
-        'UPDATE people SET updated_at = ? WHERE id = ?'
-      ).bind(now, id).run();
+      await repository.updatePersonById(id, { updated_at: now });
     } else {
       return c.json({ error: 'No fields to update' }, 400);
     }
 
     if (customFields !== null) {
-      await c.env.DB.prepare(
-        'DELETE FROM person_custom_fields WHERE person_id = ?'
-      ).bind(id).run();
+      await repository.deleteCustomFieldsByPersonId(id);
       for (const field of customFields) {
         if (!field?.label && !field?.value) continue;
-        await c.env.DB.prepare(
-          'INSERT INTO person_custom_fields (person_id, label, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-        ).bind(
-          id,
-          field.label || '',
-          await encryptProtectedValue(c.env, field.value || ''),
-          now,
-          now
-        ).run();
+        await repository.insertCustomField({
+          personId: id,
+          label: field.label || '',
+          value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+          createdAt: now,
+          updatedAt: now,
+        });
       }
     }
 
@@ -872,9 +398,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         await c.env.DB.prepare(
           'UPDATE person_avatars SET is_primary = 0, updated_at = ? WHERE person_id = ? AND is_primary = 1'
         ).bind(now, id).run();
-        await c.env.DB.prepare(
-          'UPDATE people SET avatar_url = ?, updated_at = ? WHERE id = ?'
-        ).bind(null, now, id).run();
+        await repository.updatePersonById(id, { avatar_url: null, updated_at: now });
       } else {
         const existingAvatar = await c.env.DB.prepare(
           'SELECT id FROM person_avatars WHERE person_id = ? AND avatar_url = ? LIMIT 1'
@@ -894,14 +418,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     if (dob !== undefined && dob !== previousDob) {
-      await updateSiblingOrdering(c.env, id, String(existingAny.layer_id || 'default'));
+      await updateSiblingOrdering(c.env, repository, id, String(existingAny.layer_id || 'default'));
     }
 
-    const person = await c.env.DB.prepare(
-      `SELECT id, layer_id, name, english_name, ${peopleSchema.hasEmail ? 'email,' : ''} gender, blood_type, dob, dod, tob, tod, avatar_url, metadata, created_at, updated_at FROM people WHERE id = ?`
-    ).bind(id).first();
+    const person = await repository.getPersonByIdInLayerDetailed(id, layerId, peopleSchema.hasEmail);
 
-    const customFieldsResult = await loadPersonCustomFields(c.env, id);
+    const customFieldsResult = await loadPersonCustomFields(c.env, repository, id);
     const decryptedPerson = person ? await decryptPersonRow(c.env, person as Record<string, unknown>) : null;
     const avatars = decryptedPerson ? await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any) : [];
     const formatCustomFields = (fields: { label: string; value: string }[]) => (
@@ -981,14 +503,18 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
     });
     queueRemoteJson(c, 'PUT', `/api/people/${id}`, body);
-    const emailVerifiedAt = await lookupVerifiedEmailAt(c.env.DB, (decryptedPerson as any).email ?? null);
-    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, emailVerifiedAt));
+    const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+    if (!decryptedPerson) {
+      return c.json({ error: 'Failed to load updated person' }, 500);
+    }
+    return c.json(buildPersonPayload(decryptedPerson, customFieldsResult, avatars, resolvePrimaryAvatar, emailVerifiedAt));
   });
 
   // Upload avatar for a person (multi-avatar API)
   app.post('/api/people/:id/avatars', async (c) => {
     try {
       const id = c.req.param('id');
+      const layerId = resolveLayerId(c);
       const formData = await c.req.formData();
       const file = formData.get('file');
       if (!isUploadFile(file)) {
@@ -996,6 +522,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       }
       const setPrimary = parseBoolean(formData.get('set_primary'), true);
       return handleAvatarUpload(c, id, file, {
+        maxAvatarBytes: MAX_AVATAR_BYTES,
+        ensurePersonExists: (db, personId) => ensurePersonExists(createPeopleRepository(db), db, personId, layerId, ensureAvatarFromLegacy),
         setPrimary,
         mirrorPath: `/api/people/${id}/avatars`,
         mirrorSetPrimary: setPrimary,
@@ -1011,12 +539,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   app.post('/api/people/:id/avatar', async (c) => {
     try {
       const id = c.req.param('id');
+      const layerId = resolveLayerId(c);
       const formData = await c.req.formData();
       const file = formData.get('file');
       if (!isUploadFile(file)) {
         return c.json({ error: 'file is required' }, 400);
       }
       return handleAvatarUpload(c, id, file, {
+        maxAvatarBytes: MAX_AVATAR_BYTES,
+        ensurePersonExists: (db, personId) => ensurePersonExists(createPeopleRepository(db), db, personId, layerId, ensureAvatarFromLegacy),
         setPrimary: true,
         mirrorPath: `/api/people/${id}/avatar`,
         notifySource: 'legacy'
@@ -1032,9 +563,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const id = c.req.param('id');
     const avatarId = c.req.param('avatarId');
     const body = await c.req.json();
+    const layerId = resolveLayerId(c, body);
     const now = new Date().toISOString();
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
 
-    const existing = await ensurePersonExists(c.env.DB, id);
+    const repository = createPeopleRepository(c.env.DB);
+    const existing = await ensurePersonExists(repository, c.env.DB, id, layerId, ensureAvatarFromLegacy);
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
     }
@@ -1092,9 +629,15 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   app.delete('/api/people/:id/avatars/:avatarId', async (c) => {
     const id = c.req.param('id');
     const avatarId = c.req.param('avatarId');
+    const layerId = resolveLayerId(c);
     const now = new Date().toISOString();
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
 
-    const existing = await ensurePersonExists(c.env.DB, id);
+    const repository = createPeopleRepository(c.env.DB);
+    const existing = await ensurePersonExists(repository, c.env.DB, id, layerId, ensureAvatarFromLegacy);
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
     }
@@ -1174,9 +717,13 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Delete a person
   app.delete('/api/people/:id', async (c) => {
     const id = c.req.param('id');
-    const existing = await c.env.DB.prepare(
-      'SELECT id, name, english_name FROM people WHERE id = ?'
-    ).bind(id).first();
+    const layerId = resolveLayerId(c);
+    await ensureLayerSchemaSupport(c.env.DB);
+    if (!await assertLayerExists(c.env.DB, layerId)) {
+      return c.json({ error: 'Layer not found' }, 404);
+    }
+    const repository = createPeopleRepository(c.env.DB);
+    const existing = await repository.getPersonSummaryByIdInLayer(id, layerId);
 
     if (!existing) {
       return c.json({ error: 'Person not found' }, 404);
@@ -1189,15 +736,11 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       await c.env.AVATARS.delete(key);
     }
 
-    await c.env.DB.prepare(
-      'DELETE FROM person_custom_fields WHERE person_id = ?'
-    ).bind(id).run();
+    await repository.deleteCustomFieldsByPersonId(id);
 
-    const result = await c.env.DB.prepare(
-      'DELETE FROM people WHERE id = ?'
-    ).bind(id).run();
+    const result = await repository.deletePersonById(id);
 
-    if (result.success && (result.meta.changes ?? 0) > 0) {
+    if (result.changes > 0) {
       notifyUpdate(c, 'people:delete', {
         id,
         name: (existing as any).name ?? null,

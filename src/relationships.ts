@@ -1,261 +1,27 @@
 import type { Hono } from 'hono';
-import type { AppBindings, Env } from './types';
+import type { AppBindings } from './types';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { RELATIONSHIP_WRITE_RATE_LIMIT } from './rate_limits';
-import { safeParse } from './utils';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
-import {
-  buildSiblingLinkMeta,
-  PARENT_CHILD_METADATA,
-  SPOUSE_METADATA,
-  trackInsertedRowId,
-  type SiblingHandlePreference
-} from './relationship_utils';
-import { decryptProtectedValue } from './data_protection';
+import { createRelationshipRepository } from './d1_repositories';
 import { assertLayerExists, DEFAULT_LAYER_ID, ensureLayerSchemaSupport, resolveLayerId } from './layers';
-
-async function getSiblingLinkMeta(
-  env: Env,
-  layerId: string,
-  aId: string,
-  bId: string,
-  preferredHandles?: SiblingHandlePreference
-) {
-  const db = env.DB;
-  const { results } = await db.prepare(
-    'SELECT id, dob FROM people WHERE layer_id = ? AND id IN (?, ?)'
-  ).bind(layerId, aId, bId).all();
-
-  const a = results.find(p => p.id === aId) as any | undefined;
-  const b = results.find(p => p.id === bId) as any | undefined;
-  const aDob = a?.dob ? new Date((await decryptProtectedValue(env, a.dob as string | null)) || '').getTime() : 0;
-  const bDob = b?.dob ? new Date((await decryptProtectedValue(env, b.dob as string | null)) || '').getTime() : 0;
-  return buildSiblingLinkMeta(aId, bId, aDob, bDob, preferredHandles);
-}
-
-async function getSiblingIds(db: D1Database, layerId: string, personId: string) {
-  const ids = new Set<string>();
-
-  const { results: siblingEdges } = await db.prepare(
-    "SELECT from_person_id, to_person_id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND (from_person_id = ? OR to_person_id = ?)"
-  ).bind(layerId, personId, personId).all();
-  for (const rel of siblingEdges) {
-    const relAny = rel as any;
-    const otherId = relAny.from_person_id === personId ? relAny.to_person_id : relAny.from_person_id;
-    if (otherId && otherId !== personId) {
-      ids.add(otherId as string);
-    }
-  }
-
-  const { results: parentEdges } = await db.prepare(
-    "SELECT from_person_id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND to_person_id = ?"
-  ).bind(layerId, personId).all();
-  const parentIds = parentEdges.map(edge => (edge as any).from_person_id as string);
-  if (parentIds.length) {
-    const placeholders = parentIds.map(() => '?').join(', ');
-    const { results: siblingChildren } = await db.prepare(
-      `SELECT to_person_id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id IN (${placeholders}) AND to_person_id != ?`
-    ).bind(layerId, ...parentIds, personId).all();
-    for (const rel of siblingChildren) {
-      const siblingId = (rel as any).to_person_id as string;
-      if (siblingId && siblingId !== personId) {
-        ids.add(siblingId);
-      }
-    }
-  }
-
-  return [...ids];
-}
-
-async function getPersonNameMap(
-  db: D1Database,
-  layerId: string,
-  personIds: Array<string | null | undefined>
-) {
-  const uniqueIds = [...new Set(
-    personIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
-  )];
-  const map = new Map<string, string>();
-  if (!uniqueIds.length) return map;
-
-  const placeholders = uniqueIds.map(() => '?').join(', ');
-  const { results } = await db.prepare(
-    `SELECT id, name FROM people WHERE layer_id = ? AND id IN (${placeholders})`
-  ).bind(layerId, ...uniqueIds).all();
-
-  for (const row of results) {
-    const rowAny = row as any;
-    if (typeof rowAny.id === 'string') {
-      map.set(rowAny.id, typeof rowAny.name === 'string' ? rowAny.name : '');
-    }
-  }
-  return map;
-}
-
-async function ensureSiblingLink(
-  env: Env,
-  layerId: string,
-  aId: string,
-  bId: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  const db = env.DB;
-  if (aId === bId) return;
-  const exists = await db.prepare(
-    "SELECT id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-  ).bind(layerId, aId, bId, bId, aId).first();
-  if (exists) return;
-
-  const link = await getSiblingLinkMeta(env, layerId, aId, bId);
-  const result = await db.prepare(
-    "INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, 'sibling', ?, ?)"
-  ).bind(layerId, link.fromId, link.toId, link.metadata, now).run();
-  trackInsertedRowId(result, createdRelationshipIds);
-}
-
-async function linkSiblingNetworks(
-  env: Env,
-  layerId: string,
-  personA: string,
-  personB: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  const db = env.DB;
-  const [siblingsA, siblingsB] = await Promise.all([
-    getSiblingIds(db, layerId, personA),
-    getSiblingIds(db, layerId, personB)
-  ]);
-
-  for (const siblingId of siblingsB) {
-    if (siblingId !== personA) {
-      await ensureSiblingLink(env, layerId, personA, siblingId, now, createdRelationshipIds);
-    }
-  }
-
-  for (const siblingId of siblingsA) {
-    if (siblingId !== personB) {
-      await ensureSiblingLink(env, layerId, personB, siblingId, now, createdRelationshipIds);
-    }
-  }
-}
-
-async function ensureParentChildLink(
-  db: D1Database,
-  layerId: string,
-  parentId: string,
-  childId: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  if (parentId === childId) return;
-  const exists = await db.prepare(
-    "SELECT id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
-  ).bind(layerId, parentId, childId).first();
-  if (exists) return;
-
-  const result = await db.prepare(
-    "INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, 'parent_child', ?, ?)"
-  ).bind(layerId, parentId, childId, PARENT_CHILD_METADATA, now).run();
-  trackInsertedRowId(result, createdRelationshipIds);
-}
-
-async function linkParentToSiblingChildren(
-  env: Env,
-  layerId: string,
-  parentId: string,
-  childId: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  const db = env.DB;
-  const siblingIds = await getSiblingIds(db, layerId, childId);
-  for (const siblingId of siblingIds) {
-    await ensureParentChildLink(db, layerId, parentId, siblingId, now, createdRelationshipIds);
-    await linkSiblingNetworks(env, layerId, childId, siblingId, now, createdRelationshipIds);
-  }
-}
-
-async function getChildIds(db: D1Database, layerId: string, parentId: string) {
-  const { results } = await db.prepare(
-    "SELECT to_person_id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ?"
-  ).bind(layerId, parentId).all();
-  return results
-    .map((row) => (row as any).to_person_id as string)
-    .filter(Boolean);
-}
-
-async function linkSpouseToChild(
-  env: Env,
-  layerId: string,
-  parentId: string,
-  childId: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  const db = env.DB;
-  const { results } = await db.prepare(
-    "SELECT from_person_id, to_person_id FROM relationships WHERE layer_id = ? AND type = 'spouse' AND (from_person_id = ? OR to_person_id = ?)"
-  ).bind(layerId, parentId, parentId).all();
-
-  const spouseIds = new Set<string>();
-  for (const rel of results) {
-    const spouseId = (rel as any).from_person_id === parentId
-      ? (rel as any).to_person_id
-      : (rel as any).from_person_id;
-    if (spouseId && spouseId !== parentId) {
-      spouseIds.add(spouseId as string);
-    }
-  }
-
-  if (!spouseIds.size) return [] as string[];
-
-  const linked: string[] = [];
-  for (const spouseId of spouseIds) {
-    const existingParentChild = await db.prepare(
-      "SELECT id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
-    ).bind(layerId, spouseId, childId).first();
-
-    if (!existingParentChild) {
-      const result = await db.prepare(
-        "INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, 'parent_child', ?, ?)"
-      ).bind(layerId, spouseId, childId, PARENT_CHILD_METADATA, now).run();
-      trackInsertedRowId(result, createdRelationshipIds);
-    }
-
-    await linkParentToSiblingChildren(env, layerId, spouseId, childId, now, createdRelationshipIds);
-    linked.push(spouseId);
-  }
-
-  return linked;
-}
-
-async function linkSpousePairExistingChildren(
-  env: Env,
-  layerId: string,
-  personA: string,
-  personB: string,
-  now: string,
-  createdRelationshipIds?: number[]
-) {
-  const db = env.DB;
-  const [aChildren, bChildren] = await Promise.all([
-    getChildIds(db, layerId, personA),
-    getChildIds(db, layerId, personB)
-  ]);
-
-  for (const childId of aChildren) {
-    await ensureParentChildLink(db, layerId, personB, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(env, layerId, personB, childId, now, createdRelationshipIds);
-  }
-
-  for (const childId of bChildren) {
-    await ensureParentChildLink(db, layerId, personA, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(env, layerId, personA, childId, now, createdRelationshipIds);
-  }
-}
+import {
+  ensureParentChildLink,
+  ensureSiblingLink,
+  getPersonNameMap,
+  getSiblingLinkMeta,
+  isRelationshipType,
+  linkParentToSiblingChildren,
+  linkSiblingNetworks,
+  linkSpousePairExistingChildren,
+  linkSpouseToChild,
+  parseRelationshipRows,
+  PARENT_CHILD_METADATA,
+  RELATIONSHIP_TYPES,
+  summarizeRelationshipMetadata,
+  SPOUSE_METADATA,
+} from './relationships/service';
 
 export function registerRelationshipRoutes(app: Hono<AppBindings>) {
   // Get all relationships
@@ -265,14 +31,9 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     if (!await assertLayerExists(c.env.DB, layerId)) {
       return c.json({ error: 'Layer not found' }, 404);
     }
-    const { results } = await c.env.DB.prepare(
-      'SELECT * FROM relationships WHERE layer_id = ? ORDER BY created_at'
-    ).bind(layerId).all();
-
-    const parsedResults = results.map(rel => ({
-      ...rel,
-      metadata: safeParse(rel.metadata as string)
-    }));
+    const repository = createRelationshipRepository(c.env.DB);
+    const results = await repository.listRelationships(layerId);
+    const parsedResults = parseRelationshipRows(results);
 
     return c.json(parsedResults);
   });
@@ -309,7 +70,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'from_person_id, to_person_id, and type are required' }, 400);
     }
 
-    if (!['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law'].includes(type)) {
+    if (!isRelationshipType(type)) {
       return c.json({ error: 'type must be parent_child, spouse, ex_spouse, sibling, or in_law' }, 400);
     }
 
@@ -321,10 +82,11 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     if (!await assertLayerExists(c.env.DB, layerId)) {
       return c.json({ error: 'Layer not found' }, 404);
     }
+    const repository = createRelationshipRepository(c.env.DB);
     // Verify both people exist
     const [fromExists, toExists] = await Promise.all([
-      c.env.DB.prepare('SELECT id FROM people WHERE layer_id = ? AND id = ?').bind(layerId, from_person_id).first(),
-      c.env.DB.prepare('SELECT id FROM people WHERE layer_id = ? AND id = ?').bind(layerId, to_person_id).first()
+      repository.personExists(layerId, from_person_id),
+      repository.personExists(layerId, to_person_id)
     ]);
 
     if (!fromExists || !toExists) {
@@ -337,23 +99,19 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     let finalMetadata = metadata ? JSON.stringify(metadata) : null;
 
     if (type === 'parent_child') {
-      const existing = await c.env.DB.prepare(
-        "SELECT id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ? AND to_person_id = ?"
-      ).bind(layerId, from_person_id, to_person_id).first();
+      const existing = await repository.findRelationship(layerId, 'parent_child', from_person_id, to_person_id);
       if (existing) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
 
-      await linkSpouseToChild(c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSpouseToChild(repository, c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
       if (finalMetadata === null) {
         finalMetadata = PARENT_CHILD_METADATA;
       }
     }
 
     if (type === 'spouse' || type === 'ex_spouse') {
-      const existing = await c.env.DB.prepare(
-        "SELECT id FROM relationships WHERE layer_id = ? AND type = ? AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-      ).bind(layerId, type, from_person_id, to_person_id, to_person_id, from_person_id).first();
+      const existing = await repository.findRelationship(layerId, type, from_person_id, to_person_id, true);
       if (existing) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
@@ -365,9 +123,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     }
 
     if (type === 'sibling') {
-      const existing = await c.env.DB.prepare(
-        "SELECT id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-      ).bind(layerId, from_person_id, to_person_id, to_person_id, from_person_id).first();
+      const existing = await repository.findRelationship(layerId, 'sibling', from_person_id, to_person_id, true);
       if (existing) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
@@ -378,75 +134,80 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           targetHandle: (metadata as any).targetHandle
         }
         : undefined;
-      const link = await getSiblingLinkMeta(c.env, layerId, from_person_id, to_person_id, preferredHandles);
+      const link = await getSiblingLinkMeta(repository, c.env, layerId, from_person_id, to_person_id, preferredHandles);
       fromId = link.fromId;
       toId = link.toId;
       finalMetadata = link.metadata;
     }
 
     if (type === 'in_law') {
-      const existing = await c.env.DB.prepare(
-        "SELECT id FROM relationships WHERE layer_id = ? AND type = 'in_law' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-      ).bind(layerId, from_person_id, to_person_id, to_person_id, from_person_id).first();
+      const existing = await repository.findRelationship(layerId, 'in_law', from_person_id, to_person_id, true);
       if (existing) {
         return c.json({ error: 'Relationship already exists' }, 409);
       }
     }
 
-    const result = await c.env.DB.prepare(
-      'INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(layerId, fromId, toId, type, finalMetadata, now).run();
-    trackInsertedRowId(result, createdRelationshipIds);
-
-    const metadataSummary = typeof finalMetadata === 'string'
-      ? safeParse(finalMetadata)
-      : finalMetadata;
-    const personNames = await getPersonNameMap(c.env.DB, layerId, [fromId, toId]);
+    const result = await repository.createRelationship({
+      layerId,
+      fromPersonId: fromId,
+      toPersonId: toId,
+      type,
+      metadata: finalMetadata,
+      createdAt: now,
+    });
+    const metadataSummary = summarizeRelationshipMetadata(finalMetadata);
+    const metadataObject = metadataSummary && typeof metadataSummary === 'object'
+      ? metadataSummary as Record<string, unknown>
+      : null;
+    const personNames = await getPersonNameMap(repository, layerId, [fromId, toId]);
     notifyUpdate(c, 'relationships:create', {
-      id: result.meta.last_row_id ?? undefined,
+      id: result.lastRowId ?? undefined,
       from_person_id: fromId,
       to_person_id: toId,
       from_person_name: personNames.get(fromId) ?? null,
       to_person_name: personNames.get(toId) ?? null,
       type,
-      source_handle: metadataSummary?.sourceHandle,
-      target_handle: metadataSummary?.targetHandle
+      source_handle: metadataObject?.sourceHandle,
+      target_handle: metadataObject?.targetHandle
     });
     if (type === 'parent_child' && !shouldSkipAutoLink) {
-      await linkSpouseToChild(c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
-      await linkParentToSiblingChildren(c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSpouseToChild(repository, c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkParentToSiblingChildren(repository, c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
 
-      const otherChildren = await c.env.DB.prepare(
-        "SELECT to_person_id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ? AND to_person_id != ?"
-      ).bind(layerId, from_person_id, to_person_id).all();
-      for (const child of otherChildren.results) {
+      const otherChildren = await repository.listChildrenForParent(layerId, from_person_id, to_person_id);
+      for (const child of otherChildren) {
         const siblingId = (child as any).to_person_id;
-        const existingSibling = await c.env.DB.prepare(
-          "SELECT id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-        ).bind(layerId, to_person_id, siblingId, siblingId, to_person_id).first();
+        const existingSibling = await repository.findRelationship(layerId, 'sibling', to_person_id, siblingId, true);
         if (!existingSibling) {
-          const link = await getSiblingLinkMeta(c.env, layerId, to_person_id, siblingId);
-          const siblingResult = await c.env.DB.prepare(
-            "INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, 'sibling', ?, ?)"
-          ).bind(layerId, link.fromId, link.toId, link.metadata, now).run();
-          trackInsertedRowId(siblingResult, createdRelationshipIds);
+          const link = await getSiblingLinkMeta(repository, c.env, layerId, to_person_id, siblingId);
+          const siblingResult = await repository.createRelationship({
+            layerId,
+            fromPersonId: link.fromId,
+            toPersonId: link.toId,
+            type: 'sibling',
+            metadata: link.metadata,
+            createdAt: now,
+          });
+          if (siblingResult.lastRowId !== null) {
+            createdRelationshipIds.push(siblingResult.lastRowId);
+          }
         }
-        await linkSiblingNetworks(c.env, layerId, to_person_id, siblingId, now, createdRelationshipIds);
+        await linkSiblingNetworks(repository, c.env, layerId, to_person_id, siblingId, now, createdRelationshipIds);
       }
     }
 
     if (type === 'sibling' && !shouldSkipAutoLink) {
-      await linkSiblingNetworks(c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
+      await linkSiblingNetworks(repository, c.env, layerId, from_person_id, to_person_id, now, createdRelationshipIds);
     }
 
     if (type === 'spouse' && !shouldSkipAutoLink) {
-      await linkSpousePairExistingChildren(c.env, layerId, fromId, toId, now, createdRelationshipIds);
+      await linkSpousePairExistingChildren(repository, c.env, layerId, fromId, toId, now, createdRelationshipIds);
     }
 
     await recordAuditLog(c, {
       action: 'create',
       resourceType: 'relationships',
-      resourceId: result.meta.last_row_id ?? null,
+      resourceId: result.lastRowId ?? null,
       summary: `新增關係 ${personNames.get(fromId) || fromId} -> ${personNames.get(toId) || toId}`,
       details: {
         from_person_id: fromId,
@@ -459,7 +220,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     });
 
     return c.json({
-      id: result.meta.last_row_id,
+      id: result.lastRowId,
       layer_id: layerId,
       from_person_id: fromId,
       to_person_id: toId,
@@ -495,11 +256,10 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const body = await c.req.json();
     const { from_person_id, to_person_id, type, metadata, skipAutoLink, skip_auto_link } = body;
     const shouldSkipAutoLink = Boolean(skipAutoLink ?? skip_auto_link);
+    const repository = createRelationshipRepository(c.env.DB);
 
     await ensureLayerSchemaSupport(c.env.DB);
-    const existing = await c.env.DB.prepare(
-      'SELECT id, layer_id, from_person_id, to_person_id, type FROM relationships WHERE id = ?'
-    ).bind(id).first();
+    const existing = await repository.getRelationshipById(id);
 
     if (!existing) {
       return c.json({ error: 'Relationship not found' }, 404);
@@ -507,7 +267,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
     const layerId = String((existing as any).layer_id || resolveLayerId(c, body));
     if (type !== undefined) {
-      if (!['parent_child', 'spouse', 'ex_spouse', 'sibling', 'in_law'].includes(type)) {
+      if (!isRelationshipType(type)) {
         return c.json({ error: 'type must be parent_child, spouse, ex_spouse, sibling, or in_law' }, 400);
       }
     }
@@ -541,11 +301,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'No updates provided' }, 400);
     }
 
-    values.push(id);
-
-    await c.env.DB.prepare(
-      `UPDATE relationships SET ${updates.join(', ')} WHERE id = ?`
-    ).bind(...values).run();
+    const updatePayload = Object.fromEntries(updates.map((entry, index) => [entry.split(' = ')[0], values[index]]));
+    await repository.updateRelationshipById(id, updatePayload);
 
     const nextFrom = (from_person_id ?? (existing as any).from_person_id) as string;
     const nextTo = (to_person_id ?? (existing as any).to_person_id) as string;
@@ -553,24 +310,25 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const now = new Date().toISOString();
 
     if (nextType === 'parent_child' && !shouldSkipAutoLink) {
-      await linkSpouseToChild(c.env, layerId, nextFrom, nextTo, now);
-      await linkParentToSiblingChildren(c.env, layerId, nextFrom, nextTo, now);
+      await linkSpouseToChild(repository, c.env, layerId, nextFrom, nextTo, now);
+      await linkParentToSiblingChildren(repository, c.env, layerId, nextFrom, nextTo, now);
 
-      const otherChildren = await c.env.DB.prepare(
-        "SELECT to_person_id FROM relationships WHERE layer_id = ? AND type = 'parent_child' AND from_person_id = ? AND to_person_id != ?"
-      ).bind(layerId, nextFrom, nextTo).all();
-      for (const child of otherChildren.results) {
+      const otherChildren = await repository.listChildrenForParent(layerId, nextFrom, nextTo);
+      for (const child of otherChildren) {
         const siblingId = (child as any).to_person_id;
-        const existingSibling = await c.env.DB.prepare(
-          "SELECT id FROM relationships WHERE layer_id = ? AND type = 'sibling' AND ((from_person_id = ? AND to_person_id = ?) OR (from_person_id = ? AND to_person_id = ?))"
-        ).bind(layerId, nextTo, siblingId, siblingId, nextTo).first();
+        const existingSibling = await repository.findRelationship(layerId, 'sibling', nextTo, siblingId, true);
         if (!existingSibling) {
-          const link = await getSiblingLinkMeta(c.env, layerId, nextTo, siblingId);
-          await c.env.DB.prepare(
-            "INSERT INTO relationships (layer_id, from_person_id, to_person_id, type, metadata, created_at) VALUES (?, ?, ?, 'sibling', ?, ?)"
-          ).bind(layerId, link.fromId, link.toId, link.metadata, now).run();
+          const link = await getSiblingLinkMeta(repository, c.env, layerId, nextTo, siblingId);
+          await repository.createRelationship({
+            layerId,
+            fromPersonId: link.fromId,
+            toPersonId: link.toId,
+            type: 'sibling',
+            metadata: link.metadata,
+            createdAt: now,
+          });
         }
-        await linkSiblingNetworks(c.env, layerId, nextTo, siblingId, now);
+        await linkSiblingNetworks(repository, c.env, layerId, nextTo, siblingId, now);
       }
     }
 
@@ -581,21 +339,21 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
           targetHandle: (metadata as any).targetHandle
         }
         : undefined;
-      const link = await getSiblingLinkMeta(c.env, layerId, nextFrom, nextTo, preferredHandles);
-      await c.env.DB.prepare(
-        'UPDATE relationships SET from_person_id = ?, to_person_id = ?, metadata = ? WHERE id = ? AND layer_id = ?'
-      ).bind(link.fromId, link.toId, link.metadata, id, layerId).run();
-      await linkSiblingNetworks(c.env, layerId, nextFrom, nextTo, now);
+      const link = await getSiblingLinkMeta(repository, c.env, layerId, nextFrom, nextTo, preferredHandles);
+      await repository.updateRelationshipById(id, {
+        from_person_id: link.fromId,
+        to_person_id: link.toId,
+        metadata: link.metadata,
+      });
+      await linkSiblingNetworks(repository, c.env, layerId, nextFrom, nextTo, now);
     }
 
     if (nextType === 'spouse' && !shouldSkipAutoLink) {
-      await linkSpousePairExistingChildren(c.env, layerId, nextFrom, nextTo, now);
+      await linkSpousePairExistingChildren(repository, c.env, layerId, nextFrom, nextTo, now);
     }
 
-    const updated = await c.env.DB.prepare(
-      'SELECT * FROM relationships WHERE id = ?'
-    ).bind(id).first();
-    const personNames = await getPersonNameMap(c.env.DB, layerId, [nextFrom, nextTo]);
+    const updated = await repository.getRelationshipById(id);
+    const personNames = await getPersonNameMap(repository, layerId, [nextFrom, nextTo]);
 
     const updateDetails: Record<string, unknown> = {
       id,
@@ -654,26 +412,23 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       }
       console.log(`DELETE /api/relationships/${id} request received`);
       await ensureLayerSchemaSupport(c.env.DB);
-      const existing = await c.env.DB.prepare(
-        'SELECT id, layer_id, from_person_id, to_person_id, type FROM relationships WHERE id = ?'
-      ).bind(id).first();
+      const repository = createRelationshipRepository(c.env.DB);
+      const existing = await repository.getRelationshipById(id);
       if (!existing) {
         return c.json({ error: 'Relationship not found' }, 404);
       }
       const existingAny = existing as any;
       const layerId = String(existingAny.layer_id || DEFAULT_LAYER_ID);
-      const personNames = await getPersonNameMap(c.env.DB, layerId, [
+      const personNames = await getPersonNameMap(repository, layerId, [
         existingAny.from_person_id as string,
         existingAny.to_person_id as string
       ]);
 
-      const result = await c.env.DB.prepare(
-        'DELETE FROM relationships WHERE id = ?'
-      ).bind(id).run();
+      const result = await repository.deleteRelationshipById(id);
 
       console.log('Delete result:', JSON.stringify(result));
 
-      if (result.success && (result.meta.changes ?? 0) > 0) {
+      if (result.changes > 0) {
         notifyUpdate(c, 'relationships:delete', {
           id,
           from_person_id: existingAny.from_person_id as string,

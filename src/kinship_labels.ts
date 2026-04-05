@@ -213,6 +213,9 @@ export function registerKinshipLabelRoutes(app: Hono<AppBindings>) {
     }
     await ensureKinshipLabelsTable(c.env.DB);
     const body = await readJsonObjectBody(c.req);
+    if (!body) {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const defaultTitle = normalizeText((body as any).default_title);
     const defaultFormalTitle = normalizeText((body as any).default_formal_title);
     if (!defaultTitle || !defaultFormalTitle) {

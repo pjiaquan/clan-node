@@ -21,6 +21,10 @@ export type Env = {
 };
 
 export type UserRole = 'admin' | 'readonly';
+export type Gender = 'M' | 'F' | 'O';
+export type RelationshipType = 'parent_child' | 'spouse' | 'ex_spouse' | 'sibling' | 'in_law';
+export type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
+export type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
 
 export type SessionUser = {
   userId: string;
@@ -40,7 +44,7 @@ export interface Relationship {
   layer_id?: string;
   from_person_id: string;
   to_person_id: string;
-  type: string;
+  type: RelationshipType;
 }
 
 export interface Person {
@@ -49,7 +53,7 @@ export interface Person {
   name: string;
   english_name?: string | null;
   email?: string | null;
-  gender: string;
+  gender: Gender;
   blood_type?: string | null;
   dob?: string;
   title?: string;

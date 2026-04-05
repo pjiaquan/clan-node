@@ -1,13 +1,10 @@
 import type { Context, Hono } from 'hono';
-import type { AppBindings } from './types';
+import type { AppBindings, NotificationStatus, NotificationType } from './types';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { readJsonObjectBody } from './http';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { NOTIFICATION_CREATE_RATE_LIMIT } from './rate_limits';
-
-type NotificationType = 'rename' | 'avatar' | 'relationship' | 'other';
-type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
 
 type NotificationRow = {
   id: string;
@@ -44,20 +41,20 @@ const parseStatus = (value: unknown): NotificationStatus | null => {
   return null;
 };
 
-const mapRow = (row: any): NotificationRow => ({
-  id: row.id as string,
+const mapRow = (row: Record<string, unknown>): NotificationRow => ({
+  id: String(row.id ?? ''),
   type: normalizeType(row.type),
-  target_person_id: (row.target_person_id as string | null) ?? null,
-  target_person_name: (row.target_person_name as string | null) ?? null,
-  message: row.message as string,
+  target_person_id: typeof row.target_person_id === 'string' ? row.target_person_id : null,
+  target_person_name: typeof row.target_person_name === 'string' ? row.target_person_name : null,
+  message: String(row.message ?? ''),
   status: parseStatus(row.status) ?? 'pending',
-  created_by_user_id: row.created_by_user_id as string,
-  created_by_username: row.created_by_username as string,
-  resolved_by_user_id: (row.resolved_by_user_id as string | null) ?? null,
-  resolved_by_username: (row.resolved_by_username as string | null) ?? null,
-  resolved_at: (row.resolved_at as string | null) ?? null,
-  created_at: row.created_at as string,
-  updated_at: row.updated_at as string,
+  created_by_user_id: String(row.created_by_user_id ?? ''),
+  created_by_username: String(row.created_by_username ?? ''),
+  resolved_by_user_id: typeof row.resolved_by_user_id === 'string' ? row.resolved_by_user_id : null,
+  resolved_by_username: typeof row.resolved_by_username === 'string' ? row.resolved_by_username : null,
+  resolved_at: typeof row.resolved_at === 'string' ? row.resolved_at : null,
+  created_at: String(row.created_at ?? ''),
+  updated_at: String(row.updated_at ?? ''),
 });
 
 export function registerNotificationRoutes(app: Hono<AppBindings>) {
@@ -84,6 +81,9 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
     }
 
     const body = await readJsonObjectBody(c.req);
+    if (!body) {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const message = typeof (body as any).message === 'string' ? (body as any).message.trim() : '';
     if (!message) {
       return c.json({ error: 'message is required' }, 400);
@@ -254,6 +254,9 @@ export function registerNotificationRoutes(app: Hono<AppBindings>) {
     }
 
     const body = await readJsonObjectBody(c.req);
+    if (!body) {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const nextStatus = parseStatus((body as any).status);
     if (!nextStatus) {
       return c.json({ error: 'status is required' }, 400);

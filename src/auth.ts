@@ -15,6 +15,8 @@ import {
   MFA_VERIFY_RATE_LIMIT,
   RESEND_RATE_LIMIT
 } from './rate_limits';
+import { getUserSchemaSupport } from './schema';
+import type { UserSchemaSupport } from './schema';
 
 const SESSION_COOKIE = 'clan_session';
 const textEncoder = new TextEncoder();
@@ -281,20 +283,7 @@ type SessionSchemaSupport = {
   hasLastSeenAt: boolean;
 };
 
-type UserSchemaSupport = {
-  hasEmail: boolean;
-  hasEmailVerifiedAt: boolean;
-  hasEmailVerifyTokenHash: boolean;
-  hasEmailVerifyExpiresAt: boolean;
-  hasAvatarUrl: boolean;
-  hasMfaTotpSecret: boolean;
-  hasMfaTotpEnabledAt: boolean;
-  hasMfaTotpPendingSecret: boolean;
-  hasMfaTotpPendingExpiresAt: boolean;
-};
-
 let sessionSchemaSupportCache: SessionSchemaSupport | null = null;
-let userSchemaSupportCache: UserSchemaSupport | null = null;
 let authRateLimitTableReady = false;
 let authMfaTableReady = false;
 let authMfaSessionTableReady = false;
@@ -466,61 +455,6 @@ const getSessionSchemaSupport = async (db: D1Database): Promise<SessionSchemaSup
     hasLastSeenAt: names.has('last_seen_at')
   };
   return sessionSchemaSupportCache;
-};
-
-const addUserColumnIfMissing = async (
-  db: D1Database,
-  existing: Set<string>,
-  column: string,
-  ddl: string
-) => {
-  if (existing.has(column)) return;
-  try {
-    await db.prepare(`ALTER TABLE users ADD COLUMN ${ddl}`).run();
-    existing.add(column);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('duplicate column name')) {
-      existing.add(column);
-      return;
-    }
-    throw error;
-  }
-};
-
-const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSupport> => {
-  if (userSchemaSupportCache) return userSchemaSupportCache;
-  const { results } = await db.prepare("PRAGMA table_info('users')").all();
-  const names = new Set(
-    results
-      .map((row) => (row as any).name as string)
-      .filter(Boolean)
-  );
-  await addUserColumnIfMissing(db, names, 'email', 'email TEXT');
-  await addUserColumnIfMissing(db, names, 'email_verified_at', 'email_verified_at TEXT');
-  await addUserColumnIfMissing(db, names, 'email_verify_token_hash', 'email_verify_token_hash TEXT');
-  await addUserColumnIfMissing(db, names, 'email_verify_expires_at', 'email_verify_expires_at TEXT');
-  await addUserColumnIfMissing(db, names, 'avatar_url', 'avatar_url TEXT');
-  await addUserColumnIfMissing(db, names, 'mfa_totp_secret', 'mfa_totp_secret TEXT');
-  await addUserColumnIfMissing(db, names, 'mfa_totp_enabled_at', 'mfa_totp_enabled_at TEXT');
-  await addUserColumnIfMissing(db, names, 'mfa_totp_pending_secret', 'mfa_totp_pending_secret TEXT');
-  await addUserColumnIfMissing(db, names, 'mfa_totp_pending_expires_at', 'mfa_totp_pending_expires_at TEXT');
-  if (names.has('email')) {
-    await db.prepare("UPDATE users SET email = LOWER(TRIM(username)) WHERE email IS NULL OR TRIM(email) = ''").run();
-    await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email)').run();
-  }
-  userSchemaSupportCache = {
-    hasEmail: names.has('email'),
-    hasEmailVerifiedAt: names.has('email_verified_at'),
-    hasEmailVerifyTokenHash: names.has('email_verify_token_hash'),
-    hasEmailVerifyExpiresAt: names.has('email_verify_expires_at'),
-    hasAvatarUrl: names.has('avatar_url'),
-    hasMfaTotpSecret: names.has('mfa_totp_secret'),
-    hasMfaTotpEnabledAt: names.has('mfa_totp_enabled_at'),
-    hasMfaTotpPendingSecret: names.has('mfa_totp_pending_secret'),
-    hasMfaTotpPendingExpiresAt: names.has('mfa_totp_pending_expires_at')
-  };
-  return userSchemaSupportCache;
 };
 
 const getEmailActionBaseUrl = (env: Env) => {

@@ -5,6 +5,7 @@ import { protectPersonWriteFields } from './data_protection';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { LAYER_WRITE_RATE_LIMIT } from './rate_limits';
+import { getPeopleSchemaSupport } from './schema';
 
 export const DEFAULT_LAYER_ID = 'default';
 export const DEFAULT_LAYER_NAME = 'Default Layer';
@@ -34,7 +35,6 @@ const EXAMPLE_RELATIONSHIP_METADATA = JSON.stringify({
 });
 
 let layerSchemaSupportPromise: Promise<void> | null = null;
-let peopleSchemaSupportPromise: Promise<{ hasEmail: boolean }> | null = null;
 
 const isAdmin = (c: Context<AppBindings>) => {
   const sessionUser = c.get('sessionUser');
@@ -51,24 +51,6 @@ const hasColumn = async (db: D1Database, table: string, column: string) => {
   const pragma = await db.prepare(`PRAGMA table_info('${table}')`).all();
   const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
   return names.has(column);
-};
-
-const getPeopleSchemaSupport = async (db: D1Database) => {
-  if (!peopleSchemaSupportPromise) {
-    peopleSchemaSupportPromise = (async () => {
-      const pragma = await db.prepare("PRAGMA table_info('people')").all();
-      const names = new Set((pragma.results as Array<Record<string, unknown>>).map((row) => String((row as any).name)));
-      if (!names.has('email')) {
-        await db.prepare('ALTER TABLE people ADD COLUMN email TEXT').run();
-        names.add('email');
-      }
-      return { hasEmail: names.has('email') };
-    })().catch((error) => {
-      peopleSchemaSupportPromise = null;
-      throw error;
-    });
-  }
-  return peopleSchemaSupportPromise;
 };
 
 const createSeedNodes = (layerName: string): SeedNode[] => ([

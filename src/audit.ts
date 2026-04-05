@@ -1,6 +1,6 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings, UserRole } from './types';
-import { safeParse } from './utils';
+import { safeParseObject } from './utils';
 
 type AuditLogInput = {
   action: string;
@@ -125,7 +125,7 @@ export function registerAuditRoutes(app: Hono<AppBindings>) {
       resource_type: row.resource_type as string,
       resource_id: (row.resource_id as string | null) ?? null,
       summary: (row.summary as string | null) ?? null,
-      details: safeParse((row.details as string | null) ?? null),
+      details: safeParseObject((row.details as string | null) ?? null),
       created_at: row.created_at as string
     })));
   });
