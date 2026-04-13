@@ -44,6 +44,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          VITE_PUBLIC_BASE: /clan-node/
           VITE_API_BASE: https://clan-node.pjiaquan.workers.dev
 
       - name: Setup Pages

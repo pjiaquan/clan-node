@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: process.env.GITHUB_ACTIONS ? '/clan-node/' : '/',
+  base: process.env.VITE_PUBLIC_BASE || '/',
   plugins: [react()],
   build: {
     rollupOptions: {
