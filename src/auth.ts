@@ -13,6 +13,8 @@ import {
   LOGIN_RATE_LIMIT,
   MFA_SEND_RATE_LIMIT,
   MFA_VERIFY_RATE_LIMIT,
+  PASSKEY_LOGIN_RATE_LIMIT,
+  PASSKEY_REGISTER_RATE_LIMIT,
   RESEND_RATE_LIMIT
 } from './rate_limits';
 import { getUserSchemaSupport } from './schema';
@@ -1135,6 +1137,8 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     || path.startsWith('/api/auth/resend-verification')
     || path.startsWith('/api/auth/forgot-password')
     || path.startsWith('/api/auth/reset-password')
+    || path.startsWith('/api/auth/passkey/register/begin')
+    || path.startsWith('/api/auth/passkey/login')
   ) {
     return next();
   }
@@ -1210,6 +1214,8 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
     || path.startsWith('/api/auth/logout')
     || path.startsWith('/api/auth/sessions')
     || path.startsWith('/api/auth/account')
+    || path.startsWith('/api/auth/passkey')
+    || path.startsWith('/api/auth/passkeys')
   ) {
     return next();
   }
@@ -1282,6 +1288,381 @@ const matchesSessionToken = async (storedSessionId: string, sessionToken: string
 };
 
 export function registerAuthRoutes(app: Hono<AppBindings>) {
+  // Passkey helpers
+  // ---------------------------------------------------------------------------
+
+  const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+  let passkeysTableReady = false;
+
+  const ensurePasskeysTable = async (db: D1Database) => {
+    if (passkeysTableReady) return;
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS auth_passkeys (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        credential_id TEXT NOT NULL,
+        credential_public_key TEXT NOT NULL,
+        algorithm INTEGER NOT NULL DEFAULT -7,
+        counter INTEGER NOT NULL DEFAULT 0,
+        device_type TEXT NOT NULL DEFAULT 'single_device',
+        backup_eligible INTEGER NOT NULL DEFAULT 0 CHECK(backup_eligible IN (0, 1)),
+        backup_state INTEGER NOT NULL DEFAULT 0 CHECK(backup_state IN (0, 1)),
+        name TEXT,
+        last_used_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`
+    ).run();
+    await db.prepare(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_passkeys_credential_id ON auth_passkeys(credential_id)'
+    ).run();
+    await db.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_passkeys_user ON auth_passkeys(user_id)'
+    ).run();
+    passkeysTableReady = true;
+  };
+
+  const getRpId = (env: Env): string => {
+    if (env.ENVIRONMENT === 'production') {
+      const origin = (env.FRONTEND_ORIGIN || '').split(',')[0]?.trim() || '';
+      try {
+        return new URL(origin).hostname;
+      } catch {
+        return 'localhost';
+      }
+    }
+    return 'localhost';
+  };
+
+  const getExpectedOrigin = (env: Env): string => {
+    const origin = (env.FRONTEND_ORIGIN || 'http://localhost:5173').split(',')[0]?.trim() || '';
+    return origin || 'http://localhost:5173';
+  };
+
+  const sha256Raw = async (input: string): Promise<Uint8Array> => {
+    const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
+    return new Uint8Array(digest);
+  };
+
+  const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) {
+      diff |= a[i] ^ b[i];
+    }
+    return diff === 0;
+  };
+
+  // Minimal CBOR decoder (handles types needed for COSE keys)
+  const decodeCbor = (data: Uint8Array): any => {
+    let offset = 0;
+
+    const readByte = (): number => {
+      if (offset >= data.length) throw new Error('CBOR: unexpected end of data');
+      return data[offset++];
+    };
+
+    const readBytes = (n: number): Uint8Array => {
+      if (offset + n > data.length) throw new Error('CBOR: unexpected end of data');
+      const slice = data.slice(offset, offset + n);
+      offset += n;
+      return slice;
+    };
+
+    const decodeUint = (initialByte: number): number => {
+      const arg = initialByte & 0x1f;
+      if (arg < 24) return arg;
+      if (arg === 24) return readByte();
+      if (arg === 25) {
+        const b0 = readByte(), b1 = readByte();
+        return (b0 << 8) | b1;
+      }
+      if (arg === 26) {
+        const b0 = readByte(), b1 = readByte(), b2 = readByte(), b3 = readByte();
+        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+      }
+      throw new Error('CBOR: unsupported uint size');
+    };
+
+    const decode = (): any => {
+      const initialByte = readByte();
+      const major = initialByte >> 5;
+      const arg = initialByte & 0x1f;
+
+      switch (major) {
+        case 0: return decodeUint(initialByte);
+        case 1: return -1 - decodeUint(initialByte);
+        case 2: { // byte string
+          const length = decodeUint(initialByte);
+          return readBytes(length);
+        }
+        case 3: { // text string
+          const length = decodeUint(initialByte);
+          const bytes = readBytes(length);
+          return new TextDecoder().decode(bytes);
+        }
+        case 4: { // array
+          const length = decodeUint(initialByte);
+          const arr: any[] = [];
+          for (let i = 0; i < length; i++) arr.push(decode());
+          return arr;
+        }
+        case 5: { // map
+          const length = decodeUint(initialByte);
+          const map: Record<number | string, any> = {};
+          for (let i = 0; i < length; i++) {
+            const key = decode();
+            const value = decode();
+            map[key] = value;
+          }
+          return map;
+        }
+        case 7: { // simple/float
+          if (arg === 20) return false;
+          if (arg === 21) return true;
+          if (arg === 22) return null;
+          if (arg === 23) return undefined;
+          if (arg === 25) {
+            // half-float
+            const b0 = readByte(), b1 = readByte();
+            const mantissa = b1 | ((b0 & 0x03) << 8);
+            const exponent = (b0 >> 2) & 0x1f;
+            const sign = b0 & 0x80 ? -1 : 1;
+            if (exponent === 0) return sign * (mantissa / 1024) * Math.pow(2, -14);
+            if (exponent === 31) return mantissa ? NaN : sign * Infinity;
+            return sign * (1 + mantissa / 1024) * Math.pow(2, exponent - 15);
+          }
+          if (arg === 26) {
+            const b0 = readByte(), b1 = readByte(), b2 = readByte(), b3 = readByte();
+            const view = new DataView(new Uint8Array([b0, b1, b2, b3]).buffer);
+            return view.getFloat32(0);
+          }
+          if (arg === 27) {
+            const b0 = readByte(), b1 = readByte(), b2 = readByte(), b3 = readByte();
+            const b4 = readByte(), b5 = readByte(), b6 = readByte(), b7 = readByte();
+            const view = new DataView(new Uint8Array([b0, b1, b2, b3, b4, b5, b6, b7]).buffer);
+            return view.getFloat64(0);
+          }
+          throw new Error(`CBOR: unsupported simple value ${arg}`);
+        }
+        default:
+          throw new Error(`CBOR: unsupported major type ${major}`);
+      }
+    };
+
+    return decode();
+  };
+
+  type ParsedClientData = {
+    type: string;
+    challenge: string;
+    origin: string;
+  };
+
+  const parseClientDataJson = (clientDataJson: string): ParsedClientData | null => {
+    try {
+      const json = new TextDecoder().decode(fromBase64Url(clientDataJson));
+      const parsed = JSON.parse(json);
+      if (typeof parsed.type === 'string' && typeof parsed.challenge === 'string' && typeof parsed.origin === 'string') {
+        return { type: parsed.type, challenge: parsed.challenge, origin: parsed.origin };
+      }
+    } catch {
+      // try parsing directly as JSON string
+      try {
+        const parsed = JSON.parse(clientDataJson);
+        if (typeof parsed.type === 'string' && typeof parsed.challenge === 'string' && typeof parsed.origin === 'string') {
+          return { type: parsed.type, challenge: parsed.challenge, origin: parsed.origin };
+        }
+      } catch {
+        // ignored
+      }
+    }
+    return null;
+  };
+
+  const parseAuthDataFlags = (authenticatorData: string): number => {
+    const bytes = fromBase64Url(authenticatorData);
+    if (bytes.length < 33) return 0;
+    return bytes[32];
+  };
+
+  const parseAuthDataCounter = (authenticatorData: string): number => {
+    const bytes = fromBase64Url(authenticatorData);
+    if (bytes.length < 37) return 0;
+    return (bytes[33] << 24) | (bytes[34] << 16) | (bytes[35] << 8) | bytes[36];
+  };
+
+  const parseAuthDataRpIdHash = (authenticatorData: string): Uint8Array => {
+    const bytes = fromBase64Url(authenticatorData);
+    return bytes.slice(0, 32);
+  };
+
+  type ParsedAuthData = {
+    rpIdHash: Uint8Array;
+    flags: number;
+    counter: number;
+    credentialIdLength: number;
+    credentialId: Uint8Array;
+    credentialPublicKey: Uint8Array;
+  };
+
+  const parseAuthData = (authenticatorData: string): ParsedAuthData | null => {
+    try {
+      const bytes = fromBase64Url(authenticatorData);
+      if (bytes.length < 37) return null;
+      const rpIdHash = bytes.slice(0, 32);
+      const flags = bytes[32];
+      const counter = (bytes[33] << 24) | (bytes[34] << 16) | (bytes[35] << 8) | bytes[36];
+
+      let offset = 37;
+      let credentialId: Uint8Array | null = null;
+      let credentialIdLength = 0;
+      let credentialPublicKey: Uint8Array | null = null;
+
+      if (flags & 0x40) { // attested credential data
+        if (offset + 18 > bytes.length) return null;
+        // aaguid (16) + credentialIdLength (2)
+        credentialIdLength = (bytes[offset + 16] << 8) | bytes[offset + 17];
+        offset += 18;
+        if (offset + credentialIdLength > bytes.length) return null;
+        credentialId = bytes.slice(offset, offset + credentialIdLength);
+        offset += credentialIdLength;
+        // Remaining bytes are the credential public key (CBOR)
+        credentialPublicKey = bytes.slice(offset);
+      }
+
+      return { rpIdHash, flags, counter, credentialIdLength, credentialId: credentialId || new Uint8Array(0), credentialPublicKey: credentialPublicKey || new Uint8Array(0) };
+    } catch {
+      return null;
+    }
+  };
+
+  type ParsedAttestation = {
+    authData: ParsedAuthData;
+  };
+
+  const parseAttestationObject = (attestationObject: string): ParsedAttestation | null => {
+    try {
+      const bytes = fromBase64Url(attestationObject);
+      const decoded = decodeCbor(bytes);
+      if (!decoded || typeof decoded !== 'object') return null;
+      const authDataRaw = decoded.authBuf || decoded.authData;
+      if (!authDataRaw || !(authDataRaw instanceof Uint8Array)) return null;
+
+      const authDataBase64 = toBase64Url(authDataRaw);
+      const authData = parseAuthData(authDataBase64);
+      if (!authData) return null;
+
+      return { authData };
+    } catch {
+      return null;
+    }
+  };
+
+  type CoseKeyInfo = {
+    kty: number;
+    alg: number;
+    crv: number;
+    x: Uint8Array;
+    y?: Uint8Array;
+    n?: Uint8Array;
+    e?: Uint8Array;
+    curve: string;
+  };
+
+  const parseCosePublicKey = (data: Uint8Array): CoseKeyInfo | null => {
+    try {
+      const decoded = decodeCbor(data);
+      if (!decoded || typeof decoded !== 'object') return null;
+
+      const kty = Number(decoded[1]);
+      const alg = Number(decoded[3]);
+
+      if (kty === 2) { // EC2
+        const crv = Number(decoded[-1]);
+        const x = decoded[-2];
+        const y = decoded[-3];
+        if (!(x instanceof Uint8Array)) return null;
+
+        let curve = 'P-256';
+        if (crv === 1) curve = 'P-256';
+        else if (crv === 2) curve = 'P-384';
+        else if (crv === 3) curve = 'P-521';
+
+        return { kty, alg, crv, x, y: y instanceof Uint8Array ? y : undefined, curve };
+      }
+
+      if (kty === 3) { // RSA
+        const n = decoded[-1];
+        const e = decoded[-2];
+        if (!(n instanceof Uint8Array) || !(e instanceof Uint8Array)) return null;
+        return { kty, alg, crv: 0, x: new Uint8Array(0), n, e, curve: 'RSA' };
+      }
+
+      if (kty === 4) { // OKP (Ed25519)
+        const crv = Number(decoded[-1]);
+        const x = decoded[-2];
+        if (!(x instanceof Uint8Array)) return null;
+        return { kty, alg, crv, x, curve: crv === 6 ? 'Ed25519' : 'unknown' };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const coseKeyToCryptoKey = async (coseKey: CoseKeyInfo): Promise<CryptoKey | null> => {
+    try {
+      if (coseKey.kty === 2) { // EC2
+        if (coseKey.y) {
+          // Uncompressed point format
+          const point = new Uint8Array(65);
+          point[0] = 0x04; // uncompressed
+          // Pad x and y to correct length for curve
+          const expectedLength = coseKey.curve === 'P-384' ? 48 : coseKey.curve === 'P-521' ? 66 : 32;
+          if (coseKey.x.length <= expectedLength && coseKey.y.length <= expectedLength) {
+            const xPad = expectedLength - coseKey.x.length;
+            const yPad = expectedLength - coseKey.y.length;
+            point.set(coseKey.x, 1 + xPad);
+            point.set(coseKey.y, 1 + expectedLength + yPad);
+
+            const namedCurve = coseKey.curve === 'P-384' ? 'P-384' : 'P-256';
+            return crypto.subtle.importKey(
+              'raw',
+              point.buffer,
+              { name: 'ECDSA', namedCurve },
+              true,
+              ['verify']
+            );
+          }
+        }
+      }
+
+      if (coseKey.kty === 3 && coseKey.n && coseKey.e) { // RSA
+        const jwk: JsonWebKey = {
+          kty: 'RSA',
+          alg: coseKey.alg === -257 ? 'RS256' : 'PS256',
+          n: toBase64Url(coseKey.n).replace(/-/g, '+').replace(/_/g, '/'),
+          e: toBase64Url(coseKey.e).replace(/-/g, '+').replace(/_/g, '/'),
+          ext: true
+        };
+        return crypto.subtle.importKey(
+          'jwk',
+          jwk,
+          { name: 'RSA-PSS', hash: 'SHA-256' },
+          true,
+          ['verify']
+        );
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  };
   app.get('/api/auth/setup', async (c) => {
     const ready = await hasUsableEmailAccount(c.env.DB);
     return c.json({ requires_setup: !ready });
@@ -1465,7 +1846,20 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const userRole = normalizeRole((user as any).role);
     const totpEnabled = Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret);
     const hasLoggedInBefore = Boolean((user as any).has_logged_in_before);
-    if (userRole === 'admin' && !totpEnabled && hasLoggedInBefore) {
+
+    // Check if user has passkeys registered
+    let hasPasskeys = false;
+    try {
+      await ensurePasskeysTable(c.env.DB);
+      const passkeyCheck = await c.env.DB.prepare(
+        'SELECT 1 FROM auth_passkeys WHERE user_id = ? LIMIT 1'
+      ).bind((user as any).id as string).first();
+      hasPasskeys = Boolean(passkeyCheck);
+    } catch {
+      // passkeys table may not exist yet
+    }
+
+    if (userRole === 'admin' && !totpEnabled && !hasPasskeys && hasLoggedInBefore) {
       await recordLoginAttempt(c, {
         email,
         success: false,
@@ -1522,9 +1916,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       email,
       masked_email: maskEmail(email),
       methods: totpEnabled
-        ? (userRole === 'admin' ? ['totp'] : ['totp', 'email'])
-        : ['email'],
+        ? (userRole === 'admin' ? (hasPasskeys ? ['totp', 'passkey'] : ['totp']) : (hasPasskeys ? ['totp', 'email', 'passkey'] : ['totp', 'email']))
+        : (hasPasskeys ? ['email', 'passkey'] : ['email']),
       preferred_method: totpEnabled ? 'totp' : 'email',
+      passkey_available: hasPasskeys,
       email_challenge_id: emailChallengeId,
       delivered: emailDelivered,
       ...(debugMfaCode ? { debug_mfa_code: debugMfaCode } : {})
@@ -2184,12 +2579,26 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const email = ((user as any).email as string | null) ?? ((user as any).username as string);
+
+    // Check passkey count
+    let passkeyCount = 0;
+    try {
+      await ensurePasskeysTable(c.env.DB);
+      const passkeyResult = await c.env.DB.prepare(
+        'SELECT COUNT(*) as count FROM auth_passkeys WHERE user_id = ?'
+      ).bind(sessionUser.userId).first();
+      passkeyCount = Number((passkeyResult as any)?.count ?? 0);
+    } catch {
+      // passkeys table may not exist yet
+    }
+
     return c.json({
       totp_enabled: Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret),
       totp_enabled_at: userSchema.hasMfaTotpEnabledAt ? (((user as any).mfa_totp_enabled_at as string | null) ?? null) : null,
       pending_setup: Boolean(userSchema.hasMfaTotpPendingExpiresAt && (user as any).mfa_totp_pending_expires_at),
       pending_expires_at: userSchema.hasMfaTotpPendingExpiresAt ? (((user as any).mfa_totp_pending_expires_at as string | null) ?? null) : null,
       email_fallback_enabled: sessionUser.role !== 'admin',
+      passkey_count: passkeyCount,
       email,
       masked_email: maskEmail(email)
     });
@@ -3056,5 +3465,493 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
     return c.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Passkey (WebAuthn) endpoints
+  // ---------------------------------------------------------------------------
+
+  app.get('/api/auth/passkey/register/begin', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const registerIp = getRequestIpAddress(c) || 'unknown-ip';
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'passkey_register',
+      limiterKey: `${sessionUser.userId}:${registerIp}`,
+      ...PASSKEY_REGISTER_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      return c.json({ error: 'Too many registration attempts. Please try again later.' }, 429);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const challenge = randomBase64Url(32);
+    const userIdBuffer = fromBase64Url(sessionUser.userId.replace(/-/g, ''));
+    const userIdBase64 = toBase64Url(userIdBuffer);
+
+    // Get existing credentials to exclude
+    const existing = await c.env.DB.prepare(
+      'SELECT credential_id FROM auth_passkeys WHERE user_id = ?'
+    ).bind(sessionUser.userId).all();
+    const excludeCredentials = (existing.results as Array<Record<string, unknown>>)
+      .map(row => ({ id: String(row.credential_id) }));
+
+    const rpId = getRpId(c.env);
+    const timeout = 60000;
+
+    return c.json({
+      challenge,
+      rp: { id: rpId, name: 'Clan Node' },
+      user: {
+        id: userIdBase64,
+        name: sessionUser.username,
+        displayName: sessionUser.username
+      },
+      pubKeyCredParams: [
+        { alg: -7, type: 'public-key' },
+        { alg: -257, type: 'public-key' }
+      ],
+      timeout,
+      attestation: 'none',
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+        requireResidentKey: false
+      },
+      excludeCredentials: excludeCredentials.map(cred => ({
+        id: cred.id,
+        type: 'public-key' as const,
+        transports: ['internal', 'hybrid'] as string[]
+      }))
+    });
+  });
+
+  app.post('/api/auth/passkey/register/finish', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const body = await c.req.json();
+    const credentialId = normalizeIdentifier((body as any)?.id);
+    const rawId = normalizeIdentifier((body as any)?.rawId);
+    const clientDataJson = normalizeIdentifier((body as any)?.response?.clientDataJSON);
+    const attestationObject = normalizeIdentifier((body as any)?.response?.attestationObject);
+    const authenticatorData = normalizeIdentifier((body as any)?.response?.authenticatorData);
+    const publicKey = normalizeIdentifier((body as any)?.response?.publicKey);
+    const alg = Number((body as any)?.response?.alg) || -7;
+    const name = normalizeIdentifier((body as any)?.name) || undefined;
+
+    if (!credentialId || !clientDataJson) {
+      return c.json({ error: 'credential id and client data are required' }, 400);
+    }
+
+    const expectedRpId = getRpId(c.env);
+
+    // Verify client data
+    const clientData = parseClientDataJson(clientDataJson);
+    if (!clientData) {
+      return c.json({ error: 'Invalid client data' }, 400);
+    }
+    if (clientData.type !== 'webauthn.create') {
+      return c.json({ error: 'Invalid client data type' }, 400);
+    }
+    if (clientData.origin !== getExpectedOrigin(c.env)) {
+      return c.json({ error: 'Invalid origin' }, 400);
+    }
+
+    let credentialPublicKey: Uint8Array;
+    let authDataFlags: number;
+    let authDataCounter: number;
+
+    if (attestationObject) {
+      // Full attestation flow
+      const attestation = parseAttestationObject(attestationObject);
+      if (!attestation) {
+        return c.json({ error: 'Invalid attestation object' }, 400);
+      }
+      authDataFlags = attestation.authData.flags;
+      authDataCounter = attestation.authData.counter;
+
+      // Verify RP ID hash
+      const rpIdHash = await sha256Raw(expectedRpId);
+      if (!bytesEqual(rpIdHash, attestation.authData.rpIdHash)) {
+        return c.json({ error: 'Invalid RP ID' }, 400);
+      }
+
+      credentialPublicKey = attestation.authData.credentialPublicKey;
+    } else if (authenticatorData && publicKey) {
+      // Simplified flow (client sends parsed data)
+      authDataFlags = parseAuthDataFlags(authenticatorData);
+      authDataCounter = parseAuthDataCounter(authenticatorData);
+
+      const rpIdHash = await sha256Raw(expectedRpId);
+      const authDataRpIdHash = parseAuthDataRpIdHash(authenticatorData);
+      if (!bytesEqual(rpIdHash, authDataRpIdHash)) {
+        return c.json({ error: 'Invalid RP ID' }, 400);
+      }
+
+      credentialPublicKey = fromBase64Url(publicKey);
+    } else {
+      return c.json({ error: 'attestation object or authenticator data + public key is required' }, 400);
+    }
+
+    // Verify user was present
+    if (!(authDataFlags & 0x01)) {
+      return c.json({ error: 'User presence not verified' }, 400);
+    }
+
+    const nowIso = new Date().toISOString();
+    const passkeyId = crypto.randomUUID();
+
+    await c.env.DB.prepare(
+      `INSERT INTO auth_passkeys (
+        id, user_id, credential_id, credential_public_key, algorithm, counter,
+        device_type, backup_eligible, backup_state, name, last_used_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      passkeyId,
+      sessionUser.userId,
+      credentialId,
+      toBase64Url(credentialPublicKey),
+      alg,
+      authDataCounter,
+      authDataFlags & 0x08 ? 'multi_device' : 'single_device',
+      authDataFlags & 0x40 ? 1 : 0,
+      authDataFlags & 0x40 ? 1 : 0,
+      name || null,
+      nowIso,
+      nowIso
+    ).run();
+
+    await recordAuditLog(c, {
+      action: 'passkey_register',
+      resourceType: 'auth',
+      resourceId: sessionUser.userId,
+      summary: `註冊 Passkey ${sessionUser.username}`,
+      details: {
+        passkey_id: passkeyId,
+        name: name || null,
+        device_type: authDataFlags & 0x08 ? 'multi_device' : 'single_device'
+      }
+    });
+
+    return c.json({ ok: true, name: name || 'Passkey' });
+  });
+
+  app.get('/api/auth/passkey/login/begin', async (c) => {
+    const loginIp = getRequestIpAddress(c) || 'unknown-ip';
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'passkey_login',
+      limiterKey: loginIp,
+      ...PASSKEY_LOGIN_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      return c.json({ error: 'Too many login attempts. Please try again later.' }, 429);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const challenge = randomBase64Url(32);
+    const rpId = getRpId(c.env);
+
+    // Get all known credentials for conditional UI
+    const allCredentials = await c.env.DB.prepare(
+      'SELECT credential_id FROM auth_passkeys'
+    ).all();
+    const allowCredentials = (allCredentials.results as Array<Record<string, unknown>>)
+      .map(row => ({ id: String(row.credential_id) }));
+
+    return c.json({
+      challenge,
+      rpId,
+      timeout: 60000,
+      userVerification: 'preferred',
+      allowCredentials: allowCredentials.slice(0, 30).map(cred => ({
+        id: cred.id,
+        type: 'public-key' as const,
+        transports: ['internal', 'hybrid', 'cable', 'ble', 'nfc', 'usb'] as string[]
+      }))
+    });
+  });
+
+  app.post('/api/auth/passkey/login/finish', async (c) => {
+    await ensurePasskeysTable(c.env.DB);
+
+    const body = await c.req.json();
+    const credentialId = normalizeIdentifier((body as any)?.id);
+    const rawId = normalizeIdentifier((body as any)?.rawId);
+    const clientDataJson = normalizeIdentifier((body as any)?.response?.clientDataJSON);
+    const authenticatorData = normalizeIdentifier((body as any)?.response?.authenticatorData);
+    const signature = normalizeIdentifier((body as any)?.response?.signature);
+    const userHandle = normalizeIdentifier((body as any)?.userHandle);
+
+    if (!credentialId || !clientDataJson || !authenticatorData || !signature) {
+      return c.json({ error: 'credential id, client data, authenticator data, and signature are required' }, 400);
+    }
+
+    // Verify client data
+    const clientData = parseClientDataJson(clientDataJson);
+    if (!clientData) {
+      return c.json({ error: 'Invalid client data' }, 400);
+    }
+    if (clientData.type !== 'webauthn.get') {
+      return c.json({ error: 'Invalid client data type' }, 400);
+    }
+    if (clientData.origin !== getExpectedOrigin(c.env)) {
+      return c.json({ error: 'Invalid origin' }, 400);
+    }
+
+    // Look up the passkey
+    const passkey = await c.env.DB.prepare(
+      'SELECT id, user_id, credential_public_key, algorithm, counter, backup_eligible, backup_state, name, last_used_at'
+      + ' FROM auth_passkeys WHERE credential_id = ?'
+    ).bind(credentialId).first();
+
+    if (!passkey) {
+      await recordLoginAttempt(c, {
+        email: 'passkey-unknown',
+        success: false,
+        reason: 'passkey_not_found'
+      });
+      return c.json({ error: 'Invalid passkey' }, 401);
+    }
+
+    // If userHandle provided, verify it matches
+    if (userHandle) {
+      const userIdBuffer = fromBase64Url(userHandle);
+      const expectedUserId = String((passkey as any).user_id).replace(/-/g, '');
+      const expectedBuffer = fromBase64Url(expectedUserId);
+      // Compare lengths first
+      if (userIdBuffer.length !== expectedBuffer.length) {
+        return c.json({ error: 'Invalid user handle' }, 401);
+      }
+    }
+
+    // Verify signature
+    const publicKey = fromBase64Url((passkey as any).credential_public_key as string);
+    const algo = Number((passkey as any).algorithm) || -7;
+
+    const clientDataHash = await sha256Raw(clientDataJson);
+    const authDataBytes = fromBase64Url(authenticatorData);
+    const sigBytes = fromBase64Url(signature);
+
+    const message = new Uint8Array(authDataBytes.length + clientDataHash.length);
+    message.set(authDataBytes, 0);
+    message.set(clientDataHash, authDataBytes.length);
+
+    let isValid = false;
+    try {
+      const coseKey = parseCosePublicKey(publicKey);
+      if (coseKey) {
+        const publicKeyObj = await coseKeyToCryptoKey(coseKey);
+        if (publicKeyObj) {
+          const algorithm = algo === -257
+            ? { name: 'RSA-PSS', saltLength: 32 }
+            : { name: 'ECDSA', hash: 'SHA-256', namedCurve: coseKey.curve === 'P-384' ? 'P-384' : 'P-256' };
+
+          isValid = await crypto.subtle.verify(
+            algorithm,
+            publicKeyObj,
+            sigBytes,
+            message
+          );
+        }
+      }
+    } catch {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      await recordLoginAttempt(c, {
+        email: 'passkey-user',
+        success: false,
+        reason: 'passkey_signature_invalid',
+        userId: (passkey as any).user_id as string
+      });
+      return c.json({ error: 'Invalid passkey signature' }, 401);
+    }
+
+    // Verify counter (prevent cloned authenticators)
+    const storedCounter = Number((passkey as any).counter) || 0;
+    const authDataCounter = parseAuthDataCounter(authenticatorData);
+    if (storedCounter > 0 && authDataCounter <= storedCounter) {
+      // Counter didn't increase - possible clone. Allow but warn.
+      console.warn('Passkey counter did not increase:', { credentialId, storedCounter, authDataCounter });
+    }
+
+    const nowIso = new Date().toISOString();
+    await c.env.DB.prepare(
+      'UPDATE auth_passkeys SET counter = ?, last_used_at = ? WHERE id = ?'
+    ).bind(authDataCounter, nowIso, (passkey as any).id as string).run();
+
+    // Get user and create session
+    const user = await c.env.DB.prepare(
+      'SELECT id, username, role FROM users WHERE id = ?'
+    ).bind((passkey as any).user_id as string).first();
+
+    if (!user) {
+      return c.json({ error: 'User not found' }, 401);
+    }
+
+    const userRole = normalizeRole((user as any).role);
+    await createSession(c, {
+      id: (user as any).id as string,
+      username: (user as any).username as string,
+      role: userRole
+    });
+
+    await recordAuditLog(c, {
+      action: 'passkey_login_success',
+      resourceType: 'auth',
+      resourceId: (user as any).id as string,
+      summary: `Passkey 登入成功 ${(user as any).username as string}`,
+      details: {
+        passkey_id: (passkey as any).id as string,
+        passkey_name: ((passkey as any).name as string | null) || null,
+        ip_address: getRequestIpAddress(c),
+        user_agent: getRequestUserAgent(c)
+      }
+    });
+
+    await recordLoginAttempt(c, {
+      email: (user as any).username as string,
+      success: true,
+      reason: 'passkey_authenticated',
+      userId: (user as any).id as string,
+      role: userRole
+    });
+
+    const accountData = await getAccountById(c.env.DB, (user as any).id as string);
+    return c.json({
+      user: accountData?.account ?? {
+        id: (user as any).id,
+        username: (user as any).username,
+        email: (user as any).username,
+        role: userRole,
+        avatar_url: null
+      }
+    });
+  });
+
+  app.get('/api/auth/passkeys', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const { results } = await c.env.DB.prepare(
+      'SELECT id, credential_id, algorithm, counter, device_type, backup_eligible,'
+      + ' backup_state, name, last_used_at, created_at'
+      + ' FROM auth_passkeys WHERE user_id = ? ORDER BY created_at DESC'
+    ).bind(sessionUser.userId).all();
+
+    const passkeys = (results as Array<Record<string, unknown>>).map(row => ({
+      id: String(row.id),
+      credential_id: String(row.credential_id),
+      algorithm: Number(row.algorithm),
+      counter: Number(row.counter),
+      device_type: String(row.device_type),
+      backup_eligible: Boolean(Number(row.backup_eligible)),
+      backup_state: Boolean(Number(row.backup_state)),
+      name: ((row.name as string | null) ?? null),
+      last_used_at: ((row.last_used_at as string | null) ?? null),
+      created_at: String(row.created_at)
+    }));
+
+    return c.json(passkeys);
+  });
+
+  app.delete('/api/auth/passkeys/:id', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const id = c.req.param('id');
+    const existing = await c.env.DB.prepare(
+      'SELECT id, user_id, name FROM auth_passkeys WHERE id = ?'
+    ).bind(id).first();
+
+    if (!existing) {
+      return c.json({ error: 'Passkey not found' }, 404);
+    }
+    if ((existing as any).user_id !== sessionUser.userId) {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
+
+    // Prevent removing last passkey if user has no password
+    const user = await c.env.DB.prepare(
+      'SELECT password_hash FROM users WHERE id = ?'
+    ).bind(sessionUser.userId).first();
+    const hasOtherAuth = (user as any)?.password_hash && (user as any).password_hash !== INVITE_PENDING_PASSWORD_HASH;
+    const otherPasskeys = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM auth_passkeys WHERE user_id = ? AND id != ?'
+    ).bind(sessionUser.userId, id).first();
+    const hasOtherPasskeys = Number((otherPasskeys as any)?.count ?? 0) > 0;
+
+    if (!hasOtherAuth && !hasOtherPasskeys) {
+      return c.json({ error: 'Cannot remove last passkey when no password is set. Set a password first or register another passkey.' }, 400);
+    }
+
+    await c.env.DB.prepare('DELETE FROM auth_passkeys WHERE id = ?').bind(id).run();
+
+    await recordAuditLog(c, {
+      action: 'passkey_remove',
+      resourceType: 'auth',
+      resourceId: sessionUser.userId,
+      summary: `移除 Passkey ${sessionUser.username}`,
+      details: {
+        passkey_id: id,
+        passkey_name: ((existing as any).name as string | null) || null
+      }
+    });
+
+    return c.json({ ok: true });
+  });
+
+  app.patch('/api/auth/passkeys/:id', async (c) => {
+    const sessionUser = c.get('sessionUser');
+    if (!sessionUser) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    await ensurePasskeysTable(c.env.DB);
+
+    const id = c.req.param('id');
+    const existing = await c.env.DB.prepare(
+      'SELECT id, user_id FROM auth_passkeys WHERE id = ?'
+    ).bind(id).first();
+
+    if (!existing) {
+      return c.json({ error: 'Passkey not found' }, 404);
+    }
+    if ((existing as any).user_id !== sessionUser.userId) {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
+
+    const body = await c.req.json();
+    const name = normalizeIdentifier((body as any)?.name);
+    if (!name) {
+      return c.json({ error: 'name is required' }, 400);
+    }
+
+    await c.env.DB.prepare(
+      'UPDATE auth_passkeys SET name = ?, updated_at = ? WHERE id = ?'
+    ).bind(name, new Date().toISOString(), id).run();
+
+    return c.json({ ok: true, name });
   });
 }

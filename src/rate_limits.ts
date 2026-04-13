@@ -16,3 +16,5 @@ export const BACKUP_EXPORT_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts:
 export const BACKUP_IMPORT_RATE_LIMIT = { windowMs: 60 * 60 * 1000, maxAttempts: 3, blockMs: 60 * 60 * 1000 };
 export const MFA_VERIFY_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 10, blockMs: 15 * 60 * 1000 };
 export const INVITE_CREATE_RATE_LIMIT = { windowMs: 15 * 60 * 1000, maxAttempts: 10, blockMs: 15 * 60 * 1000 };
+export const PASSKEY_REGISTER_RATE_LIMIT = { windowMs: 10 * 60 * 1000, maxAttempts: 5, blockMs: 15 * 60 * 1000 };
+export const PASSKEY_LOGIN_RATE_LIMIT = { windowMs: 10 * 60 * 1000, maxAttempts: 10, blockMs: 15 * 60 * 1000 };
