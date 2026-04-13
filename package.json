@@ -11,7 +11,7 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "deploy:build": "VITE_PUBLIC_BASE=/ VITE_API_BASE=https://clan-node-production.pjiaquan.workers.dev npm --prefix frontend run build && npx wrangler --config wrangler.worker.toml deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master --commit-dirty=true",
+    "deploy:build": "VITE_PUBLIC_BASE=/ VITE_API_BASE= npm --prefix frontend run build && npx wrangler --config wrangler.worker.toml deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master --commit-dirty=true",
     "d1:create": "wrangler --config wrangler.worker.toml d1 create clan-db",
     "d1:migrate": "wrangler --config wrangler.worker.toml d1 execute clan-db --local --file=./migrations/schema.sql",
     "d1:migrate:prod": "wrangler --config wrangler.worker.toml d1 execute clan-db --file=./migrations/schema.sql",
