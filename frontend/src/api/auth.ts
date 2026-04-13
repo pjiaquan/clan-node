@@ -5,6 +5,7 @@ import type {
   AuthUser,
   ManagedUser,
   MfaStatus,
+  PasskeyCredentialItem,
   PendingMfaChallenge,
   UserInviteResult,
 } from '../types';
@@ -13,6 +14,25 @@ import { API_BASE, fetchWithAuth, parseErrorMessage } from './base';
 export type LoginResponse =
   | { user: AuthUser; mfa_required?: false }
   | ({ mfa_required: true } & PendingMfaChallenge);
+
+type PasskeyRegistrationBegin = {
+  challenge: string;
+  rp: { id: string; name: string };
+  user: { id: string; name: string; displayName: string };
+  pubKeyCredParams: Array<{ alg: number; type: 'public-key' }>;
+  timeout?: number;
+  attestation?: AttestationConveyancePreference;
+  authenticatorSelection?: AuthenticatorSelectionCriteria;
+  excludeCredentials?: Array<{ id: string; type: 'public-key'; transports?: AuthenticatorTransport[] }>;
+};
+
+type PasskeyLoginBegin = {
+  challenge: string;
+  rpId?: string;
+  timeout?: number;
+  userVerification?: UserVerificationRequirement;
+  allowCredentials?: Array<{ id: string; type: 'public-key'; transports?: AuthenticatorTransport[] }>;
+};
 
 export const authApi = {
   authMe: async (): Promise<{ user: AuthUser }> => {
@@ -124,6 +144,63 @@ export const authApi = {
     return res.json();
   },
 
+  beginPasskeyLogin: async (): Promise<PasskeyLoginBegin> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkey/login/begin`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  finishPasskeyLogin: async (payload: {
+    id: string;
+    rawId: string;
+    userHandle?: string;
+    response: {
+      clientDataJSON: string;
+      authenticatorData: string;
+      signature: string;
+    };
+  }): Promise<{ user: AuthUser }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkey/login/finish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  beginPasskeyRegistration: async (): Promise<PasskeyRegistrationBegin> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkey/register/begin`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  finishPasskeyRegistration: async (payload: {
+    id: string;
+    rawId: string;
+    name?: string;
+    response: {
+      clientDataJSON: string;
+      attestationObject: string;
+    };
+  }): Promise<{ ok: boolean; name: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkey/register/finish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
   verifyMfa: async (challengeId: string, code: string): Promise<{ user: AuthUser }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/verify-mfa`, {
       method: 'POST',
@@ -162,6 +239,36 @@ export const authApi = {
 
   fetchMfaStatus: async (): Promise<MfaStatus> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/mfa/status`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  fetchPasskeys: async (): Promise<PasskeyCredentialItem[]> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkeys`);
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  renamePasskey: async (id: string, name: string): Promise<{ ok: boolean; name: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkeys/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
+  deletePasskey: async (id: string): Promise<{ ok: boolean }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/passkeys/${id}`, {
+      method: 'DELETE',
+    });
     if (!res.ok) {
       throw new Error(await parseErrorMessage(res));
     }

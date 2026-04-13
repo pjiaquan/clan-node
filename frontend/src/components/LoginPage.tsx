@@ -6,9 +6,11 @@ interface LoginPageProps {
   error?: string | null;
   notice?: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
+  onLoginWithPasskey?: () => Promise<void>;
   onVerifyMfa?: (code: string) => Promise<void>;
   onUseEmailMfa?: () => Promise<void>;
   onUseTotpMfa?: () => void;
+  onUsePasskeyMfa?: () => Promise<void>;
   onCancelMfa?: () => void;
   pendingMfa?: PendingMfaChallenge | null;
   pendingMfaMethod?: 'totp' | 'email';
@@ -21,9 +23,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   error,
   notice,
   onLogin,
+  onLoginWithPasskey,
   onVerifyMfa,
   onUseEmailMfa,
   onUseTotpMfa,
+  onUsePasskeyMfa,
   pendingMfa = null,
   pendingMfaMethod = 'email',
   onResendVerification,
@@ -231,6 +235,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     {t('login.useAuthenticatorApp')}
                   </button>
                 )}
+                {pendingMfa.methods.includes('passkey') && onUsePasskeyMfa && (
+                  <button
+                    type="button"
+                    className="user-admin-btn secondary"
+                    onClick={() => { void onUsePasskeyMfa(); }}
+                    disabled={submitting}
+                  >
+                    {t('login.usePasskey')}
+                  </button>
+                )}
               </div>
             </form>
           ) : (
@@ -275,6 +289,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <button type="submit" className="btn-primary" disabled={submitting}>
                 {submitting ? t('login.signingIn') : t('login.signIn')}
               </button>
+              {onLoginWithPasskey && (
+                <button type="button" className="auth-secondary-btn" onClick={() => { void onLoginWithPasskey(); }} disabled={submitting}>
+                  {t('login.signInWithPasskey')}
+                </button>
+              )}
               {onForgotPassword && (
                 <button type="button" className="auth-secondary-btn" onClick={onForgotPassword} disabled={submitting}>
                   {t('login.forgotPassword')}

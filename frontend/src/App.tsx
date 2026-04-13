@@ -8,6 +8,7 @@ import {
   type GraphSettings,
 } from './graphSettings';
 import { useI18n } from './i18n';
+import { getPasskeyAssertion, isPasskeySupported, passkeyErrorMessage } from './utils/webauthn';
 import './App.css';
 
 type AppView = 'graph' | 'account' | 'users' | 'sessions' | 'notifications' | 'auditLogs' | 'kinshipLabels' | 'settings' | 'data';
@@ -418,6 +419,26 @@ function App() {
     }
   }, [t]);
 
+  const handlePasskeyLogin = useCallback(async () => {
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      const options = await api.beginPasskeyLogin();
+      const assertion = await getPasskeyAssertion(options);
+      const data = await api.finishPasskeyLogin(assertion);
+      setIsAuthed(true);
+      setAuthUser(data.user);
+      setPendingMfa(null);
+      setPendingMfaMethod('email');
+      setAuthNotice(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : passkeyErrorMessage(err);
+      setAuthError(message);
+      setIsAuthed(false);
+      setAuthUser(null);
+    }
+  }, []);
+
   const handleVerifyMfa = useCallback(async (code: string) => {
     if (!pendingMfa) return;
     setAuthError(null);
@@ -467,6 +488,10 @@ function App() {
     setAuthError(null);
     setAuthNotice(null);
   }, []);
+
+  const handleUsePasskeyMfa = useCallback(async () => {
+    await handlePasskeyLogin();
+  }, [handlePasskeyLogin]);
 
   const handleCancelMfa = useCallback(() => {
     setPendingMfa(null);
@@ -645,9 +670,11 @@ function App() {
           error={authError}
           notice={authNotice}
           onLogin={handleLogin}
+          onLoginWithPasskey={isPasskeySupported() ? handlePasskeyLogin : undefined}
           onVerifyMfa={handleVerifyMfa}
           onUseEmailMfa={handleUseEmailMfa}
           onUseTotpMfa={handleUseTotpMfa}
+          onUsePasskeyMfa={isPasskeySupported() ? handleUsePasskeyMfa : undefined}
           onCancelMfa={handleCancelMfa}
           pendingMfa={pendingMfa}
           pendingMfaMethod={pendingMfaMethod}

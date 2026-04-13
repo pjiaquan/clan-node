@@ -21,6 +21,7 @@ import { getUserSchemaSupport } from './schema';
 import type { UserSchemaSupport } from './schema';
 
 const SESSION_COOKIE = 'clan_session';
+const PASSKEY_CHALLENGE_COOKIE = 'clan_passkey_challenge';
 const textEncoder = new TextEncoder();
 const toBufferSource = (value: Uint8Array): ArrayBuffer =>
   Uint8Array.from(value).buffer;
@@ -162,11 +163,32 @@ async function hmacSha1(secret: Uint8Array, message: Uint8Array) {
   return new Uint8Array(signature);
 }
 
+async function hmacSha256(secret: Uint8Array, message: Uint8Array) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    toBufferSource(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, toBufferSource(message));
+  return new Uint8Array(signature);
+}
+
 export const timingSafeEqual = (left: string, right: string) => {
   if (left.length !== right.length) return false;
   let diff = 0;
   for (let i = 0; i < left.length; i += 1) {
     diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  }
+  return diff === 0;
+};
+
+const timingSafeEqualBytes = (left: Uint8Array, right: Uint8Array) => {
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i += 1) {
+    diff |= left[i] ^ right[i];
   }
   return diff === 0;
 };
@@ -180,6 +202,20 @@ const normalizeIdentifier = (value: unknown): string => {
 
 const normalizeEmail = (value: unknown): string => {
   return normalizeIdentifier(value).toLowerCase();
+};
+
+type PasskeyClientData = {
+  type: string;
+  challenge: string;
+  origin: string;
+  rawBytes: Uint8Array;
+};
+
+type PasskeyChallengeState = {
+  challenge: string;
+  flow: 'register' | 'login';
+  userId: string | null;
+  expiresAt: string;
 };
 
 const normalizeOtpCode = (value: unknown): string => {
@@ -1346,6 +1382,94 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     return new Uint8Array(digest);
   };
 
+  const sha256Bytes = async (input: Uint8Array): Promise<Uint8Array> => {
+    const digest = await crypto.subtle.digest('SHA-256', toBufferSource(input));
+    return new Uint8Array(digest);
+  };
+
+  const getPasskeyChallengeSecret = (env: Env): string | null => {
+    const candidates = [
+      env.AUTH_ENCRYPTION_KEY,
+      env.ADMIN_SETUP_TOKEN,
+      env.DUAL_WRITE_SHARED_SECRET
+    ];
+    for (const candidate of candidates) {
+      const normalized = candidate?.trim();
+      if (normalized) return normalized;
+    }
+    if (env.ENVIRONMENT === 'production') {
+      return null;
+    }
+    return 'dev-passkey-challenge-secret';
+  };
+
+  const setPasskeyChallengeCookie = async (
+    c: Context<AppBindings>,
+    input: { challenge: string; flow: PasskeyChallengeState['flow']; userId?: string | null }
+  ) => {
+    const secret = getPasskeyChallengeSecret(c.env);
+    if (!secret) {
+      throw new Error('Passkey challenge secret is not configured');
+    }
+    const state: PasskeyChallengeState = {
+      challenge: input.challenge,
+      flow: input.flow,
+      userId: input.userId ?? null,
+      expiresAt: new Date(Date.now() + PASSKEY_CHALLENGE_TTL_MS).toISOString()
+    };
+    const payload = toBase64Url(textEncoder.encode(JSON.stringify(state)));
+    const signature = toBase64Url(await hmacSha256(textEncoder.encode(secret), textEncoder.encode(payload)));
+    const isSecure = isSecureRequest(c.env);
+    setCookie(c, PASSKEY_CHALLENGE_COOKIE, `${payload}.${signature}`, {
+      httpOnly: true,
+      path: '/',
+      sameSite: isSecure ? 'None' : 'Lax',
+      secure: isSecure,
+      expires: new Date(state.expiresAt)
+    });
+    return state;
+  };
+
+  const clearPasskeyChallengeCookie = (c: Context<AppBindings>) => {
+    const isSecure = isSecureRequest(c.env);
+    deleteCookie(c, PASSKEY_CHALLENGE_COOKIE, {
+      path: '/',
+      sameSite: isSecure ? 'None' : 'Lax',
+      secure: isSecure
+    });
+  };
+
+  const getPasskeyChallengeState = async (c: Context<AppBindings>): Promise<PasskeyChallengeState | null> => {
+    const cookieValue = getCookie(c, PASSKEY_CHALLENGE_COOKIE);
+    if (!cookieValue) return null;
+    const secret = getPasskeyChallengeSecret(c.env);
+    if (!secret) return null;
+    const [payload, signature] = cookieValue.split('.');
+    if (!payload || !signature) return null;
+    const expected = await hmacSha256(textEncoder.encode(secret), textEncoder.encode(payload));
+    const actual = fromBase64Url(signature);
+    if (!timingSafeEqualBytes(expected, actual)) {
+      return null;
+    }
+    try {
+      const decoded = JSON.parse(new TextDecoder().decode(fromBase64Url(payload))) as PasskeyChallengeState;
+      if (!decoded || typeof decoded.challenge !== 'string' || typeof decoded.flow !== 'string' || typeof decoded.expiresAt !== 'string') {
+        return null;
+      }
+      if (Date.parse(decoded.expiresAt) <= Date.now()) {
+        return null;
+      }
+      return {
+        challenge: decoded.challenge,
+        flow: decoded.flow === 'register' ? 'register' : 'login',
+        userId: typeof decoded.userId === 'string' ? decoded.userId : null,
+        expiresAt: decoded.expiresAt
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
     if (a.length !== b.length) return false;
     let diff = 0;
@@ -1455,25 +1579,25 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     return decode();
   };
 
-  type ParsedClientData = {
-    type: string;
-    challenge: string;
-    origin: string;
-  };
-
-  const parseClientDataJson = (clientDataJson: string): ParsedClientData | null => {
+  const decodePasskeyClientData = (clientDataJson: string): PasskeyClientData | null => {
     try {
-      const json = new TextDecoder().decode(fromBase64Url(clientDataJson));
+      const rawBytes = fromBase64Url(clientDataJson);
+      const json = new TextDecoder().decode(rawBytes);
       const parsed = JSON.parse(json);
       if (typeof parsed.type === 'string' && typeof parsed.challenge === 'string' && typeof parsed.origin === 'string') {
-        return { type: parsed.type, challenge: parsed.challenge, origin: parsed.origin };
+        return { type: parsed.type, challenge: parsed.challenge, origin: parsed.origin, rawBytes };
       }
     } catch {
       // try parsing directly as JSON string
       try {
         const parsed = JSON.parse(clientDataJson);
         if (typeof parsed.type === 'string' && typeof parsed.challenge === 'string' && typeof parsed.origin === 'string') {
-          return { type: parsed.type, challenge: parsed.challenge, origin: parsed.origin };
+          return {
+            type: parsed.type,
+            challenge: parsed.challenge,
+            origin: parsed.origin,
+            rawBytes: textEncoder.encode(clientDataJson)
+          };
         }
       } catch {
         // ignored
@@ -1497,6 +1621,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   const parseAuthDataRpIdHash = (authenticatorData: string): Uint8Array => {
     const bytes = fromBase64Url(authenticatorData);
     return bytes.slice(0, 32);
+  };
+
+  const encodePasskeyUserHandle = (userId: string): string => (
+    toBase64Url(textEncoder.encode(userId))
+  );
+
+  const matchesPasskeyUserHandle = (userHandle: string, expectedUserId: string): boolean => {
+    try {
+      return bytesEqual(fromBase64Url(userHandle), textEncoder.encode(expectedUserId));
+    } catch {
+      return false;
+    }
   };
 
   type ParsedAuthData = {
@@ -1618,26 +1754,20 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     try {
       if (coseKey.kty === 2) { // EC2
         if (coseKey.y) {
-          // Uncompressed point format
-          const point = new Uint8Array(65);
-          point[0] = 0x04; // uncompressed
-          // Pad x and y to correct length for curve
-          const expectedLength = coseKey.curve === 'P-384' ? 48 : coseKey.curve === 'P-521' ? 66 : 32;
-          if (coseKey.x.length <= expectedLength && coseKey.y.length <= expectedLength) {
-            const xPad = expectedLength - coseKey.x.length;
-            const yPad = expectedLength - coseKey.y.length;
-            point.set(coseKey.x, 1 + xPad);
-            point.set(coseKey.y, 1 + expectedLength + yPad);
-
-            const namedCurve = coseKey.curve === 'P-384' ? 'P-384' : 'P-256';
-            return crypto.subtle.importKey(
-              'raw',
-              point.buffer,
-              { name: 'ECDSA', namedCurve },
-              true,
-              ['verify']
-            );
-          }
+          const namedCurve = coseKey.curve === 'P-384' ? 'P-384' : 'P-256';
+          return crypto.subtle.importKey(
+            'jwk',
+            {
+              kty: 'EC',
+              crv: namedCurve,
+              x: toBase64Url(coseKey.x),
+              y: toBase64Url(coseKey.y),
+              ext: true
+            },
+            { name: 'ECDSA', namedCurve },
+            true,
+            ['verify']
+          );
         }
       }
 
@@ -1645,14 +1775,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         const jwk: JsonWebKey = {
           kty: 'RSA',
           alg: coseKey.alg === -257 ? 'RS256' : 'PS256',
-          n: toBase64Url(coseKey.n).replace(/-/g, '+').replace(/_/g, '/'),
-          e: toBase64Url(coseKey.e).replace(/-/g, '+').replace(/_/g, '/'),
+          n: toBase64Url(coseKey.n),
+          e: toBase64Url(coseKey.e),
           ext: true
         };
         return crypto.subtle.importKey(
           'jwk',
           jwk,
-          { name: 'RSA-PSS', hash: 'SHA-256' },
+          coseKey.alg === -257
+            ? { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }
+            : { name: 'RSA-PSS', hash: 'SHA-256' },
           true,
           ['verify']
         );
@@ -3490,9 +3622,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     await ensurePasskeysTable(c.env.DB);
 
+    if (!getPasskeyChallengeSecret(c.env)) {
+      return c.json({ error: 'Server misconfiguration: passkey challenge secret is required' }, 503);
+    }
+
     const challenge = randomBase64Url(32);
-    const userIdBuffer = fromBase64Url(sessionUser.userId.replace(/-/g, ''));
-    const userIdBase64 = toBase64Url(userIdBuffer);
+    await setPasskeyChallengeCookie(c, {
+      challenge,
+      flow: 'register',
+      userId: sessionUser.userId
+    });
 
     // Get existing credentials to exclude
     const existing = await c.env.DB.prepare(
@@ -3508,7 +3647,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       challenge,
       rp: { id: rpId, name: 'Clan Node' },
       user: {
-        id: userIdBase64,
+        id: encodePasskeyUserHandle(sessionUser.userId),
         name: sessionUser.username,
         displayName: sessionUser.username
       },
@@ -3554,17 +3693,29 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const expectedRpId = getRpId(c.env);
+    const challengeState = await getPasskeyChallengeState(c);
+    if (!challengeState || challengeState.flow !== 'register' || challengeState.userId !== sessionUser.userId) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey registration challenge is missing or expired' }, 400);
+    }
 
     // Verify client data
-    const clientData = parseClientDataJson(clientDataJson);
+    const clientData = decodePasskeyClientData(clientDataJson);
     if (!clientData) {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid client data' }, 400);
     }
     if (clientData.type !== 'webauthn.create') {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid client data type' }, 400);
     }
     if (clientData.origin !== getExpectedOrigin(c.env)) {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid origin' }, 400);
+    }
+    if (!timingSafeEqual(clientData.challenge, challengeState.challenge)) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Invalid challenge' }, 400);
     }
 
     let credentialPublicKey: Uint8Array;
@@ -3575,6 +3726,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       // Full attestation flow
       const attestation = parseAttestationObject(attestationObject);
       if (!attestation) {
+        clearPasskeyChallengeCookie(c);
         return c.json({ error: 'Invalid attestation object' }, 400);
       }
       authDataFlags = attestation.authData.flags;
@@ -3583,6 +3735,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       // Verify RP ID hash
       const rpIdHash = await sha256Raw(expectedRpId);
       if (!bytesEqual(rpIdHash, attestation.authData.rpIdHash)) {
+        clearPasskeyChallengeCookie(c);
         return c.json({ error: 'Invalid RP ID' }, 400);
       }
 
@@ -3595,16 +3748,19 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       const rpIdHash = await sha256Raw(expectedRpId);
       const authDataRpIdHash = parseAuthDataRpIdHash(authenticatorData);
       if (!bytesEqual(rpIdHash, authDataRpIdHash)) {
+        clearPasskeyChallengeCookie(c);
         return c.json({ error: 'Invalid RP ID' }, 400);
       }
 
       credentialPublicKey = fromBase64Url(publicKey);
     } else {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'attestation object or authenticator data + public key is required' }, 400);
     }
 
     // Verify user was present
     if (!(authDataFlags & 0x01)) {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'User presence not verified' }, 400);
     }
 
@@ -3624,12 +3780,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       alg,
       authDataCounter,
       authDataFlags & 0x08 ? 'multi_device' : 'single_device',
-      authDataFlags & 0x40 ? 1 : 0,
-      authDataFlags & 0x40 ? 1 : 0,
+      authDataFlags & 0x08 ? 1 : 0,
+      authDataFlags & 0x10 ? 1 : 0,
       name || null,
       nowIso,
       nowIso
     ).run();
+    clearPasskeyChallengeCookie(c);
 
     await recordAuditLog(c, {
       action: 'passkey_register',
@@ -3660,7 +3817,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     await ensurePasskeysTable(c.env.DB);
 
+    if (!getPasskeyChallengeSecret(c.env)) {
+      return c.json({ error: 'Server misconfiguration: passkey challenge secret is required' }, 503);
+    }
+
     const challenge = randomBase64Url(32);
+    await setPasskeyChallengeCookie(c, { challenge, flow: 'login' });
     const rpId = getRpId(c.env);
 
     // Get all known credentials for conditional UI
@@ -3698,16 +3860,40 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'credential id, client data, authenticator data, and signature are required' }, 400);
     }
 
+    const expectedRpId = getRpId(c.env);
+    const expectedRpIdHash = await sha256Raw(expectedRpId);
+    const challengeState = await getPasskeyChallengeState(c);
+    if (!challengeState || challengeState.flow !== 'login') {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey login challenge is missing or expired' }, 400);
+    }
+
     // Verify client data
-    const clientData = parseClientDataJson(clientDataJson);
+    const clientData = decodePasskeyClientData(clientDataJson);
     if (!clientData) {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid client data' }, 400);
     }
     if (clientData.type !== 'webauthn.get') {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid client data type' }, 400);
     }
     if (clientData.origin !== getExpectedOrigin(c.env)) {
+      clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid origin' }, 400);
+    }
+    if (!timingSafeEqual(clientData.challenge, challengeState.challenge)) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Invalid challenge' }, 400);
+    }
+    if (!bytesEqual(expectedRpIdHash, parseAuthDataRpIdHash(authenticatorData))) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Invalid RP ID' }, 400);
+    }
+    const authDataFlags = parseAuthDataFlags(authenticatorData);
+    if (!(authDataFlags & 0x01)) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'User presence not verified' }, 400);
     }
 
     // Look up the passkey
@@ -3726,21 +3912,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     // If userHandle provided, verify it matches
-    if (userHandle) {
-      const userIdBuffer = fromBase64Url(userHandle);
-      const expectedUserId = String((passkey as any).user_id).replace(/-/g, '');
-      const expectedBuffer = fromBase64Url(expectedUserId);
-      // Compare lengths first
-      if (userIdBuffer.length !== expectedBuffer.length) {
-        return c.json({ error: 'Invalid user handle' }, 401);
-      }
+    if (userHandle && !matchesPasskeyUserHandle(userHandle, String((passkey as any).user_id))) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Invalid user handle' }, 401);
     }
 
     // Verify signature
     const publicKey = fromBase64Url((passkey as any).credential_public_key as string);
     const algo = Number((passkey as any).algorithm) || -7;
 
-    const clientDataHash = await sha256Raw(clientDataJson);
+    const clientDataHash = await sha256Bytes(clientData.rawBytes);
     const authDataBytes = fromBase64Url(authenticatorData);
     const sigBytes = fromBase64Url(signature);
 
@@ -3755,8 +3936,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         const publicKeyObj = await coseKeyToCryptoKey(coseKey);
         if (publicKeyObj) {
           const algorithm = algo === -257
-            ? { name: 'RSA-PSS', saltLength: 32 }
-            : { name: 'ECDSA', hash: 'SHA-256', namedCurve: coseKey.curve === 'P-384' ? 'P-384' : 'P-256' };
+            ? { name: 'RSASSA-PKCS1-v1_5' }
+            : { name: 'ECDSA', hash: 'SHA-256' };
 
           isValid = await crypto.subtle.verify(
             algorithm,
@@ -3771,6 +3952,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     if (!isValid) {
+      clearPasskeyChallengeCookie(c);
       await recordLoginAttempt(c, {
         email: 'passkey-user',
         success: false,
@@ -3792,6 +3974,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     await c.env.DB.prepare(
       'UPDATE auth_passkeys SET counter = ?, last_used_at = ? WHERE id = ?'
     ).bind(authDataCounter, nowIso, (passkey as any).id as string).run();
+    clearPasskeyChallengeCookie(c);
 
     // Get user and create session
     const user = await c.env.DB.prepare(

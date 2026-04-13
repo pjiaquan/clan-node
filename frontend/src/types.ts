@@ -117,8 +117,9 @@ export interface PendingMfaChallenge {
   session_id: string;
   email: string;
   masked_email: string;
-  methods: Array<'totp' | 'email'>;
+  methods: Array<'totp' | 'email' | 'passkey'>;
   preferred_method: 'totp' | 'email';
+  passkey_available?: boolean;
   email_challenge_id?: string | null;
   delivered?: boolean;
   debug_mfa_code?: string;
@@ -130,8 +131,22 @@ export interface MfaStatus {
   pending_setup: boolean;
   pending_expires_at: string | null;
   email_fallback_enabled: boolean;
+  passkey_count: number;
   email: string;
   masked_email: string;
+}
+
+export interface PasskeyCredentialItem {
+  id: string;
+  credential_id: string;
+  algorithm: number;
+  counter: number;
+  device_type: string;
+  backup_eligible: boolean;
+  backup_state: boolean;
+  name: string | null;
+  last_used_at: string | null;
+  created_at: string;
 }
 
 export interface ManagedUser {

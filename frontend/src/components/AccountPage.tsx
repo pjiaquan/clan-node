@@ -306,6 +306,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({
             <MfaSettingsSection
               currentUser={currentUser}
               onError={setError}
+              onNotice={setNotice}
             />
           </>
         )}
