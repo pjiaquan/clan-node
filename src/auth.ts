@@ -1173,7 +1173,6 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     || path.startsWith('/api/auth/resend-verification')
     || path.startsWith('/api/auth/forgot-password')
     || path.startsWith('/api/auth/reset-password')
-    || path.startsWith('/api/auth/passkey/register/begin')
     || path.startsWith('/api/auth/passkey/login')
   ) {
     return next();
