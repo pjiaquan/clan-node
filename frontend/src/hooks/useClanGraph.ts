@@ -100,7 +100,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     const initCenter = async () => {
       try {
         setError(null);
-        await loadLayerCenter(activeLayerId, setCenterIdState, setError);
+        await loadLayerCenter(activeLayer, activeLayerId, setCenterIdState, setError);
       } catch (error) {
         if (!cancelled) {
           setError(error instanceof Error ? error.message : 'Unknown error');
@@ -112,7 +112,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [activeLayerId, enabled]);
+  }, [activeLayer, activeLayerId, enabled]);
 
   useEffect(() => {
     if (!centerId || !activeLayerId || !enabled) return;

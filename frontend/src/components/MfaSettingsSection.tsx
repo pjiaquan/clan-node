@@ -317,9 +317,18 @@ export const MfaSettingsSection: React.FC<MfaSettingsSectionProps> = ({
         <div className="session-loading">{t('common.loading')}</div>
       ) : (
         <div className="session-mfa-card">
-          <p>{t('account.passkeyCount', { count: String(mfaStatus?.passkey_count ?? passkeys.length) })}</p>
+          <div className="passkey-summary-grid">
+            <div className="account-meta-card">
+              <span>{t('account.passkeyTitle')}</span>
+              <strong>{t('account.passkeyCount', { count: String(mfaStatus?.passkey_count ?? passkeys.length) })}</strong>
+            </div>
+            <div className="account-meta-card">
+              <span>{t('account.securityTitle')}</span>
+              <strong>{passkeySupported ? t('account.passkeyHint') : t('account.passkeyUnsupported')}</strong>
+            </div>
+          </div>
           {passkeys.length === 0 ? (
-            <p>{t('account.passkeyEmpty')}</p>
+            <p className="passkey-empty-state">{t('account.passkeyEmpty')}</p>
           ) : (
             <div className="passkey-list">
               {passkeys.map((passkey) => (
@@ -339,8 +348,12 @@ export const MfaSettingsSection: React.FC<MfaSettingsSectionProps> = ({
                     </div>
                   </div>
                   <div className="passkey-meta-grid">
-                    <span>{t('account.passkeyCreatedAt', { value: formatDate(passkey.created_at, locale) })}</span>
-                    <span>{t('account.passkeyLastUsedAt', { value: formatDate(passkey.last_used_at, locale) })}</span>
+                    <div className="passkey-meta-item">
+                      <span>{t('account.passkeyCreatedAt', { value: formatDate(passkey.created_at, locale) })}</span>
+                    </div>
+                    <div className="passkey-meta-item">
+                      <span>{t('account.passkeyLastUsedAt', { value: formatDate(passkey.last_used_at, locale) })}</span>
+                    </div>
                   </div>
                 </article>
               ))}

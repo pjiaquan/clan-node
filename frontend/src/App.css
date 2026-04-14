@@ -1247,25 +1247,21 @@
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   justify-content: center;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   background:
-    radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(15, 118, 110, 0.18), transparent 32%),
-    linear-gradient(145deg, #f7f1df 0%, #f6faf7 46%, #eef5ff 100%);
-  padding: clamp(1.25rem, 2vw, 2rem);
+    radial-gradient(circle at top center, rgba(15, 118, 110, 0.12), transparent 28%),
+    linear-gradient(145deg, #f8fafc 0%, #f3f7ff 100%);
+  padding: clamp(2rem, 4vw, 3.5rem) clamp(1rem, 2vw, 1.5rem) 1.5rem;
 }
 
 .login-shell {
-  width: min(1240px, 100%);
-  margin: auto 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 420px);
-  gap: clamp(1.25rem, 2vw, 2rem);
-  align-items: stretch;
+  width: min(430px, 100%);
+  margin: 0 auto;
+  display: block;
 }
 
 .landing-panel,
@@ -1453,7 +1449,7 @@
 
 .login-card {
   width: 100%;
-  padding: 1.6rem;
+  padding: 1.75rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1472,7 +1468,7 @@
 
 .login-logo {
   display: block;
-  width: min(164px, 42vw);
+  width: min(128px, 34vw);
   height: auto;
   margin: 0 auto;
   object-fit: contain;
@@ -1486,7 +1482,7 @@
 
 .login-card h2 {
   margin: 0;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   color: #1e293b;
 }
 
@@ -1502,6 +1498,10 @@
 
 .login-card .form-group {
   text-align: left;
+}
+
+.login-card input {
+  width: 100%;
 }
 
 .login-card .btn-primary {
@@ -3207,25 +3207,18 @@ button:disabled:hover {
   .login-page {
     align-items: flex-start;
     justify-content: center;
-    padding: 1rem 0.75rem;
-    padding-top: 6dvh;
+    padding: 1.25rem 0.85rem;
+    padding-top: 4dvh;
   }
 
   .login-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .landing-panel {
-    order: 2;
-  }
-
-  .login-card {
-    order: 1;
+    width: min(420px, 100%);
   }
 
   .login-card {
     width: min(420px, 100%);
     margin: 0 auto;
+    padding: 1.35rem;
   }
 
   .login-logo {
@@ -3822,6 +3815,12 @@ button:disabled:hover {
   border-color: rgba(148, 163, 184, 0.18);
 }
 
+:root[data-theme='dark'] .login-page {
+  background:
+    radial-gradient(circle at top center, rgba(15, 118, 110, 0.16), transparent 28%),
+    linear-gradient(160deg, #0b1220 0%, #111827 48%, #020617 100%);
+}
+
 :root[data-theme='dark'] .landing-eyebrow {
   background: rgba(148, 163, 184, 0.12);
   color: #e2e8f0;
@@ -4376,18 +4375,27 @@ button:disabled:hover {
   cursor: pointer;
 }
 
+.passkey-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
 .passkey-list {
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
+  margin-top: 1rem;
 }
 
 .passkey-card {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.95rem 1rem;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
   border: 1px solid var(--app-border);
   border-radius: 16px;
   background: rgba(248, 250, 252, 0.85);
+  grid-template-columns: minmax(0, 1fr);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 
 .passkey-card-head {
@@ -4402,20 +4410,36 @@ button:disabled:hover {
   margin: 0.35rem 0 0;
   color: var(--app-muted);
   font-size: 0.88rem;
+  line-height: 1.5;
 }
 
 .passkey-card-actions {
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .passkey-meta-grid {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.passkey-meta-item {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.16);
   color: var(--app-muted);
   font-size: 0.84rem;
+}
+
+.passkey-empty-state {
+  margin: 1rem 0 0;
+  color: var(--app-muted);
 }
 
 .account-meta-grid {

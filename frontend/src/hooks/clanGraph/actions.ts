@@ -18,6 +18,7 @@ type SetError = Dispatch<SetStateAction<string | null>>;
 type SetLoading = Dispatch<SetStateAction<boolean>>;
 
 export const loadLayerCenter = async (
+  layer: GraphLayer | null,
   layerId: string,
   setCenterIdState: SetCenterId,
   setError: SetError,
@@ -33,10 +34,8 @@ export const loadLayerCenter = async (
     // Ignore localStorage errors and fall back to API initialization.
   }
 
-  const people = await api.fetchPeople(layerId);
-  if (people.length) {
-    const hasDefault = people.some((person) => person.id === defaultCenterId);
-    const nextCenterId = hasDefault ? defaultCenterId : people[0].id;
+  const nextCenterId = layer?.center_id || defaultCenterId;
+  if (nextCenterId) {
     setCenterIdState(nextCenterId);
     persistCenterId(layerId, nextCenterId);
     queueLayerFocus(layerId, nextCenterId);

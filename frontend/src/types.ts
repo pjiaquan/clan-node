@@ -90,6 +90,7 @@ export interface GraphLayer {
   id: string;
   name: string;
   description?: string | null;
+  center_id?: string | null;
   created_at: string;
   updated_at: string;
   node_count: number;

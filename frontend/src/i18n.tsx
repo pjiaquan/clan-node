@@ -76,6 +76,8 @@ const MESSAGES: Record<Language, Record<string, string>> = {
     'relationship.in_law': '姻親',
 
     'login.prompt': '請先登入以查看家族譜圖',
+    'login.simplePrompt': '請使用帳號與密碼登入',
+    'login.username': '帳號',
     'login.email': 'Email',
     'login.password': '密碼',
     'login.signIn': '登入',
@@ -705,6 +707,8 @@ const MESSAGES: Record<Language, Record<string, string>> = {
     'relationship.in_law': 'In-law',
 
     'login.prompt': 'Sign in to view the family graph',
+    'login.simplePrompt': 'Sign in with your username and password',
+    'login.username': 'Username',
     'login.email': 'Email',
     'login.password': 'Password',
     'login.signIn': 'Sign in',
