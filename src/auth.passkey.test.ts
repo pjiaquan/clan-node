@@ -265,18 +265,29 @@ const concatBytes = (...values: Uint8Array[]) => {
 const encodeCborInteger = (value: number) => {
   if (value >= 0) {
     if (value < 24) return Uint8Array.of(value);
-    return Uint8Array.of(24, value);
+    if (value < 256) return Uint8Array.of(24, value);
+    const encoded = new Uint8Array(2);
+    new DataView(encoded.buffer).setUint16(0, value);
+    return concatBytes(Uint8Array.of(25), encoded);
   }
   const normalized = -1 - value;
   if (normalized < 24) return Uint8Array.of(0x20 | normalized);
-  return Uint8Array.of(0x38, normalized);
+  if (normalized < 256) return Uint8Array.of(0x38, normalized);
+  const encoded = new Uint8Array(2);
+  new DataView(encoded.buffer).setUint16(0, normalized);
+  return concatBytes(Uint8Array.of(0x39), encoded);
 };
 
 const encodeCborBytes = (value: Uint8Array) => {
   if (value.length < 24) {
     return concatBytes(Uint8Array.of(0x40 | value.length), value);
   }
-  return concatBytes(Uint8Array.of(0x58, value.length), value);
+  if (value.length < 256) {
+    return concatBytes(Uint8Array.of(0x58, value.length), value);
+  }
+  const length = new Uint8Array(2);
+  new DataView(length.buffer).setUint16(0, value.length);
+  return concatBytes(Uint8Array.of(0x59), length, value);
 };
 
 const encodeCoseEc2PublicKey = (x: Uint8Array, y: Uint8Array) => concatBytes(
@@ -286,6 +297,14 @@ const encodeCoseEc2PublicKey = (x: Uint8Array, y: Uint8Array) => concatBytes(
   encodeCborInteger(-1), encodeCborInteger(1),
   encodeCborInteger(-2), encodeCborBytes(x),
   encodeCborInteger(-3), encodeCborBytes(y)
+);
+
+const encodeCoseRsaPublicKey = (n: Uint8Array, e: Uint8Array) => concatBytes(
+  Uint8Array.of(0xa4),
+  encodeCborInteger(1), encodeCborInteger(3),
+  encodeCborInteger(3), encodeCborInteger(-257),
+  encodeCborInteger(-1), encodeCborBytes(n),
+  encodeCborInteger(-2), encodeCborBytes(e)
 );
 
 const createAuthenticatorData = async (rpId: string, counter: number, flags = 0x01) => {
@@ -449,4 +468,83 @@ test('passkey registration and login succeed with a real signed assertion', asyn
   assert.equal(loginJson.user.id, 'user-1');
   assert.equal(db.sessions.length, 1);
   assert.equal(db.passkeys.get('cred-1')?.counter, 2);
+});
+
+test('passkey registration stores RSA algorithm and login succeeds with an RSA assertion', async () => {
+  const { app, db, env } = createTestApp();
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256'
+    },
+    true,
+    ['sign', 'verify']
+  );
+  const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const n = Buffer.from(jwk.n ?? '', 'base64url');
+  const e = Buffer.from(jwk.e ?? '', 'base64url');
+  const cosePublicKey = encodeCoseRsaPublicKey(new Uint8Array(n), new Uint8Array(e));
+
+  const registerBegin = await app.request('/api/auth/passkey/register/begin', {}, env);
+  assert.equal(registerBegin.status, 200);
+  const registerCookie = getCookieHeader(registerBegin);
+  const registerBody = await registerBegin.json() as { challenge: string };
+  const registerAuthData = await createAuthenticatorData('localhost', 1);
+  const registerClientData = createClientDataJson('webauthn.create', String(registerBody.challenge), 'http://localhost:5173');
+
+  const registerFinish = await app.request('/api/auth/passkey/register/finish', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      cookie: registerCookie
+    },
+    body: JSON.stringify({
+      id: 'cred-rsa-1',
+      name: 'Security key',
+      response: {
+        clientDataJSON: registerClientData.encoded,
+        authenticatorData: toBase64Url(registerAuthData),
+        publicKey: toBase64Url(cosePublicKey)
+      }
+    })
+  }, env);
+
+  assert.equal(registerFinish.status, 200);
+  assert.equal(db.passkeys.get('cred-rsa-1')?.algorithm, -257);
+
+  const loginBegin = await app.request('/api/auth/passkey/login/begin', {}, env);
+  assert.equal(loginBegin.status, 200);
+  const loginCookie = getCookieHeader(loginBegin);
+  const loginBody = await loginBegin.json() as { challenge: string };
+  const loginAuthData = await createAuthenticatorData('localhost', 2);
+  const loginClientData = createClientDataJson('webauthn.get', String(loginBody.challenge), 'http://localhost:5173');
+  const loginClientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', loginClientData.raw));
+  const signedPayload = concatBytes(loginAuthData, loginClientHash);
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    keyPair.privateKey,
+    signedPayload
+  ));
+
+  const loginFinish = await app.request('/api/auth/passkey/login/finish', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      cookie: loginCookie
+    },
+    body: JSON.stringify({
+      id: 'cred-rsa-1',
+      response: {
+        clientDataJSON: loginClientData.encoded,
+        authenticatorData: toBase64Url(loginAuthData),
+        signature: toBase64Url(signature)
+      }
+    })
+  }, env);
+
+  assert.equal(loginFinish.status, 200);
+  assert.equal(db.sessions.length, 1);
+  assert.equal(db.passkeys.get('cred-rsa-1')?.counter, 2);
 });

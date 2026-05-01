@@ -3718,6 +3718,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     let credentialPublicKey: Uint8Array;
+    let credentialAlgorithm = alg;
     let authDataFlags: number;
     let authDataCounter: number;
 
@@ -3739,6 +3740,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
 
       credentialPublicKey = attestation.authData.credentialPublicKey;
+      credentialAlgorithm = parseCosePublicKey(credentialPublicKey)?.alg ?? alg;
     } else if (authenticatorData && publicKey) {
       // Simplified flow (client sends parsed data)
       authDataFlags = parseAuthDataFlags(authenticatorData);
@@ -3752,6 +3754,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
 
       credentialPublicKey = fromBase64Url(publicKey);
+      credentialAlgorithm = parseCosePublicKey(credentialPublicKey)?.alg ?? alg;
     } else {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'attestation object or authenticator data + public key is required' }, 400);
@@ -3776,7 +3779,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       sessionUser.userId,
       credentialId,
       toBase64Url(credentialPublicKey),
-      alg,
+      credentialAlgorithm,
       authDataCounter,
       authDataFlags & 0x08 ? 'multi_device' : 'single_device',
       authDataFlags & 0x08 ? 1 : 0,
