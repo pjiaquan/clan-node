@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import type { AppBindings, Gender, Person, Relationship, RelationshipType } from './types';
 import { safeParse, safeParseObject } from './utils';
-import { calculateKinship } from './kinship';
+import { calculateKinshipMany } from './kinship';
 import { loadKinshipLabelMap, resolveKinshipLabel, trackKinshipLabelDefaults } from './kinship_labels';
 import { createGraphRepository } from './d1_repositories';
 import {
@@ -121,6 +121,13 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       }));
       const kinshipLabelMap = await loadKinshipLabelMap(c.env.DB);
       const observedKinshipDefaults: Array<{ default_title: string; default_formal_title: string }> = [];
+      const kinshipResults = calculateKinshipMany({
+        centerId,
+        targetIds: people.map((person: any) => String(person.id)),
+        relationships: kinshipRelationships,
+        people: kinshipPeople,
+        centerPerson: decryptedCenter as any,
+      });
 
       // Calculate kinship titles for each person relative to center
       console.log('Calculating kinship titles...');
@@ -134,13 +141,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
             });
             return { ...person, title: resolved.title, formal_title: resolved.formalTitle };
           }
-          const { title, formalTitle } = calculateKinship({
-            centerId,
-            targetId: person.id,
-            relationships: kinshipRelationships,
-            people: kinshipPeople,
-            centerPerson: decryptedCenter as any,
-          });
+          const { title, formalTitle } = kinshipResults.get(String(person.id)) ?? { title: '未知', formalTitle: '未知' };
           observedKinshipDefaults.push({
             default_title: title,
             default_formal_title: formalTitle,

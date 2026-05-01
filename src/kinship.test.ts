@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateKinship } from './kinship';
+import { calculateKinship, calculateKinshipMany } from './kinship';
 import type { Person, Relationship } from './types';
 
 const people: Person[] = [
@@ -68,4 +68,23 @@ test('calculateKinship resolves cousin titles', () => {
 test('calculateKinship resolves child in-law via in_law edge', () => {
   const result = calculateKinship('me', 'daughter-in-law', relationships, people, centerPerson);
   assert.deepEqual(result, { title: '媳婦', formalTitle: '媳婦' });
+});
+
+test('calculateKinshipMany matches single-target calculation results', () => {
+  const targetIds = people.map((person) => person.id);
+  const batchResults = calculateKinshipMany({
+    centerId: 'me',
+    targetIds,
+    relationships,
+    people,
+    centerPerson,
+  });
+
+  for (const targetId of targetIds) {
+    assert.deepEqual(
+      batchResults.get(targetId),
+      calculateKinship('me', targetId, relationships, people, centerPerson),
+      targetId,
+    );
+  }
 });

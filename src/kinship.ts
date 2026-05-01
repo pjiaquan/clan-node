@@ -1,5 +1,6 @@
 import type { Person, Relationship } from './types';
 import {
+  type BatchKinshipCalculationContext,
   BreadthFirstKinshipCalculator,
   type KinshipCalculationContext,
   type KinshipCalculationResult,
@@ -8,7 +9,7 @@ import {
 
 const defaultKinshipCalculator = new BreadthFirstKinshipCalculator();
 
-export type { KinshipCalculationContext, KinshipCalculationResult, KinshipCalculator };
+export type { BatchKinshipCalculationContext, KinshipCalculationContext, KinshipCalculationResult, KinshipCalculator };
 export { BreadthFirstKinshipCalculator };
 
 export function calculateKinship(ctx: KinshipCalculationContext): KinshipCalculationResult;
@@ -38,3 +39,7 @@ export function calculateKinship(
 
   return defaultKinshipCalculator.calculate(context);
 }
+
+export const calculateKinshipMany = (ctx: BatchKinshipCalculationContext): Map<string, KinshipCalculationResult> => (
+  defaultKinshipCalculator.calculateMany(ctx)
+);

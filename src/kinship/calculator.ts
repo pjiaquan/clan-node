@@ -9,6 +9,10 @@ export type KinshipCalculationContext = {
   centerPerson: Person;
 };
 
+export type BatchKinshipCalculationContext = Omit<KinshipCalculationContext, 'targetId'> & {
+  targetIds: string[];
+};
+
 export type KinshipCalculationResult = {
   title: string;
   formalTitle: string;
@@ -32,17 +36,38 @@ type AdjacencyEdge = {
 export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   calculate(ctx: KinshipCalculationContext): KinshipCalculationResult {
     const { centerId, targetId, relationships, people, centerPerson } = ctx;
-    const directAncestorPath = this.findDirectAncestorPath(centerId, targetId, relationships);
+    const parentMap = this.buildParentMap(relationships);
+    const adjacency = this.buildAdjacency(relationships);
     const resolver = new KinshipTitleResolver(centerPerson, people, relationships);
+    return this.calculateWithIndexes(centerId, targetId, parentMap, adjacency, resolver);
+  }
 
-    if (directAncestorPath) {
-      return this.formatResult(resolver.resolve({ ...directAncestorPath, targetId }));
+  calculateMany(ctx: BatchKinshipCalculationContext): Map<string, KinshipCalculationResult> {
+    const { centerId, targetIds, relationships, people, centerPerson } = ctx;
+    const parentMap = this.buildParentMap(relationships);
+    const adjacency = this.buildAdjacency(relationships);
+    const resolver = new KinshipTitleResolver(centerPerson, people, relationships);
+    const results = new Map<string, KinshipCalculationResult>();
+
+    for (const targetId of targetIds) {
+      results.set(targetId, this.calculateWithIndexes(centerId, targetId, parentMap, adjacency, resolver));
     }
 
-    const bestPath = this.findShortestPreferredPath(centerId, targetId, relationships);
-    if (bestPath) {
-      return this.formatResult(resolver.resolve({ ...bestPath, targetId }));
-    }
+    return results;
+  }
+
+  private calculateWithIndexes(
+    centerId: string,
+    targetId: string,
+    parentMap: Map<string, string[]>,
+    adjacency: Map<string, AdjacencyEdge[]>,
+    resolver: KinshipTitleResolver,
+  ): KinshipCalculationResult {
+    const directAncestorPath = this.findDirectAncestorPath(centerId, targetId, parentMap);
+    if (directAncestorPath) return this.formatResult(resolver.resolve({ ...directAncestorPath, targetId }));
+
+    const bestPath = this.findShortestPreferredPath(centerId, targetId, adjacency);
+    if (bestPath) return this.formatResult(resolver.resolve({ ...bestPath, targetId }));
 
     return this.formatResult('未知');
   }
@@ -61,7 +86,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     return { title: trimmed, formalTitle: trimmed };
   }
 
-  private findDirectAncestorPath(centerId: string, targetId: string, relationships: Relationship[]) {
+  private buildParentMap(relationships: Relationship[]) {
     const parentMap = new Map<string, string[]>();
     relationships.forEach((relationship) => {
       if (relationship.type === 'parent_child') {
@@ -69,7 +94,10 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
         parentMap.get(relationship.to_person_id)?.push(relationship.from_person_id);
       }
     });
+    return parentMap;
+  }
 
+  private findDirectAncestorPath(centerId: string, targetId: string, parentMap: Map<string, string[]>) {
     const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
     const visited = new Set<string>([centerId]);
 
@@ -127,8 +155,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     return adjacency;
   }
 
-  private findShortestPreferredPath(centerId: string, targetId: string, relationships: Relationship[]) {
-    const adjacency = this.buildAdjacency(relationships);
+  private findShortestPreferredPath(centerId: string, targetId: string, adjacency: Map<string, AdjacencyEdge[]>) {
     const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
     const visited = new Set<string>([centerId]);
     let foundDepth: number | null = null;
