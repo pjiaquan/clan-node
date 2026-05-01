@@ -58,7 +58,18 @@ const normalizeAvatars = (avatars: any): Avatar[] => {
 };
 
 const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
-const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const ACCEPTED_AVATAR_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
+
+const isAcceptedAvatarFile = (file: File) => {
+  const type = file.type.toLowerCase();
+  if (type) {
+    return type.startsWith('image/') || ACCEPTED_AVATAR_TYPES.has(type);
+  }
+
+  const extension = file.name.split('.').pop()?.toLowerCase() || '';
+  return ACCEPTED_AVATAR_EXTENSIONS.has(extension);
+};
 
 const formatSaveError = (
   error: unknown,
@@ -540,7 +551,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       setSaveError(t('editPerson.errorImageTooLarge'));
       return;
     }
-    if (!ACCEPTED_AVATAR_TYPES.has(file.type)) {
+    if (!isAcceptedAvatarFile(file)) {
       setSaveError(t('editPerson.errorUnsupportedImage'));
       return;
     }
@@ -766,6 +777,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                 <div
                   ref={cropperRef}
                   className={`avatar-cropper ${avatarPreview ? 'has-image' : ''} ${isDragging ? 'dragging' : ''}`}
+                  onClick={() => {
+                    if (avatarImage || skipClickRef.current) return;
+                    fileInputRef.current?.click();
+                  }}
                   onPointerDown={(event) => {
                     if (!avatarImage || event.button !== 0) return;
                     event.preventDefault();
@@ -846,7 +861,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        accept="image/*"
                         onChange={(e) => {
                           handleFileSelect(e.target.files?.[0] || null);
                           e.currentTarget.value = '';
