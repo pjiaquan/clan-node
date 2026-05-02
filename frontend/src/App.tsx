@@ -222,13 +222,13 @@ function App() {
       setAuthUser(null);
       setPendingMfa(null);
       setPendingMfaMethod('email');
-      setAuthError(t('app.authExpired'));
+      setAuthError(null);
       setAuthNotice(null);
       navigateTo('graph');
     };
     window.addEventListener('clan:unauthorized', onUnauthorized as EventListener);
     return () => window.removeEventListener('clan:unauthorized', onUnauthorized as EventListener);
-  }, [isZh, navigateTo]);
+  }, [navigateTo]);
 
   useEffect(() => {
     persistPendingMfaState(pendingMfa ? {

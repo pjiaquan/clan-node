@@ -1142,8 +1142,8 @@ export function ClanGraph({
     void createRelationshipWithUndo(
       olderId,
       youngerId,
-      'bottom-s',
-      'top-t',
+      'left-s',
+      'right-t',
       'sibling'
     );
   }, [pendingSiblingOrderChoice, createRelationshipWithUndo]);

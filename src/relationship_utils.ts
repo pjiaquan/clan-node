@@ -9,22 +9,21 @@ type SiblingLink = {
   metadata: string;
 };
 
-const SIBLING_BY_AGE_METADATA = JSON.stringify({
-  sourceHandle: 'bottom-s',
-  targetHandle: 'top-t'
-});
-
-const SIBLING_DEFAULT_METADATA = JSON.stringify({
+const HORIZONTAL_RELATIONSHIP_METADATA = JSON.stringify({
   sourceHandle: 'left-s',
   targetHandle: 'right-t'
 });
+
+const SIBLING_BY_AGE_METADATA = HORIZONTAL_RELATIONSHIP_METADATA;
+
+const SIBLING_DEFAULT_METADATA = HORIZONTAL_RELATIONSHIP_METADATA;
 
 export const PARENT_CHILD_METADATA = JSON.stringify({
   sourceHandle: 'bottom-s',
   targetHandle: 'top-t'
 });
 
-export const SPOUSE_METADATA = SIBLING_BY_AGE_METADATA;
+export const SPOUSE_METADATA = HORIZONTAL_RELATIONSHIP_METADATA;
 
 export function trackInsertedRowId(result: any, collector?: number[]) {
   if (!collector) return;
