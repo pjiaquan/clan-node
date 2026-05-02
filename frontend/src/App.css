@@ -3627,6 +3627,11 @@ button:disabled:hover {
     display: none;
   }
 
+  .react-flow__panel.react-flow__controls,
+  .react-flow__minimap {
+    display: none;
+  }
+
   .search-box {
     flex: 1 1 auto;
     width: auto;
