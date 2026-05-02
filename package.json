@@ -26,6 +26,7 @@
     "siblings:fix": "node scripts/fix_siblings.mjs",
     "d1:merge": "node scripts/merge_d1_via_api.mjs",
     "type-check": "tsc --noEmit",
+    "test": "tsx --test $(find src -name '*.test.ts' -print)",
     "test:security": "tsx --test src/security.test.ts"
   },
   "repository": {

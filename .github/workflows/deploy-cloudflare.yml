@@ -47,8 +47,26 @@ jobs:
       - name: Type check backend
         run: npm run type-check
 
-      - name: Run backend security tests
-        run: npm run test:security
+      - name: Run backend tests
+        run: npm test
+
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+
+      - name: Run frontend tests
+        run: npm test --prefix frontend
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          build-args: |
+            VITE_API_BASE=
 
       - name: Build and deploy to Cloudflare
         run: npm run deploy:build

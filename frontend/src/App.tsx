@@ -362,7 +362,7 @@ function App() {
         } catch (error) {
           console.warn('Failed to persist pending focus:', error);
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setIsAuthed(false);
           setAuthUser(null);
