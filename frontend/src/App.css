@@ -1895,6 +1895,9 @@
   padding: 0.35rem 0;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.15);
   z-index: 1000;
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .header-mobile-label {
@@ -2054,8 +2057,11 @@
   background: #ffffff;
   border-radius: 10px;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
-  overflow: hidden;
   z-index: 40;
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mobile-search-item {

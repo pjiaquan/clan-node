@@ -3827,23 +3827,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     await setPasskeyChallengeCookie(c, { challenge, flow: 'login' });
     const rpId = getRpId(c.env);
 
-    // Get all known credentials for conditional UI
-    const allCredentials = await c.env.DB.prepare(
-      'SELECT credential_id FROM auth_passkeys'
-    ).all();
-    const allowCredentials = (allCredentials.results as Array<Record<string, unknown>>)
-      .map(row => ({ id: String(row.credential_id) }));
-
     return c.json({
       challenge,
       rpId,
       timeout: 60000,
-      userVerification: 'preferred',
-      allowCredentials: allowCredentials.slice(0, 30).map(cred => ({
-        id: cred.id,
-        type: 'public-key' as const,
-        transports: ['internal', 'hybrid', 'cable', 'ble', 'nfc', 'usb'] as string[]
-      }))
+      userVerification: 'preferred'
     });
   });
 
