@@ -6,4 +6,20 @@ frontend/node_modules
 dist
 frontend/dist
 backups
+.data
+.auto-claude
+.grok
 *.log
+
+# Env files
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+selfhost.env
+
+# IDE and OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db
