@@ -56,10 +56,16 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           .catch(err => console.error('Background center person migration failed:', err));
       }
 
-      // Get all people
-      console.log('Fetching all people...');
-      const peopleRaw = await graphRepository.listPeople(layerId, peopleSchema.hasEmail);
-      console.log(`Fetched ${peopleRaw.length} people`);
+      // Get all people, avatars, custom fields, and relationships concurrently
+      console.log('Fetching people, avatars, custom fields, and relationships concurrently...');
+      const [peopleRaw, avatarRows, customFieldRows, relationshipsRaw] = await Promise.all([
+        graphRepository.listPeople(layerId, peopleSchema.hasEmail),
+        graphRepository.listAvatarRows(layerId),
+        graphRepository.listCustomFieldRows(layerId),
+        graphRepository.listRelationships(layerId)
+      ]);
+      console.log(`Fetched ${peopleRaw.length} people, ${avatarRows.length} avatars, ${customFieldRows.length} custom fields, ${relationshipsRaw.length} relationships`);
+
       if (c.executionCtx) {
         c.executionCtx.waitUntil(
           Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
@@ -69,19 +75,22 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
           .catch(err => console.error('Background people migration failed:', err));
       }
-      const avatarRows = await graphRepository.listAvatarRows(layerId);
+
       const avatarMap = new Map<string, typeof avatarRows>();
       avatarRows.forEach((avatar) => {
         const list = avatarMap.get(avatar.person_id) || [];
         list.push(avatar);
         avatarMap.set(avatar.person_id, list);
       });
-      const verifiedEmailMap = await graphRepository.listVerifiedEmails(
-        peopleRaw.map((person) => person.email as string | null | undefined)
-      );
 
-      const customFieldRows = await graphRepository.listCustomFieldRows(layerId);
-      const decryptedCustomFieldRows = await decryptCustomFieldRows(c.env, customFieldRows);
+      // Decrypt custom fields and list verified emails concurrently
+      const [decryptedCustomFieldRows, verifiedEmailMap] = await Promise.all([
+        decryptCustomFieldRows(c.env, customFieldRows),
+        graphRepository.listVerifiedEmails(
+          peopleRaw.map((person) => person.email as string | null | undefined)
+        )
+      ]);
+
       if (c.executionCtx) {
         c.executionCtx.waitUntil(
           migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows)
@@ -126,11 +135,6 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         title: person.title,
         formal_title: person.formal_title
       }));
-
-      // Get all relationships
-      console.log('Fetching all relationships...');
-      const relationshipsRaw = await graphRepository.listRelationships(layerId);
-      console.log(`Fetched ${relationshipsRaw.length} relationships`);
 
       const relationships = relationshipsRaw.map((rel: any) => ({
         ...rel,

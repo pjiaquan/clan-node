@@ -142,11 +142,13 @@ export const protectPersonWriteFields = async (
 
 export const decryptPersonRow = async <T extends Record<string, unknown>>(env: Env, row: T): Promise<T> => {
   const next = { ...row } as Record<string, unknown>;
-  for (const field of PERSON_PROTECTED_FIELDS) {
-    if (field in next) {
-      next[field] = await decryptProtectedValue(env, (next[field] as string | null | undefined) ?? null);
-    }
-  }
+  await Promise.all(
+    PERSON_PROTECTED_FIELDS.map(async (field) => {
+      if (field in next) {
+        next[field] = await decryptProtectedValue(env, (next[field] as string | null | undefined) ?? null);
+      }
+    })
+  );
   return next as T;
 };
 
