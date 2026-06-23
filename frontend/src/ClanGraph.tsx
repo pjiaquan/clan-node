@@ -10,6 +10,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
   MarkerType,
+  type NodeChange,
 } from 'reactflow';
 import type { Person, Relationship } from './types';
 import { api } from './api';
@@ -2617,6 +2618,21 @@ export function ClanGraph({
   }, [graphData, concealedNodeIds, selectedEdge, dimIds, selectedEdgeFocusEdgeIds, isSelectedEdgeFocusActive, ctrlHoverConnectedEdgeIds, isCtrlHoverActive, isCoarsePointer, graphSettings, t, graphRenderContext]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const onNodesChangeCustom = useCallback((changes: NodeChange[]) => {
+    const lastRightClick = (window as any).__lastRightClickedNode;
+    if (lastRightClick && lastRightClick.wasSelected) {
+      const filteredChanges = changes.filter(change => {
+        if (change.type === 'select' && !change.selected) {
+          return false;
+        }
+        return true;
+      });
+      onNodesChange(filteredChanges);
+      return;
+    }
+    onNodesChange(changes);
+  }, [onNodesChange]);
+
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const selectedEdgeType = useMemo(() => {
     if (!graphData || !selectedEdge) return null;
@@ -3651,7 +3667,7 @@ export function ClanGraph({
           proOptions={{ hideAttribution: true }}
           defaultViewport={initialViewport ?? undefined}
           onInit={setReactFlowInstance}
-          onNodesChange={onNodesChange}
+          onNodesChange={onNodesChangeCustom}
           onEdgesChange={onEdgesChange}
           onConnect={allowNodeConnecting ? onConnect : undefined}
           onConnectStart={allowNodeConnecting ? onConnectStart : undefined}

@@ -118,9 +118,15 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
         } as React.CSSProperties}
         onMouseDown={(event) => {
           if (event.button === 2) {
-            if (selected) {
-              event.stopPropagation();
-            }
+            (window as any).__lastRightClickedNode = {
+              id: data.id,
+              wasSelected: selected
+            };
+            setTimeout(() => {
+              try {
+                delete (window as any).__lastRightClickedNode;
+              } catch (e) {}
+            }, 0);
           }
         }}
         onTouchStart={(event) => {
