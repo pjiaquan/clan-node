@@ -92,11 +92,11 @@ export class KinshipTitleResolver {
   }
 
   private getParentSiblingRank(parent: Person, sibling: Person) {
-    return this.rankComputer.getParentSiblingRank(parent, sibling);
+    return this.rankComputer.getSiblingRank(parent, sibling);
   }
 
   private getGrandparentSiblingRank(grandparent: Person, sibling: Person) {
-    return this.rankComputer.getGrandparentSiblingRank(grandparent, sibling);
+    return this.rankComputer.getSiblingRank(grandparent, sibling);
   }
 
   private isSpouseOfChild(parentId: string, personId: string) {

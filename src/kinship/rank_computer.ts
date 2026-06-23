@@ -15,14 +15,6 @@ export class SiblingRankComputer {
     return this.getRelativeSiblingRank(reference, sibling);
   }
 
-  getParentSiblingRank(parent: Person, sibling: Person): RelativeRank | null {
-    return this.getRelativeSiblingRank(parent, sibling);
-  }
-
-  getGrandparentSiblingRank(grandparent: Person, sibling: Person): RelativeRank | null {
-    return this.getRelativeSiblingRank(grandparent, sibling);
-  }
-
   private getRelativeSiblingRank(reference: Person, sibling: Person): RelativeRank | null {
     const referenceDob = reference.dob ? new Date(reference.dob).getTime() : 0;
     const siblingDob = sibling.dob ? new Date(sibling.dob).getTime() : 0;
