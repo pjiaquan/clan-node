@@ -257,6 +257,30 @@ const clearStoredLastEditedId = () => {
     console.warn('Failed to clear last edited id:', error);
   }
 };
+const getElementUnderEvent = (clientX: number, clientY: number) => {
+  let element = document.elementFromPoint(clientX, clientY);
+  if (!element) return null;
+
+  let nodeEl = element.closest('.person-node');
+  if (nodeEl) return nodeEl;
+
+  const overlays = document.querySelectorAll('.react-flow__nodesselection, .react-flow__selection');
+  const originalStyles = Array.from(overlays).map(el => {
+    const htmlEl = el as HTMLElement;
+    const original = htmlEl.style.pointerEvents;
+    htmlEl.style.pointerEvents = 'none';
+    return { el: htmlEl, original };
+  });
+
+  element = document.elementFromPoint(clientX, clientY);
+  nodeEl = element?.closest('.person-node') ?? null;
+
+  originalStyles.forEach(({ el, original }) => {
+    el.style.pointerEvents = original;
+  });
+
+  return nodeEl;
+};
 
 type ClanGraphProps = {
   username: string | null;
@@ -1408,6 +1432,31 @@ export function ClanGraph({
     },
     []
   );
+
+  const handleGlobalContextMenu = useCallback((event: React.MouseEvent) => {
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+      return;
+    }
+
+    const nodeEl = getElementUnderEvent(event.clientX, event.clientY);
+    if (nodeEl) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeId = nodeEl.getAttribute('data-id');
+      if (nodeId) {
+        const openUp = event.clientY > window.innerHeight * 0.6;
+        setContextMenu({
+          id: nodeId,
+          top: openUp ? undefined : event.clientY,
+          bottom: openUp ? window.innerHeight - event.clientY : undefined,
+          left: event.clientX,
+          openUp,
+        });
+      }
+    } else {
+      setContextMenu(null);
+    }
+  }, []);
 
   const openContextMenuAt = useCallback((id: string, x: number, y: number) => {
     const openUp = y > window.innerHeight * 0.6;
@@ -3659,7 +3708,11 @@ export function ClanGraph({
         }}
       />
 
-      <div className="flow-container" ref={flowWrapperRef}>
+      <div 
+        className="flow-container" 
+        ref={flowWrapperRef}
+        onContextMenuCapture={handleGlobalContextMenu}
+      >
         <ReactFlow
           nodes={nodesWithHighlights}
           edges={edges}
