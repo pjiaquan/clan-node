@@ -116,6 +116,13 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
           '--highlight-color-15': `${data.genderColor}26`,
           '--highlight-color-18': `${data.genderColor}2E`,
         } as React.CSSProperties}
+        onMouseDown={(event) => {
+          if (event.button === 2) {
+            if (selected) {
+              event.stopPropagation();
+            }
+          }
+        }}
         onTouchStart={(event) => {
           const touch = event.changedTouches[0];
           if (!touch) return;

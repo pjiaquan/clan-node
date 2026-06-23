@@ -1389,6 +1389,7 @@ export function ClanGraph({
     });
   }, [avatarBlobs]);
 
+
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
@@ -3357,6 +3358,67 @@ export function ClanGraph({
     setUndoStack(prev => [{ type: 'align', positions: previousPositions } as const, ...prev].slice(0, 10));
   }, [ensureEditable, nodes, selectedNodeIds, setNodes, updatePersonPosition]);
 
+  const alignToNodeHeight = useCallback((targetId: string) => {
+    if (!ensureEditable()) return;
+    const targetNode = nodes.find(node => node.id === targetId);
+    if (!targetNode) return;
+    const targetY = targetNode.position.y;
+
+    const ids = selectedNodeIds.includes(targetId)
+      ? selectedNodeIds
+      : [...selectedNodeIds, targetId];
+
+    if (ids.length < 2) return;
+
+    const selectedNodes = nodes.filter(node => ids.includes(node.id));
+    const previousPositions = selectedNodes.reduce<Record<string, { x: number; y: number }>>((acc, node) => {
+      acc[node.id] = { ...node.position };
+      return acc;
+    }, {});
+
+    setNodes((prev) => prev.map((node) => {
+      if (!ids.includes(node.id)) return node;
+      const position = { ...node.position, y: targetY };
+      updatePersonPosition(node.id, position);
+      return { ...node, position };
+    }));
+    setUndoStack(prev => [{ type: 'align', positions: previousPositions } as const, ...prev].slice(0, 10));
+  }, [ensureEditable, nodes, selectedNodeIds, setNodes, updatePersonPosition]);
+
+  const selectSameRowNodes = useCallback((targetId: string) => {
+    const targetNode = nodes.find(node => node.id === targetId);
+    if (!targetNode) return;
+    const targetY = targetNode.position.y;
+    const threshold = 80; // 80px threshold to capture slightly misaligned nodes
+    const rowNodeIds = new Set(
+      nodes
+        .filter(node => Math.abs(node.position.y - targetY) <= threshold)
+        .map(node => node.id)
+    );
+
+    setNodes((prev) => prev.map((node) => ({
+      ...node,
+      selected: rowNodeIds.has(node.id),
+    })));
+  }, [nodes, setNodes]);
+
+  const selectSameColumnNodes = useCallback((targetId: string) => {
+    const targetNode = nodes.find(node => node.id === targetId);
+    if (!targetNode) return;
+    const targetX = targetNode.position.x;
+    const threshold = 80; // 80px threshold to capture slightly misaligned nodes
+    const colNodeIds = new Set(
+      nodes
+        .filter(node => Math.abs(node.position.x - targetX) <= threshold)
+        .map(node => node.id)
+    );
+
+    setNodes((prev) => prev.map((node) => ({
+      ...node,
+      selected: colNodeIds.has(node.id),
+    })));
+  }, [nodes, setNodes]);
+
   useEffect(() => {
     setNodes((prev) => {
       const prevNodeMap = new Map(prev.map((node) => [node.id, node]));
@@ -3701,6 +3763,9 @@ export function ClanGraph({
             selectedCount={selectedNodeIds.length}
             onAlignHorizontal={() => alignSelectedNodes('horizontal')}
             onAlignVertical={() => alignSelectedNodes('vertical')}
+            onAlignToNodeHeight={alignToNodeHeight}
+            onSelectSameRowNodes={selectSameRowNodes}
+            onSelectSameColumnNodes={selectSameColumnNodes}
             onToggleDimSingle={(id) => {
               const isDimmed = dimIds.has(id);
               if (isDimmed) {

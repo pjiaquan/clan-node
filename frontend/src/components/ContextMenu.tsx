@@ -30,6 +30,9 @@ interface ContextMenuProps {
   selectedCount: number;
   onAlignHorizontal: () => void;
   onAlignVertical: () => void;
+  onAlignToNodeHeight: (id: string) => void;
+  onSelectSameRowNodes: (id: string) => void;
+  onSelectSameColumnNodes: (id: string) => void;
   dimRelativesActive: boolean;
   dimNonRelativesActive: boolean;
   dimSingleActive: boolean;
@@ -68,6 +71,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   selectedCount,
   onAlignHorizontal,
   onAlignVertical,
+  onAlignToNodeHeight,
+  onSelectSameRowNodes,
+  onSelectSameColumnNodes,
   dimRelativesActive,
   dimNonRelativesActive,
   dimSingleActive,
@@ -140,6 +146,32 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         {t('context.setCenter')}
       </button>
+      {canEdit && (
+        <>
+          <button
+            onClick={() => {
+              onSelectSameRowNodes(id);
+              onClose();
+            }}
+            style={menuItemStyle}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            {t('context.selectSameRowNodes')}
+          </button>
+          <button
+            onClick={() => {
+              onSelectSameColumnNodes(id);
+              onClose();
+            }}
+            style={menuItemStyle}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            {t('context.selectSameColumnNodes')}
+          </button>
+        </>
+      )}
       {canEdit && selectedCount > 1 && (
         <button
           onClick={() => {
@@ -164,6 +196,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
           {t('context.alignVertical')}
+        </button>
+      )}
+      {canEdit && selectedCount > 1 && (
+        <button
+          onClick={() => {
+            onAlignToNodeHeight(id);
+            onClose();
+          }}
+          style={menuItemStyle}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          {t('context.alignToNodeHeight')}
         </button>
       )}
       {canEdit && (
