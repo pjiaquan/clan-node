@@ -479,10 +479,12 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const handleClose = useCallback(() => {
     if (isSaving) return;
     if (isDirty) {
+      const confirmClose = window.confirm(t('editPerson.unsavedConfirm'));
+      if (!confirmClose) return;
       onUnsavedClose?.();
     }
     onClose();
-  }, [isDirty, isSaving, onClose, onUnsavedClose]);
+  }, [isDirty, isSaving, onClose, onUnsavedClose, t]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
