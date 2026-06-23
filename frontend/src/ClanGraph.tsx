@@ -1433,7 +1433,7 @@ export function ClanGraph({
     if (nodeEl) {
       event.preventDefault();
       event.stopPropagation();
-      const nodeId = nodeEl.getAttribute('data-id');
+      const nodeId = nodeEl.getAttribute('data-id') || nodeEl.closest('.react-flow__node')?.getAttribute('data-id');
       if (nodeId) {
         const openUp = event.clientY > window.innerHeight * 0.6;
         setContextMenu({

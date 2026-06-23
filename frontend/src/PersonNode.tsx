@@ -104,6 +104,7 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
       <Handle type="source" position={Position.Left} id="left-s" className={highlightHandles.has('left-s') ? 'handle-hot' : undefined} />
 
       <div
+        data-id={data.id}
         className={`person-node nopan ${data.interactionLocked ? 'nodrag' : ''} ${selected ? 'selected' : ''} ${data.isCenter ? 'center' : ''} ${data.flashCenter ? 'center-flash' : ''} ${data.flashSearch ? 'search-flash' : ''} ${data.focusHover ? 'focus-hover' : ''} ${isFloating ? 'floating' : ''}`}
         style={{
           borderColor: data.genderColor,
