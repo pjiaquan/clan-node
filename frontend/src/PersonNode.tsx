@@ -125,7 +125,9 @@ const PersonNode = memo(({ data, selected }: NodeProps) => {
             setTimeout(() => {
               try {
                 delete (window as any).__lastRightClickedNode;
-              } catch (e) {}
+              } catch {
+                // Ignore errors
+              }
             }, 0);
           }
         }}
