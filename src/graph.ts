@@ -66,16 +66,6 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       ]);
       console.log(`Fetched ${peopleRaw.length} people, ${avatarRows.length} avatars, ${customFieldRows.length} custom fields, ${relationshipsRaw.length} relationships`);
 
-      if (c.executionCtx) {
-        c.executionCtx.waitUntil(
-          Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
-            .catch(err => console.error('Background people migration failed:', err))
-        );
-      } else {
-        Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
-          .catch(err => console.error('Background people migration failed:', err));
-      }
-
       const avatarMap = new Map<string, typeof avatarRows>();
       avatarRows.forEach((avatar) => {
         const list = avatarMap.get(avatar.person_id) || [];
@@ -90,16 +80,6 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           peopleRaw.map((person) => person.email as string | null | undefined)
         )
       ]);
-
-      if (c.executionCtx) {
-        c.executionCtx.waitUntil(
-          migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows)
-            .catch(err => console.error('Background custom fields migration failed:', err))
-        );
-      } else {
-        migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows)
-          .catch(err => console.error('Background custom fields migration failed:', err));
-      }
       const customFieldMap = new Map<string, { label: string; value: string }[]>();
       decryptedCustomFieldRows.forEach((row: any) => {
         const list = customFieldMap.get(row.person_id) || [];

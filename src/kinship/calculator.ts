@@ -234,6 +234,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     const queue: { id: string; path: string[]; nodePath: string[] }[] = [
       { id: centerId, path: [], nodePath: [centerId] }
     ];
+    const visited = new Set<string>([centerId]);
 
     while (queue.length > 0) {
       const current = queue.shift()!;
@@ -242,11 +243,14 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
       }
       const parents = parentMap.get(current.id) || [];
       for (const parentId of parents) {
-        queue.push({
-          id: parentId,
-          path: [...current.path, 'up'],
-          nodePath: [...current.nodePath, parentId],
-        });
+        if (!visited.has(parentId)) {
+          visited.add(parentId);
+          queue.push({
+            id: parentId,
+            path: [...current.path, 'up'],
+            nodePath: [...current.nodePath, parentId],
+          });
+        }
       }
     }
     return paths;
