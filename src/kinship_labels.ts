@@ -165,22 +165,33 @@ export async function trackKinshipLabelDefaults(
   if (!rows.length) return;
   await ensureKinshipLabelsTable(db);
 
+  // Load existing labels to avoid redundant inserts
+  const existingRows = await listKinshipLabels(db);
+  const existingKeys = new Set(existingRows.map((r) => makeKey(r.default_title, r.default_formal_title)));
+
   const now = new Date().toISOString();
   const seen = new Set<string>();
+  const stmts: D1PreparedStatement[] = [];
+
   for (const row of rows) {
     const defaultTitle = normalizeText(row.default_title);
     const defaultFormalTitle = normalizeText(row.default_formal_title);
     if (!defaultTitle || !defaultFormalTitle) continue;
     const key = makeKey(defaultTitle, defaultFormalTitle);
-    if (seen.has(key)) continue;
+    if (seen.has(key) || existingKeys.has(key)) continue;
     seen.add(key);
-    await db.prepare(`
+
+    stmts.push(db.prepare(`
       INSERT OR IGNORE INTO kinship_labels (
         default_title, default_formal_title,
         custom_title, custom_formal_title,
         description, created_at, updated_at
       ) VALUES (?, ?, NULL, NULL, '', ?, ?)
-    `).bind(defaultTitle, defaultFormalTitle, now, now).run();
+    `).bind(defaultTitle, defaultFormalTitle, now, now));
+  }
+
+  if (stmts.length > 0) {
+    await db.batch(stmts);
   }
 }
 
