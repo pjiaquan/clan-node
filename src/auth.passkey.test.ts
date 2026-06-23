@@ -548,3 +548,92 @@ test('passkey registration stores RSA algorithm and login succeeds with an RSA a
   assert.equal(db.sessions.length, 1);
   assert.equal(db.passkeys.get('cred-rsa-1')?.counter, 2);
 });
+
+test('passkey login succeeds with an ECDSA DER assertion signature', async () => {
+  const { app, db, env } = createTestApp();
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify']
+  );
+  const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const x = Buffer.from(jwk.x ?? '', 'base64url');
+  const y = Buffer.from(jwk.y ?? '', 'base64url');
+  const cosePublicKey = encodeCoseEc2PublicKey(new Uint8Array(x), new Uint8Array(y));
+
+  const registerBegin = await app.request('/api/auth/passkey/register/begin', {}, env);
+  const registerCookie = getCookieHeader(registerBegin);
+  const registerBody = await registerBegin.json() as { challenge: string };
+  const registerAuthData = await createAuthenticatorData('localhost', 1);
+  const registerClientData = createClientDataJson('webauthn.create', String(registerBody.challenge), 'http://localhost:5173');
+
+  await app.request('/api/auth/passkey/register/finish', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: registerCookie },
+    body: JSON.stringify({
+      id: 'cred-der-1',
+      name: 'Mobile passkey',
+      response: {
+        clientDataJSON: registerClientData.encoded,
+        authenticatorData: toBase64Url(registerAuthData),
+        publicKey: toBase64Url(cosePublicKey)
+      }
+    })
+  }, env);
+
+  const loginBegin = await app.request('/api/auth/passkey/login/begin', {}, env);
+  const loginCookie = getCookieHeader(loginBegin);
+  const loginBody = await loginBegin.json() as { challenge: string };
+  const loginAuthData = await createAuthenticatorData('localhost', 2);
+  const loginClientData = createClientDataJson('webauthn.get', String(loginBody.challenge), 'http://localhost:5173');
+  const loginClientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', loginClientData.raw));
+  const signedPayload = concatBytes(loginAuthData, loginClientHash);
+  const signatureRaw = new Uint8Array(await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    keyPair.privateKey,
+    signedPayload
+  ));
+
+  // Convert raw ECDSA signature to DER format to simulate a real hardware key/browser
+  const r = signatureRaw.slice(0, 32);
+  const s = signatureRaw.slice(32, 64);
+  const formatInteger = (bytes: Uint8Array): Uint8Array => {
+    let start = 0;
+    while (start < bytes.length - 1 && bytes[start] === 0x00) start++;
+    let payload = bytes.slice(start);
+    if (payload[0] >= 0x80) {
+      const padded = new Uint8Array(payload.length + 1);
+      padded.set(payload, 1);
+      payload = padded;
+    }
+    const result = new Uint8Array(payload.length + 2);
+    result[0] = 0x02;
+    result[1] = payload.length;
+    result.set(payload, 2);
+    return result;
+  };
+  const rInt = formatInteger(r);
+  const sInt = formatInteger(s);
+  const signatureDer = new Uint8Array(rInt.length + sInt.length + 2);
+  signatureDer[0] = 0x30;
+  signatureDer[1] = rInt.length + sInt.length;
+  signatureDer.set(rInt, 2);
+  signatureDer.set(sInt, 2 + rInt.length);
+
+  const loginFinish = await app.request('/api/auth/passkey/login/finish', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: loginCookie },
+    body: JSON.stringify({
+      id: 'cred-der-1',
+      response: {
+        clientDataJSON: loginClientData.encoded,
+        authenticatorData: toBase64Url(loginAuthData),
+        signature: toBase64Url(signatureDer)
+      }
+    })
+  }, env);
+
+  assert.equal(loginFinish.status, 200);
+  assert.equal(db.sessions.length, 1);
+});
+

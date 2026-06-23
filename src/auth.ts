@@ -1794,6 +1794,43 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return null;
     }
   };
+
+  const derToRaw = (der: Uint8Array, keySize = 32): Uint8Array | null => {
+    try {
+      if (der[0] !== 0x30) return null;
+      let pos = 2;
+      if (der[1] & 0x80) {
+        pos += der[1] & 0x7f;
+      }
+
+      if (der[pos] !== 0x02) return null;
+      const rLen = der[pos + 1];
+      let rStart = pos + 2;
+      let rEnd = rStart + rLen;
+      if (der[rStart] === 0x00 && rLen > keySize) {
+        rStart++;
+      }
+      const r = der.slice(rStart, rEnd);
+
+      pos = rEnd;
+      if (der[pos] !== 0x02) return null;
+      const sLen = der[pos + 1];
+      let sStart = pos + 2;
+      let sEnd = sStart + sLen;
+      if (der[sStart] === 0x00 && sLen > keySize) {
+        sStart++;
+      }
+      const s = der.slice(sStart, sEnd);
+
+      const raw = new Uint8Array(keySize * 2);
+      raw.set(r, keySize - r.length);
+      raw.set(s, keySize * 2 - s.length);
+      return raw;
+    } catch {
+      return null;
+    }
+  };
+
   app.get('/api/auth/setup', async (c) => {
     const ready = await hasUsableEmailAccount(c.env.DB);
     return c.json({ requires_setup: !ready });
@@ -3909,11 +3946,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     // Verify signature
     const publicKey = fromBase64Url((passkey as any).credential_public_key as string);
-    const algo = Number((passkey as any).algorithm) || -7;
+    const sigBytes = fromBase64Url(signature);
 
     const clientDataHash = await sha256Bytes(clientData.rawBytes);
     const authDataBytes = fromBase64Url(authenticatorData);
-    const sigBytes = fromBase64Url(signature);
 
     const message = new Uint8Array(authDataBytes.length + clientDataHash.length);
     message.set(authDataBytes, 0);
@@ -3925,19 +3961,37 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       if (coseKey) {
         const publicKeyObj = await coseKeyToCryptoKey(coseKey);
         if (publicKeyObj) {
-          const algorithm = algo === -257
-            ? { name: 'RSASSA-PKCS1-v1_5' }
-            : { name: 'ECDSA', hash: 'SHA-256' };
+          let verifyAlgorithm: any;
+          let signatureBytes = sigBytes;
+
+          if (publicKeyObj.algorithm.name === 'ECDSA') {
+            const namedCurve = (publicKeyObj.algorithm as any).namedCurve;
+            const hash = namedCurve === 'P-384' ? 'SHA-384' : namedCurve === 'P-521' ? 'SHA-512' : 'SHA-256';
+            verifyAlgorithm = { name: 'ECDSA', hash };
+
+            const keySize = namedCurve === 'P-384' ? 48 : namedCurve === 'P-521' ? 66 : 32;
+            const rawSig = derToRaw(sigBytes, keySize);
+            if (rawSig) {
+              signatureBytes = rawSig as any;
+            }
+          } else if (publicKeyObj.algorithm.name === 'RSASSA-PKCS1-v1_5') {
+            verifyAlgorithm = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
+          } else if (publicKeyObj.algorithm.name === 'RSA-PSS') {
+            verifyAlgorithm = { name: 'RSA-PSS', saltLength: 32 };
+          } else {
+            throw new Error(`Unsupported public key algorithm: ${publicKeyObj.algorithm.name}`);
+          }
 
           isValid = await crypto.subtle.verify(
-            algorithm,
+            verifyAlgorithm,
             publicKeyObj,
-            sigBytes,
+            signatureBytes,
             message
           );
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('Passkey signature verification threw an error:', err);
       isValid = false;
     }
 

@@ -137,9 +137,21 @@ export const lookupVerifiedEmailAtFromRepository = async (
   return repository.findVerifiedEmailAt(normalizedEmail);
 };
 
-export const loadCustomFields = async (env: Env, repository: PeopleRepository, layerId: string) => {
+export const loadCustomFields = async (
+  env: Env,
+  repository: PeopleRepository,
+  layerId: string,
+  waitUntil?: (promise: Promise<unknown>) => void
+) => {
   const results = await repository.listCustomFieldRowsByLayer(layerId);
-  await migratePlaintextCustomFieldRows(env.DB, env, results);
+  if (waitUntil) {
+    waitUntil(
+      migratePlaintextCustomFieldRows(env.DB, env, results)
+        .catch(err => console.error('Background custom fields migration failed:', err))
+    );
+  } else {
+    await migratePlaintextCustomFieldRows(env.DB, env, results);
+  }
   const decrypted = await decryptCustomFieldRows(env, results);
   const map = new Map<string, { label: string; value: string }[]>();
   decrypted.forEach((row: Record<string, unknown>) => {
@@ -151,9 +163,21 @@ export const loadCustomFields = async (env: Env, repository: PeopleRepository, l
   return map;
 };
 
-export const loadPersonCustomFields = async (env: Env, repository: PeopleRepository, personId: string) => {
+export const loadPersonCustomFields = async (
+  env: Env,
+  repository: PeopleRepository,
+  personId: string,
+  waitUntil?: (promise: Promise<unknown>) => void
+) => {
   const results = await repository.listCustomFieldRowsByPersonId(personId);
-  await migratePlaintextCustomFieldRows(env.DB, env, results);
+  if (waitUntil) {
+    waitUntil(
+      migratePlaintextCustomFieldRows(env.DB, env, results)
+        .catch(err => console.error('Background custom fields migration failed:', err))
+    );
+  } else {
+    await migratePlaintextCustomFieldRows(env.DB, env, results);
+  }
   const decrypted = await decryptCustomFieldRows(env, results);
   return decrypted.map((row: Record<string, unknown>) => ({
     label: String(row.label ?? ''),

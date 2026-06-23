@@ -49,12 +49,30 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     const resolver = new KinshipTitleResolver(centerPerson, people, relationships);
     const results = new Map<string, KinshipCalculationResult>();
 
+    const ancestorPaths = this.findAllDirectAncestorPaths(centerId, parentMap);
+    const bestPaths = this.findAllShortestPreferredPaths(centerId, adjacency);
+
     for (const targetId of targetIds) {
-      results.set(targetId, this.calculateWithIndexes(centerId, targetId, parentMap, adjacency, resolver));
+      if (targetId === centerId) {
+        results.set(targetId, this.formatResult('我'));
+        continue;
+      }
+      const directAncestorPath = ancestorPaths.get(targetId);
+      if (directAncestorPath) {
+        results.set(targetId, this.formatResult(resolver.resolve({ ...directAncestorPath, targetId })));
+        continue;
+      }
+      const bestPath = bestPaths.get(targetId);
+      if (bestPath) {
+        results.set(targetId, this.formatResult(resolver.resolve({ ...bestPath, targetId })));
+        continue;
+      }
+      results.set(targetId, this.formatResult('未知'));
     }
 
     return results;
   }
+
 
   private calculateWithIndexes(
     centerId: string,
@@ -206,5 +224,83 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     }
 
     return bestPath;
+  }
+
+  private findAllDirectAncestorPaths(
+    centerId: string,
+    parentMap: Map<string, string[]>
+  ): Map<string, { path: string[]; nodePath: string[] }> {
+    const paths = new Map<string, { path: string[]; nodePath: string[] }>();
+    const queue: { id: string; path: string[]; nodePath: string[] }[] = [
+      { id: centerId, path: [], nodePath: [centerId] }
+    ];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current.id !== centerId) {
+        paths.set(current.id, { path: current.path, nodePath: current.nodePath });
+      }
+      const parents = parentMap.get(current.id) || [];
+      for (const parentId of parents) {
+        queue.push({
+          id: parentId,
+          path: [...current.path, 'up'],
+          nodePath: [...current.nodePath, parentId],
+        });
+      }
+    }
+    return paths;
+  }
+
+  private findAllShortestPreferredPaths(
+    centerId: string,
+    adjacency: Map<string, AdjacencyEdge[]>
+  ): Map<string, { path: string[]; nodePath: string[] }> {
+    const paths = new Map<string, { path: string[]; nodePath: string[] }>();
+    paths.set(centerId, { path: [], nodePath: [centerId] });
+
+    const queue: string[] = [centerId];
+    const visitedDepth = new Map<string, number>();
+    visitedDepth.set(centerId, 0);
+
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      const currentPathObj = paths.get(currentId)!;
+      const currentDepth = currentPathObj.path.length;
+
+      const neighbors = adjacency.get(currentId) || [];
+      const sorted = [
+        ...neighbors.filter((neighbor) => neighbor.direction !== 'inlaw'),
+        ...neighbors.filter((neighbor) => neighbor.direction === 'inlaw'),
+      ];
+
+      for (const neighbor of sorted) {
+        const nextDepth = currentDepth + 1;
+        const prevDepth = visitedDepth.get(neighbor.id);
+
+        if (prevDepth === undefined || nextDepth < prevDepth) {
+          visitedDepth.set(neighbor.id, nextDepth);
+          paths.set(neighbor.id, {
+            path: [...currentPathObj.path, neighbor.direction],
+            nodePath: [...currentPathObj.nodePath, neighbor.id],
+          });
+          queue.push(neighbor.id);
+        } else if (nextDepth === prevDepth) {
+          const currentInlawCount = currentPathObj.path.filter((segment) => segment === 'inlaw').length + (neighbor.direction === 'inlaw' ? 1 : 0);
+          const existingPathObj = paths.get(neighbor.id);
+          const existingInlawCount = existingPathObj
+            ? existingPathObj.path.filter((segment) => segment === 'inlaw').length
+            : Number.POSITIVE_INFINITY;
+
+          if (currentInlawCount < existingInlawCount) {
+            paths.set(neighbor.id, {
+              path: [...currentPathObj.path, neighbor.direction],
+              nodePath: [...currentPathObj.nodePath, neighbor.id],
+            });
+          }
+        }
+      }
+    }
+    return paths;
   }
 }

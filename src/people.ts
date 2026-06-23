@@ -57,8 +57,16 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
     const results = await repository.listPeople(layerId, peopleSchema.hasEmail);
-    await Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)));
-    const customFieldsMap = await loadCustomFields(c.env, repository, layerId);
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(
+        Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
+          .catch(err => console.error('Background people migration failed:', err))
+      );
+    } else {
+      Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
+        .catch(err => console.error('Background people migration failed:', err));
+    }
+    const customFieldsMap = await loadCustomFields(c.env, repository, layerId, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
     const avatarMap = await loadAvatarMap(c.env.DB);
 
     const parsedResults = await Promise.all(results.map(async (person: any) => {
@@ -86,9 +94,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    await migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>);
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(
+        migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
+          .catch(err => console.error('Background person migration failed:', err))
+      );
+    } else {
+      migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
+        .catch(err => console.error('Background person migration failed:', err));
+    }
     const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
-    const customFields = await loadPersonCustomFields(c.env, repository, id);
+    const customFields = await loadPersonCustomFields(c.env, repository, id, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
     const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
     const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
     return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, resolvePrimaryAvatar, emailVerifiedAt));

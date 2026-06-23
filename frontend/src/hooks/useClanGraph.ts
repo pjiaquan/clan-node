@@ -77,10 +77,13 @@ export function useClanGraph(options?: { enabled?: boolean }) {
           setLoading(false);
           return;
         }
-        const preferredLayerId = items.some((layer) => layer.id === activeLayerId)
-          ? activeLayerId
-          : items[0].id;
-        persistActiveLayer(preferredLayerId);
+        setActiveLayerIdState((currentActiveId) => {
+          const preferredLayerId = items.some((layer) => layer.id === currentActiveId)
+            ? currentActiveId
+            : items[0].id;
+          persistActiveLayerId(preferredLayerId);
+          return preferredLayerId;
+        });
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Unknown error');
@@ -92,7 +95,7 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [activeLayerId, enabled, fetchLayers, persistActiveLayerId]);
+  }, [enabled, fetchLayers]);
 
   useEffect(() => {
     if (!activeLayerId || !enabled) return;

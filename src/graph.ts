@@ -45,14 +45,30 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         console.log('Center person not found');
         return c.json({ error: 'Center person not found' }, 404);
       }
-      await migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>);
       const decryptedCenter = await decryptPersonRow(c.env, center as Record<string, unknown>);
+      if (c.executionCtx) {
+        c.executionCtx.waitUntil(
+          migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>)
+            .catch(err => console.error('Background center person migration failed:', err))
+        );
+      } else {
+        migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>)
+          .catch(err => console.error('Background center person migration failed:', err));
+      }
 
       // Get all people
       console.log('Fetching all people...');
       const peopleRaw = await graphRepository.listPeople(layerId, peopleSchema.hasEmail);
       console.log(`Fetched ${peopleRaw.length} people`);
-      await Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)));
+      if (c.executionCtx) {
+        c.executionCtx.waitUntil(
+          Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
+            .catch(err => console.error('Background people migration failed:', err))
+        );
+      } else {
+        Promise.all(peopleRaw.map((person) => migratePlaintextPersonRow(c.env.DB, c.env, person)))
+          .catch(err => console.error('Background people migration failed:', err));
+      }
       const avatarRows = await graphRepository.listAvatarRows(layerId);
       const avatarMap = new Map<string, typeof avatarRows>();
       avatarRows.forEach((avatar) => {
@@ -65,8 +81,16 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       );
 
       const customFieldRows = await graphRepository.listCustomFieldRows(layerId);
-      await migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows);
       const decryptedCustomFieldRows = await decryptCustomFieldRows(c.env, customFieldRows);
+      if (c.executionCtx) {
+        c.executionCtx.waitUntil(
+          migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows)
+            .catch(err => console.error('Background custom fields migration failed:', err))
+        );
+      } else {
+        migratePlaintextCustomFieldRows(c.env.DB, c.env, customFieldRows)
+          .catch(err => console.error('Background custom fields migration failed:', err));
+      }
       const customFieldMap = new Map<string, { label: string; value: string }[]>();
       decryptedCustomFieldRows.forEach((row: any) => {
         const list = customFieldMap.get(row.person_id) || [];
