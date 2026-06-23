@@ -258,28 +258,19 @@ const clearStoredLastEditedId = () => {
   }
 };
 const getElementUnderEvent = (clientX: number, clientY: number) => {
-  let element = document.elementFromPoint(clientX, clientY);
-  if (!element) return null;
-
-  let nodeEl = element.closest('.person-node');
-  if (nodeEl) return nodeEl;
-
-  const overlays = document.querySelectorAll('.react-flow__nodesselection, .react-flow__selection');
-  const originalStyles = Array.from(overlays).map(el => {
-    const htmlEl = el as HTMLElement;
-    const original = htmlEl.style.pointerEvents;
-    htmlEl.style.pointerEvents = 'none';
-    return { el: htmlEl, original };
-  });
-
-  element = document.elementFromPoint(clientX, clientY);
-  nodeEl = element?.closest('.person-node') ?? null;
-
-  originalStyles.forEach(({ el, original }) => {
-    el.style.pointerEvents = original;
-  });
-
-  return nodeEl;
+  const nodeElements = document.querySelectorAll('.person-node');
+  for (let i = 0; i < nodeElements.length; i++) {
+    const rect = nodeElements[i].getBoundingClientRect();
+    if (
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+    ) {
+      return nodeElements[i] as HTMLElement;
+    }
+  }
+  return null;
 };
 
 type ClanGraphProps = {
