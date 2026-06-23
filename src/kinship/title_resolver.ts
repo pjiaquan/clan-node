@@ -14,6 +14,10 @@ type ResolveState = ResolveInput & {
 
 export class KinshipTitleResolver {
   private readonly rankComputer: SiblingRankComputer;
+  private readonly peopleMap = new Map<string, Person>();
+  private readonly childrenOfParentMap = new Map<string, Set<string>>();
+  private readonly parentsOfChildMap = new Map<string, Set<string>>();
+  private readonly spouseOfPersonMap = new Map<string, Set<string>>();
 
   constructor(
     private readonly centerPerson: Person,
@@ -21,6 +25,31 @@ export class KinshipTitleResolver {
     private readonly relationships: Relationship[],
   ) {
     this.rankComputer = new SiblingRankComputer(people, relationships);
+    people.forEach((p) => this.peopleMap.set(p.id, p));
+
+    relationships.forEach((rel) => {
+      if (rel.type === 'parent_child') {
+        if (!this.childrenOfParentMap.has(rel.from_person_id)) {
+          this.childrenOfParentMap.set(rel.from_person_id, new Set());
+        }
+        this.childrenOfParentMap.get(rel.from_person_id)!.add(rel.to_person_id);
+
+        if (!this.parentsOfChildMap.has(rel.to_person_id)) {
+          this.parentsOfChildMap.set(rel.to_person_id, new Set());
+        }
+        this.parentsOfChildMap.get(rel.to_person_id)!.add(rel.from_person_id);
+      } else if (rel.type === 'spouse') {
+        if (!this.spouseOfPersonMap.has(rel.from_person_id)) {
+          this.spouseOfPersonMap.set(rel.from_person_id, new Set());
+        }
+        this.spouseOfPersonMap.get(rel.from_person_id)!.add(rel.to_person_id);
+
+        if (!this.spouseOfPersonMap.has(rel.to_person_id)) {
+          this.spouseOfPersonMap.set(rel.to_person_id, new Set());
+        }
+        this.spouseOfPersonMap.get(rel.to_person_id)!.add(rel.from_person_id);
+      }
+    });
   }
 
   resolve({ path, nodePath, targetId }: ResolveInput): string {
@@ -59,7 +88,7 @@ export class KinshipTitleResolver {
 
   private getPerson(id: string | undefined) {
     if (!id) return undefined;
-    return this.people.find((person) => person.id === id);
+    return this.peopleMap.get(id);
   }
 
   private formatDualTitle(colloquial: string, formal: string) {
@@ -100,16 +129,10 @@ export class KinshipTitleResolver {
   }
 
   private isSpouseOfChild(parentId: string, personId: string) {
-    const childIds = this.relationships
-      .filter((relationship) => relationship.type === 'parent_child' && relationship.from_person_id === parentId)
-      .map((relationship) => relationship.to_person_id);
+    const childIds = this.childrenOfParentMap.get(parentId) || new Set();
     for (const childId of childIds) {
-      const isSpouse = this.relationships.some((relationship) => (
-        relationship.type === 'spouse'
-        && ((relationship.from_person_id === childId && relationship.to_person_id === personId)
-          || (relationship.to_person_id === childId && relationship.from_person_id === personId))
-      ));
-      if (isSpouse) return true;
+      const spouses = this.spouseOfPersonMap.get(childId);
+      if (spouses && spouses.has(personId)) return true;
     }
     return false;
   }
@@ -321,16 +344,16 @@ export class KinshipTitleResolver {
     if (pathStr === 'up-up-inlaw') {
       const parent = this.getPerson(nodePath[1]);
       const grandparent = this.getPerson(nodePath[2]);
-      const spouseChildRelationship = this.relationships.find((relationship) => (
-        relationship.type === 'spouse'
-        && ((relationship.from_person_id === target.id
-          && this.relationships.some((candidate) => candidate.type === 'parent_child' && candidate.from_person_id === grandparent?.id && candidate.to_person_id === relationship.to_person_id))
-        || (relationship.to_person_id === target.id
-          && this.relationships.some((candidate) => candidate.type === 'parent_child' && candidate.from_person_id === grandparent?.id && candidate.to_person_id === relationship.from_person_id)))
-      ));
-      const spouseChild = spouseChildRelationship
-        ? this.getPerson(spouseChildRelationship.from_person_id === target.id ? spouseChildRelationship.to_person_id : spouseChildRelationship.from_person_id)
-        : undefined;
+      const targetSpouses = this.spouseOfPersonMap.get(target.id) || new Set();
+      const grandparentChildren = grandparent ? (this.childrenOfParentMap.get(grandparent.id) || new Set()) : new Set();
+      let spouseChildId: string | undefined;
+      for (const spouseId of targetSpouses) {
+        if (grandparentChildren.has(spouseId)) {
+          spouseChildId = spouseId;
+          break;
+        }
+      }
+      const spouseChild = spouseChildId ? this.getPerson(spouseChildId) : undefined;
 
       if (parent && spouseChild) {
         if (parent.gender === 'M') {
@@ -591,18 +614,11 @@ export class KinshipTitleResolver {
       const possibleSibling = this.getPerson(nodePath[2]);
       const possibleSpouse = this.getPerson(nodePath[3]);
       if (parent && possibleSibling && possibleSpouse) {
-        const parentIds = this.relationships
-          .filter((relationship) => relationship.type === 'parent_child' && relationship.to_person_id === parent.id)
-          .map((relationship) => relationship.from_person_id);
-        const siblingParentIds = this.relationships
-          .filter((relationship) => relationship.type === 'parent_child' && relationship.to_person_id === possibleSibling.id)
-          .map((relationship) => relationship.from_person_id);
-        const sharesParent = parentIds.some((id) => siblingParentIds.includes(id));
-        const isSpouse = this.relationships.some((relationship) => (
-          relationship.type === 'spouse'
-          && ((relationship.from_person_id === possibleSibling.id && relationship.to_person_id === possibleSpouse.id)
-            || (relationship.to_person_id === possibleSibling.id && relationship.from_person_id === possibleSpouse.id))
-        ));
+        const parentIds = this.parentsOfChildMap.get(parent.id) || new Set();
+        const siblingParentIds = this.parentsOfChildMap.get(possibleSibling.id) || new Set();
+        const sharesParent = [...parentIds].some((id) => siblingParentIds.has(id));
+        const spouses = this.spouseOfPersonMap.get(possibleSibling.id);
+        const isSpouse = spouses ? spouses.has(possibleSpouse.id) : false;
 
         if (sharesParent && isSpouse) {
           const title = this.getParentSiblingSpouseTitle(parent, possibleSibling);

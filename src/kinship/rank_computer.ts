@@ -6,10 +6,32 @@ export type RelativeRank = {
 };
 
 export class SiblingRankComputer {
+  private readonly siblingMap = new Map<string, Set<string>>();
+  private readonly parentsMap = new Map<string, Set<string>>();
+  private readonly childrenMap = new Map<string, Set<string>>();
+  private readonly peopleMap = new Map<string, Person>();
+
   constructor(
     private readonly people: Person[],
     private readonly relationships: Relationship[],
-  ) {}
+  ) {
+    people.forEach((p) => this.peopleMap.set(p.id, p));
+
+    relationships.forEach((relationship) => {
+      if (relationship.type === 'sibling') {
+        if (!this.siblingMap.has(relationship.from_person_id)) this.siblingMap.set(relationship.from_person_id, new Set());
+        if (!this.siblingMap.has(relationship.to_person_id)) this.siblingMap.set(relationship.to_person_id, new Set());
+        this.siblingMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
+        this.siblingMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
+      } else if (relationship.type === 'parent_child') {
+        if (!this.parentsMap.has(relationship.to_person_id)) this.parentsMap.set(relationship.to_person_id, new Set());
+        this.parentsMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
+
+        if (!this.childrenMap.has(relationship.from_person_id)) this.childrenMap.set(relationship.from_person_id, new Set());
+        this.childrenMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
+      }
+    });
+  }
 
   getSiblingRank(reference: Person, sibling: Person): RelativeRank | null {
     return this.getRelativeSiblingRank(reference, sibling);
@@ -23,29 +45,27 @@ export class SiblingRankComputer {
       return { relation: 'younger', rank: 0 };
     }
 
-    const siblingIds = new Set<string>();
-    this.relationships.forEach((relationship) => {
-      if (relationship.type === 'sibling') {
-        if (relationship.from_person_id === reference.id) siblingIds.add(relationship.to_person_id);
-        if (relationship.to_person_id === reference.id) siblingIds.add(relationship.from_person_id);
+    const siblingIds = new Set<string>(this.siblingMap.get(reference.id) || []);
+
+    const parentIds = this.parentsMap.get(reference.id) || new Set<string>();
+    parentIds.forEach((parentId) => {
+      const children = this.childrenMap.get(parentId) || new Set<string>();
+      children.forEach((childId) => {
+        if (childId !== reference.id) {
+          siblingIds.add(childId);
+        }
+      });
+    });
+
+    const sameGenderSiblings: Person[] = [];
+    siblingIds.forEach((id) => {
+      const person = this.peopleMap.get(id);
+      if (person && person.gender === sibling.gender && person.dob) {
+        sameGenderSiblings.push(person);
       }
     });
 
-    const parentIds = this.relationships
-      .filter((relationship) => relationship.type === 'parent_child' && relationship.to_person_id === reference.id)
-      .map((relationship) => relationship.from_person_id);
-
-    this.relationships
-      .filter((relationship) => (
-        relationship.type === 'parent_child'
-        && parentIds.includes(relationship.from_person_id)
-        && relationship.to_person_id !== reference.id
-      ))
-      .forEach((relationship) => siblingIds.add(relationship.to_person_id));
-
-    const sameGenderSiblings = this.people
-      .filter((person) => siblingIds.has(person.id) && person.gender === sibling.gender && person.dob)
-      .sort((left, right) => new Date(left.dob!).getTime() - new Date(right.dob!).getTime());
+    sameGenderSiblings.sort((left, right) => new Date(left.dob!).getTime() - new Date(right.dob!).getTime());
 
     const index = sameGenderSiblings.findIndex((person) => person.id === sibling.id);
     if (index === -1) return null;
