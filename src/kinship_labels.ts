@@ -73,29 +73,44 @@ const makeKey = (defaultTitle: string, defaultFormalTitle: string) => (
   `${defaultTitle}${KEY_SEPARATOR}${defaultFormalTitle}`
 );
 
-export async function ensureKinshipLabelsTable(db: D1Database) {
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS kinship_labels (
-      default_title TEXT NOT NULL,
-      default_formal_title TEXT NOT NULL,
-      custom_title TEXT,
-      custom_formal_title TEXT,
-      description TEXT NOT NULL DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (default_title, default_formal_title)
-    )
-  `).run();
+let ensureKinshipLabelsTablePromise: Promise<void> | null = null;
 
-  for (const item of CORE_KINSHIP_DEFAULTS) {
-    await db.prepare(`
-      INSERT OR IGNORE INTO kinship_labels (
-        default_title, default_formal_title,
-        custom_title, custom_formal_title,
-        description, created_at, updated_at
-      ) VALUES (?, ?, NULL, NULL, ?, datetime('now'), datetime('now'))
-    `).bind(item.default_title, item.default_formal_title, item.description).run();
+export async function ensureKinshipLabelsTable(db: D1Database): Promise<void> {
+  if (!ensureKinshipLabelsTablePromise) {
+    ensureKinshipLabelsTablePromise = (async () => {
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS kinship_labels (
+          default_title TEXT NOT NULL,
+          default_formal_title TEXT NOT NULL,
+          custom_title TEXT,
+          custom_formal_title TEXT,
+          description TEXT NOT NULL DEFAULT '',
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          PRIMARY KEY (default_title, default_formal_title)
+        )
+      `).run();
+
+      const stmts: D1PreparedStatement[] = [];
+      for (const item of CORE_KINSHIP_DEFAULTS) {
+        stmts.push(db.prepare(`
+          INSERT OR IGNORE INTO kinship_labels (
+            default_title, default_formal_title,
+            custom_title, custom_formal_title,
+            description, created_at, updated_at
+          ) VALUES (?, ?, NULL, NULL, ?, datetime('now'), datetime('now'))
+        `).bind(item.default_title, item.default_formal_title, item.description));
+      }
+
+      if (stmts.length > 0) {
+        await db.batch(stmts);
+      }
+    })().catch((err) => {
+      ensureKinshipLabelsTablePromise = null;
+      throw err;
+    });
   }
+  return ensureKinshipLabelsTablePromise;
 }
 
 const mapRow = (row: any): KinshipLabelRow | null => {
