@@ -132,6 +132,18 @@ export const authApi = {
     return res.json();
   },
 
+  register: async (email: string, password: string): Promise<{ id: string; email: string; email_verified: boolean; verification_email_sent: boolean; debug_verify_token?: string }> => {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res));
+    }
+    return res.json();
+  },
+
   login: async (email: string, password: string): Promise<LoginResponse> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',

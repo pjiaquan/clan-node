@@ -15,7 +15,8 @@ import {
   MFA_VERIFY_RATE_LIMIT,
   PASSKEY_LOGIN_RATE_LIMIT,
   PASSKEY_REGISTER_RATE_LIMIT,
-  RESEND_RATE_LIMIT
+  RESEND_RATE_LIMIT,
+  PUBLIC_REGISTER_RATE_LIMIT
 } from './rate_limits';
 import { getUserSchemaSupport } from './schema';
 import type { UserSchemaSupport } from './schema';
@@ -1174,6 +1175,7 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     || path.startsWith('/api/auth/forgot-password')
     || path.startsWith('/api/auth/reset-password')
     || path.startsWith('/api/auth/passkey/login')
+    || path.startsWith('/api/auth/register')
   ) {
     return next();
   }
@@ -1251,6 +1253,7 @@ export const requireWriteAccess: MiddlewareHandler<AppBindings> = async (c, next
     || path.startsWith('/api/auth/account')
     || path.startsWith('/api/auth/passkey')
     || path.startsWith('/api/auth/passkeys')
+    || path.startsWith('/api/auth/register')
   ) {
     return next();
   }
@@ -1903,6 +1906,145 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
     return c.json({ id, username: email, email }, 201);
+  });
+
+  app.post('/api/auth/register', async (c) => {
+    const userSchema = await getUserSchemaSupport(c.env.DB);
+
+    const body = await c.req.json();
+    const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
+    const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
+    if (!email || !password) {
+      return c.json({ error: 'email and password are required' }, 400);
+    }
+    if (!isValidEmail(email)) {
+      return c.json({ error: 'Invalid email format' }, 400);
+    }
+    const passwordValidationError = validatePasswordStrength(password, [email]);
+    if (passwordValidationError) {
+      return c.json({ error: passwordValidationError }, 400);
+    }
+
+    const registerIp = getRequestIpAddress(c) || 'unknown-ip';
+    const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
+      action: 'public_register',
+      limiterKey: registerIp,
+      ...PUBLIC_REGISTER_RATE_LIMIT
+    });
+    if (!rateLimit.allowed) {
+      c.header('Retry-After', String(rateLimit.retryAfterSeconds));
+      await recordRateLimitAudit(c, {
+        action: 'public_register',
+        limiterKey: registerIp,
+        route: '/api/auth/register',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+        summary: `公開註冊速率限制：${registerIp}`
+      });
+      return c.json({ error: 'Too many registration requests. Please try again later.' }, 429);
+    }
+
+    const existingField = userSchema.hasEmail ? 'email' : 'username';
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM users WHERE ${existingField} = ?`
+    ).bind(email).first();
+    if (existing) {
+      return c.json({ error: 'User already exists' }, 409);
+    }
+
+    const id = crypto.randomUUID();
+    const salt = randomBase64(16);
+    const passwordHash = await hashPassword(password, salt);
+    const now = new Date().toISOString();
+
+    const usersCountRow = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM users'
+    ).first();
+    const isFirstUser = Number((usersCountRow as any)?.count ?? 0) === 0;
+
+    const finalRole: UserRole = isFirstUser ? 'admin' : 'readonly';
+
+    const isEmailConfigured = Boolean(c.env.BREVO_API_KEY && c.env.BREVO_FROM_EMAIL);
+    const requireVerification = !isFirstUser && isEmailConfigured && userSchema.hasEmailVerifiedAt && userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt;
+
+    let verifyToken: string | null = null;
+    let verifyTokenHash: string | null = null;
+    let verifyExpiresAt: string | null = null;
+    if (requireVerification) {
+      const token = await createVerificationToken();
+      verifyToken = token.token;
+      verifyTokenHash = token.tokenHash;
+      verifyExpiresAt = token.expiresAt;
+    }
+
+    const columns = ['id', 'username', 'password_hash', 'password_salt', 'role', 'created_at', 'updated_at'];
+    const values: Array<string | null> = [
+      id,
+      email,
+      passwordHash,
+      salt,
+      finalRole,
+      now,
+      now
+    ];
+
+    if (userSchema.hasEmail) {
+      columns.push('email');
+      values.push(email);
+    }
+    if (userSchema.hasEmailVerifiedAt) {
+      columns.push('email_verified_at');
+      values.push(requireVerification ? null : now);
+    }
+    if (userSchema.hasEmailVerifyTokenHash) {
+      columns.push('email_verify_token_hash');
+      values.push(verifyTokenHash);
+    }
+    if (userSchema.hasEmailVerifyExpiresAt) {
+      columns.push('email_verify_expires_at');
+      values.push(verifyExpiresAt);
+    }
+
+    await c.env.DB.prepare(
+      `INSERT INTO users (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
+    ).bind(...values).run();
+
+    let delivered = false;
+    if (verifyToken) {
+      const actionUrl = buildVerificationUrl(c.env, verifyToken);
+      delivered = await sendVerificationEmail(c.env, email, actionUrl);
+    }
+
+    notifyUpdate(c, 'user:create', {
+      id,
+      username: email,
+      role: finalRole
+    });
+
+    await recordAuditLog(c, {
+      action: 'register',
+      resourceType: 'users',
+      resourceId: id,
+      summary: isFirstUser ? `公開註冊首位管理員帳號 ${email}` : `公開註冊帳號 ${email}`,
+      details: {
+        username: email,
+        role: finalRole,
+        verification_email_sent: delivered,
+        requires_verification: requireVerification,
+        is_first_user: isFirstUser
+      }
+    });
+
+    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    return c.json({
+      id,
+      username: email,
+      email,
+      role: finalRole,
+      email_verified: !requireVerification,
+      verification_email_sent: delivered,
+      ...(debugToken ? { debug_verify_token: debugToken } : {})
+    }, 201);
+
   });
 
   app.post('/api/auth/login', async (c) => {

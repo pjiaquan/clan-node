@@ -6,6 +6,7 @@ interface LoginPageProps {
   error?: string | null;
   notice?: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
+  onRegister: (email: string, password: string) => Promise<void>;
   onLoginWithPasskey?: () => Promise<void>;
   onVerifyMfa?: (code: string) => Promise<void>;
   onUseEmailMfa?: () => Promise<void>;
@@ -23,6 +24,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   error,
   notice,
   onLogin,
+  onRegister,
   onLoginWithPasskey,
   onVerifyMfa,
   onUseEmailMfa,
@@ -37,6 +39,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const logoSrc = `${import.meta.env.BASE_URL}family_tree_logo.png`;
@@ -45,13 +50,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setMfaCode('');
   }, [pendingMfa?.session_id, pendingMfaMethod]);
 
+  useEffect(() => {
+    setLocalError(null);
+    setPassword('');
+    setConfirmPassword('');
+  }, [isRegistering]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    try {
-      await onLogin(email.trim().toLowerCase(), password);
-    } finally {
-      setSubmitting(false);
+    setLocalError(null);
+    if (isRegistering) {
+      if (password !== confirmPassword) {
+        setLocalError(t('login.passwordsMustMatch'));
+        return;
+      }
+      setSubmitting(true);
+      try {
+        await onRegister(email.trim().toLowerCase(), password);
+        setIsRegistering(false);
+      } catch (err) {
+        // Parent handleRegister will set authError
+      } finally {
+        setSubmitting(false);
+      }
+    } else {
+      setSubmitting(true);
+      try {
+        await onLogin(email.trim().toLowerCase(), password);
+      } finally {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -67,7 +95,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   const canResend = Boolean(onResendVerification && email.trim());
-  const cardStageKey = pendingMfa ? `mfa-card-${pendingMfaMethod}` : 'login-card';
+  const cardStageKey = pendingMfa ? `mfa-card-${pendingMfaMethod}` : (isRegistering ? 'register-card' : 'login-card');
 
   const handleResend = async () => {
     if (!onResendVerification || !email.trim()) return;
@@ -87,7 +115,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               ? pendingMfaMethod === 'totp'
                 ? t('login.totpPrompt')
                 : t('login.mfaPrompt', { email: pendingMfa.masked_email })
-              : t('login.simplePrompt')}
+              : isRegistering
+                ? t('login.registerPrompt')
+                : t('login.simplePrompt')}
             </p>
           </div>
           {pendingMfa ? (
@@ -149,7 +179,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </form>
           ) : (
-            <form key="login-form" onSubmit={handleSubmit}>
+            <form key={isRegistering ? 'register-form' : 'login-form'} onSubmit={handleSubmit}>
               <div className="form-group">
                 <label htmlFor="login-email">{t('login.username')}</label>
                 <input
@@ -171,12 +201,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
+                  autoComplete={isRegistering ? 'new-password' : 'current-password'}
                   required
                 />
               </div>
+              {isRegistering && (
+                <div className="form-group">
+                  <label htmlFor="login-confirm-password">{t('login.confirmPassword')}</label>
+                  <input
+                    id="login-confirm-password"
+                    name="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+              )}
               {notice && <div className="notice-info">{notice}</div>}
-              {error && <div className="login-error">{error}</div>}
+              {(error || localError) && <div className="login-error">{error || localError}</div>}
               {error?.toLowerCase().includes('email not verified') && (
                 <button
                   type="button"
@@ -188,18 +232,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 </button>
               )}
               <button type="submit" className="btn-primary" disabled={submitting}>
-                {submitting ? t('login.signingIn') : t('login.signIn')}
+                {submitting
+                  ? (isRegistering ? t('setup.submitting') : t('login.signingIn'))
+                  : (isRegistering ? t('login.register') : t('login.signIn'))}
               </button>
-              {onLoginWithPasskey && (
+              {!isRegistering && onLoginWithPasskey && (
                 <button type="button" className="auth-secondary-btn" onClick={() => { void onLoginWithPasskey(); }} disabled={submitting}>
                   {t('login.signInWithPasskey')}
                 </button>
               )}
-              {onForgotPassword && (
+              {!isRegistering && onForgotPassword && (
                 <button type="button" className="auth-secondary-btn" onClick={onForgotPassword} disabled={submitting}>
                   {t('login.forgotPassword')}
                 </button>
               )}
+              <div className="login-toggle-mode" style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  className="auth-secondary-btn"
+                  onClick={() => setIsRegistering(!isRegistering)}
+                  disabled={submitting}
+                  style={{ fontSize: '0.9rem', opacity: 0.8 }}
+                >
+                  {isRegistering ? t('login.alreadyHaveAccount') : t('login.noAccount')}
+                </button>
+              </div>
             </form>
           )}
         </div>

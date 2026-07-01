@@ -419,6 +419,25 @@ function App() {
     }
   }, [t]);
 
+  const handleRegister = useCallback(async (email: string, password: string) => {
+    setAuthError(null);
+    setAuthNotice(null);
+    try {
+      const result = await api.register(email, password);
+      if (result.email_verified) {
+        setAuthNotice(t('login.registerSuccessNoVerify'));
+      } else {
+        const debugVerifyToken = (result as any).debug_verify_token;
+        const debugSuffix = debugVerifyToken ? ` (Debug token: ?verify_email_token=${encodeURIComponent(debugVerifyToken)})` : '';
+        setAuthNotice(`${t('login.registerSuccessVerify', { email: result.email })}${debugSuffix}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('login.registerFailed');
+      setAuthError(message);
+      throw err;
+    }
+  }, [t]);
+
   const handlePasskeyLogin = useCallback(async () => {
     setAuthError(null);
     setAuthNotice(null);
@@ -670,6 +689,7 @@ function App() {
           error={authError}
           notice={authNotice}
           onLogin={handleLogin}
+          onRegister={handleRegister}
           onLoginWithPasskey={isPasskeySupported() ? handlePasskeyLogin : undefined}
           onVerifyMfa={handleVerifyMfa}
           onUseEmailMfa={handleUseEmailMfa}
