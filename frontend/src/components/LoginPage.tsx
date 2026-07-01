@@ -68,7 +68,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       try {
         await onRegister(email.trim().toLowerCase(), password);
         setIsRegistering(false);
-      } catch (err) {
+      } catch {
         // Parent handleRegister will set authError
       } finally {
         setSubmitting(false);
