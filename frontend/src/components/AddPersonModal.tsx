@@ -98,24 +98,25 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           );
         }}>
           <div className="form-group">
-            <label>{t('personForm.name')}</label>
-            <input name="name" required autoFocus />
+            <label htmlFor="add-person-name">{t('personForm.name')}</label>
+            <input id="add-person-name" name="name" required autoFocus />
           </div>
           <div className="form-group">
-            <label>{t('personForm.englishName')}</label>
-            <input name="english_name" />
+            <label htmlFor="add-person-english-name">{t('personForm.englishName')}</label>
+            <input id="add-person-english-name" name="english_name" />
           </div>
           <div className="form-group">
-            <label>{t('personForm.gender')}</label>
-            <select name="gender" defaultValue="O">
+            <label htmlFor="add-person-gender">{t('personForm.gender')}</label>
+            <select id="add-person-gender" name="gender" defaultValue="O">
               <option value="M">{t('personForm.genderMale')}</option>
               <option value="F">{t('personForm.genderFemale')}</option>
               <option value="O">{t('personForm.genderOther')}</option>
             </select>
           </div>
           <div className="form-group">
-            <label>{t('personForm.bloodType')}</label>
+            <label htmlFor="add-person-blood-type">{t('personForm.bloodType')}</label>
             <select
+              id="add-person-blood-type"
               name="blood_type"
               value={bloodType}
               onChange={(event) => setBloodType(event.target.value)}
@@ -221,10 +222,10 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           </div>
           {showBirthTimeField && (
             <div className="form-group">
-              <label>
+              <label htmlFor="add-person-tob">
                 {t('personForm.birthHour')} {tobRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({tobRange})</span>}
               </label>
-              <select name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
+              <select id="add-person-tob" name="tob" value={tob} onChange={(e) => setTob(e.target.value)}>
                 <option value="">--</option>
                 {TRADITIONAL_HOURS.map((hour) => (
                   <option key={hour.name} value={hour.name}>
@@ -320,10 +321,11 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 </div>
               </div>
               <div className="form-group">
-                <label>
+                <label htmlFor="add-person-tod">
                   {t('personForm.deathHour')} {todRange && <span style={{ marginLeft: '0.5rem', color: '#64748b' }}>({todRange})</span>}
                 </label>
                 <select
+                  id="add-person-tod"
                   name="tod"
                   value={tod}
                   onChange={(e) => setTod(e.target.value)}
