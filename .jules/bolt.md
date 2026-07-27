@@ -25,3 +25,7 @@
 ## 2025-02-28 - N+1 Queries in Custom Field Insertions
 **Learning:** Consecutive database writes inside a for-loop (awaiting each insertion) create a severe N+1 bottleneck, causing sequential I/O blocking.
 **Action:** Always batch database inserts or use `Promise.all()` to run independent insertions concurrently when possible.
+
+## 2024-05-15 - N+1 Query Parallelization in Relationships
+**Learning:** Sequential DB queries (like findRelationship, createRelationship) inside for...of loops for sibling relationship generation cause N+1 performance bottlenecks.
+**Action:** Use Promise.all with array.map for independent relationship creations to parallelize I/O bounds tasks in Cloudflare D1 / SQLite setups where concurrent connections are supported or queued efficiently by the driver.
