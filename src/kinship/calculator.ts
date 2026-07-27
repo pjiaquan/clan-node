@@ -118,9 +118,10 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   private findDirectAncestorPath(centerId: string, targetId: string, parentMap: Map<string, string[]>) {
     const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
     const visited = new Set<string>([centerId]);
+    let head = 0;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    while (head < queue.length) {
+      const current = queue[head++];
       if (current.id === targetId && current.path.length > 0) {
         return { path: current.path, nodePath: current.nodePath };
       }
@@ -170,6 +171,14 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
       }
     }
 
+    for (const edges of adjacency.values()) {
+      edges.sort((a, b) => {
+        if (a.direction === 'inlaw' && b.direction !== 'inlaw') return 1;
+        if (a.direction !== 'inlaw' && b.direction === 'inlaw') return -1;
+        return 0;
+      });
+    }
+
     return adjacency;
   }
 
@@ -178,9 +187,10 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     const visited = new Set<string>([centerId]);
     let foundDepth: number | null = null;
     let bestPath: { path: string[]; nodePath: string[] } | null = null;
+    let head = 0;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    while (head < queue.length) {
+      const current = queue[head++];
 
       if (current.id === targetId) {
         if (foundDepth === null) {
@@ -203,11 +213,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
       }
 
       const neighbors = adjacency.get(current.id) || [];
-      const sorted = [
-        ...neighbors.filter((neighbor) => neighbor.direction !== 'inlaw'),
-        ...neighbors.filter((neighbor) => neighbor.direction === 'inlaw'),
-      ];
-      for (const neighbor of sorted) {
+      for (const neighbor of neighbors) {
         const canRevisitTarget = (
           neighbor.id === targetId
           && (foundDepth === null || current.path.length + 1 <= foundDepth)
@@ -235,9 +241,10 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
       { id: centerId, path: [], nodePath: [centerId] }
     ];
     const visited = new Set<string>([centerId]);
+    let head = 0;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    while (head < queue.length) {
+      const current = queue[head++];
       if (current.id !== centerId) {
         paths.set(current.id, { path: current.path, nodePath: current.nodePath });
       }
@@ -266,19 +273,16 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     const queue: string[] = [centerId];
     const visitedDepth = new Map<string, number>();
     visitedDepth.set(centerId, 0);
+    let head = 0;
 
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
+    while (head < queue.length) {
+      const currentId = queue[head++];
       const currentPathObj = paths.get(currentId)!;
       const currentDepth = currentPathObj.path.length;
 
       const neighbors = adjacency.get(currentId) || [];
-      const sorted = [
-        ...neighbors.filter((neighbor) => neighbor.direction !== 'inlaw'),
-        ...neighbors.filter((neighbor) => neighbor.direction === 'inlaw'),
-      ];
 
-      for (const neighbor of sorted) {
+      for (const neighbor of neighbors) {
         const nextDepth = currentDepth + 1;
         const prevDepth = visitedDepth.get(neighbor.id);
 
