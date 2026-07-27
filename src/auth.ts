@@ -225,7 +225,7 @@ const normalizeOtpCode = (value: unknown): string => {
 };
 
 const isValidEmail = (value: string): boolean => (
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 );
 
 const isInvitePendingPassword = (passwordHash: unknown, passwordSalt: unknown) => (
@@ -1863,6 +1863,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!email || !password) {
       return c.json({ error: 'email and password are required' }, 400);
     }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Invalid email or password' }, 401);
+    }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
     }
@@ -2626,6 +2629,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!token || !password) {
       return c.json({ error: 'token and password are required' }, 400);
     }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: `Password must be at most ${PASSWORD_MAX_LENGTH} characters` }, 400);
+    }
 
     const tokenHash = await sha256Base64(token);
     const now = new Date().toISOString();
@@ -3251,6 +3257,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const nextPassword = typeof (body as any)?.new_password === 'string' ? (body as any).new_password : '';
     if (!currentPassword || !nextPassword) {
       return c.json({ error: 'current_password and new_password are required' }, 400);
+    }
+    if (currentPassword.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Current password is incorrect' }, 400);
+    }
+    if (nextPassword.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: `Password must be at most ${PASSWORD_MAX_LENGTH} characters` }, 400);
     }
 
     const userSchema = await getUserSchemaSupport(c.env.DB);
