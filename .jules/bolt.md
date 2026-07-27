@@ -13,3 +13,7 @@
 ## 2024-05-18 - Optimize relationship validation in backup service
 **Learning:** Found an O(N*M) time complexity bottleneck in `validateRelations` within `src/backup/service.ts`, where array `.find()` was being executed inside a loop across relationships, which caused O(N) operations inside an O(M) loop.
 **Action:** Replace `Array.prototype.find` inside tight loops with an `O(1)` hash map / dictionary lookup created before the loop to reduce time complexity to O(N+M). This particular optimization reduced validation time for 5,000 nodes from ~3.75s to ~44ms.
+
+## 2024-07-27 - [Concurrent Database Writes Optimization]
+**Learning:** [Using sequential awaits in loops creates a severe N+1 problem against remote databases (like Cloudflare D1). For independent record insertions (e.g. custom fields for a person), resolving promises concurrently yields substantial speedups.]
+**Action:** [When batching data insertions/updates that are not reliant on each other, prefer `Promise.all` mapping over `for...of` await loops to minimize RTT (Round Trip Time).]
