@@ -78,3 +78,46 @@ test('safeParseObject', async (t) => {
     assert.equal(safeParseObject(''), null);
   });
 });
+
+test('safeParse - valid JSON', () => {
+  assert.deepEqual(safeParse('{"a": 1}'), { a: 1 });
+  assert.deepEqual(safeParse('[1, 2, 3]'), [1, 2, 3]);
+  assert.equal(safeParse('"test"'), 'test');
+  assert.equal(safeParse('123'), 123);
+  assert.equal(safeParse('true'), true);
+  assert.equal(safeParse('null'), null);
+});
+
+test('safeParse - null or empty inputs', () => {
+  assert.equal(safeParse(null), null);
+  assert.equal(safeParse(undefined), null);
+  assert.equal(safeParse(''), null);
+});
+
+test('safeParse - invalid JSON error path', () => {
+  // Pass an invalid JSON string which should hit the catch block and return null
+  assert.equal(safeParse('invalid-json-string'), null);
+  assert.equal(safeParse('{a: 1}'), null); // Missing quotes around key
+});
+
+test('safeParseObject - valid JSON object', () => {
+  assert.deepEqual(safeParseObject('{"a": 1, "b": "test"}'), { a: 1, b: 'test' });
+});
+
+test('safeParseObject - invalid JSON object (non-objects)', () => {
+  assert.equal(safeParseObject('[1, 2, 3]'), null);
+  assert.equal(safeParseObject('"test"'), null);
+  assert.equal(safeParseObject('123'), null);
+  assert.equal(safeParseObject('true'), null);
+  assert.equal(safeParseObject('null'), null);
+});
+
+test('safeParseObject - invalid JSON string', () => {
+  assert.equal(safeParseObject('invalid-json-string'), null);
+});
+
+test('safeParseObject - null or empty inputs', () => {
+  assert.equal(safeParseObject(null), null);
+  assert.equal(safeParseObject(undefined), null);
+  assert.equal(safeParseObject(''), null);
+});
