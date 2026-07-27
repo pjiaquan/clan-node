@@ -1,5 +1,11 @@
 ## 2024-05-26 - Breadth-First Search Array Shift Bottleneck
 **Learning:** In `src/kinship/calculator.ts`, the Breadth-First Search (BFS) traversals for kinship calculations were bottlenecked by two main issues. First, using `Array.prototype.shift()` on the queue caused O(N) operations inside the loop, making the traversal O(N^2) overall. Second, dynamically filtering adjacency lists inside the traversal loop using `...neighbors.filter(...)` created massive unnecessary memory allocations and garbage collection pressure.
-**Action:** Always use an index pointer (e.g., `let head = 0; queue[head++]`) instead of `queue.shift()` for queues in BFS traversals in JavaScript to maintain O(1) dequeue time. Pre-sort or pre-process adjacency lists during graph construction (e.g., `buildAdjacency`) rather than inside the hot path of the traversal loop to avoid redundant allocations.## 2024-05-18 - Optimize Primary Avatar Pre-computation
+**Action:** Always use an index pointer (e.g., `let head = 0; queue[head++]`) instead of `queue.shift()` for queues in BFS traversals in JavaScript to maintain O(1) dequeue time. Pre-sort or pre-process adjacency lists during graph construction (e.g., `buildAdjacency`) rather than inside the hot path of the traversal loop to avoid redundant allocations.
+
+## 2024-05-18 - Optimize Primary Avatar Pre-computation
 **Learning:** In `src/backup.ts`, an O(N^2) time complexity bottleneck existed during primary avatar computation due to iterating over unique `personId`s and filtering a large `avatars` array each time. Grouping items by an ID into a Map before processing reduces time complexity to O(N).
 **Action:** When working with large arrays of relations that need to be processed per entity ID, always group the items using a Map first instead of calling `.filter()` repeatedly inside a loop.
+
+## 2024-07-27 - Concurrent Linking Optimization
+**Learning:** In `linkSpousePairExistingChildren`, running independent asynchronous data mutations (`ensureParentChildLink`, `linkParentToSiblingChildren`) inside a sequential `for...of` loop creates an unnecessary bottleneck.
+**Action:** Replace independent sequential loop bodies containing promises with `Promise.all` using array mappings (`array.map(...)`) to maximize concurrent execution while maintaining inner-loop sequentiality if required.
