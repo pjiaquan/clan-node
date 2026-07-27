@@ -300,6 +300,10 @@ export const validateRelations = (
 ) => {
   const layerIds = new Set(layers.map((layer) => layer.id));
   const personIds = new Set(people.map((person) => person.id));
+
+  // Cache people by ID for O(1) lookups during relationship validation
+  const personMap = new Map(people.map((person) => [person.id, person]));
+
   for (const person of people) {
     if (!layerIds.has(person.layer_id)) {
       throw new Error(`Person "${person.id}" references unknown layer "${person.layer_id}"`);
@@ -317,8 +321,8 @@ export const validateRelations = (
     if (!personIds.has(relation.from_person_id) || !personIds.has(relation.to_person_id)) {
       throw new Error(`Relationship references unknown person: ${relation.from_person_id} -> ${relation.to_person_id}`);
     }
-    const fromPerson = people.find((person) => person.id === relation.from_person_id);
-    const toPerson = people.find((person) => person.id === relation.to_person_id);
+    const fromPerson = personMap.get(relation.from_person_id);
+    const toPerson = personMap.get(relation.to_person_id);
     if (!fromPerson || !toPerson || fromPerson.layer_id !== relation.layer_id || toPerson.layer_id !== relation.layer_id) {
       throw new Error(`Relationship crosses layers: ${relation.from_person_id} -> ${relation.to_person_id}`);
     }

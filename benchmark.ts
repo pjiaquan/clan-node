@@ -1,5 +1,6 @@
 import { linkSpousePairExistingChildren } from './src/relationships/service';
-import type { RelationshipRepository, RepositoryMutationResult } from './src/repositories';
+import { validateRelations } from './src/backup/service.js';
+import type { RelationshipRepository } from './src/repositories';
 import type { Env } from './src/types';
 
 class MockSlowRepository implements RelationshipRepository {
@@ -32,7 +33,7 @@ class MockSlowRepository implements RelationshipRepository {
   }
 }
 
-async function run() {
+async function runSpouseLinkBenchmark() {
   const repo = new MockSlowRepository();
   const env = {} as Env;
 
@@ -40,7 +41,34 @@ async function run() {
   await linkSpousePairExistingChildren(repo, env, 'layer', 'A', 'B', new Date().toISOString(), []);
   const end = Date.now();
 
-  console.log(`Time taken: ${end - start}ms`);
+  console.log(`[SpouseLink] Time taken: ${end - start}ms`);
 }
 
-run().catch(console.error);
+function runValidateRelationsBenchmark() {
+  const layers = [{ id: 'layer1', name: 'layer1', description: '', created_at: '', updated_at: '' }];
+  const people: any[] = [];
+  const relationships: any[] = [];
+  for (let i = 0; i < 5000; i++) {
+    people.push({ id: `p${i}`, layer_id: 'layer1' });
+  }
+  for (let i = 0; i < 5000; i++) {
+    relationships.push({
+      from_person_id: `p${i}`,
+      to_person_id: `p${(i + 1) % 5000}`,
+      layer_id: 'layer1',
+    });
+  }
+
+  console.time('validateRelations');
+  for (let i = 0; i < 10; i++) {
+    validateRelations(layers, people, [], relationships, []);
+  }
+  console.timeEnd('validateRelations');
+}
+
+async function main() {
+  await runSpouseLinkBenchmark();
+  runValidateRelationsBenchmark();
+}
+
+main().catch(console.error);
