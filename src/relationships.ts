@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import type { AppBindings } from './types';
+import type { AppBindings, Relationship } from './types';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { RELATIONSHIP_WRITE_RATE_LIMIT } from './rate_limits';
 import { notifyUpdate } from './notify';
@@ -130,8 +130,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
       const preferredHandles = metadata && typeof metadata === 'object'
         ? {
-          sourceHandle: (metadata as any).sourceHandle,
-          targetHandle: (metadata as any).targetHandle
+          sourceHandle: (metadata as Record<string, unknown>).sourceHandle as string | undefined,
+          targetHandle: (metadata as Record<string, unknown>).targetHandle as string | undefined
         }
         : undefined;
       const link = await getSiblingLinkMeta(repository, c.env, layerId, from_person_id, to_person_id, preferredHandles);
@@ -176,7 +176,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
       const otherChildren = await repository.listChildrenForParent(layerId, from_person_id, to_person_id);
       for (const child of otherChildren) {
-        const siblingId = (child as any).to_person_id;
+        const childRel = child as unknown as Relationship;
+        const siblingId = childRel.to_person_id;
         const existingSibling = await repository.findRelationship(layerId, 'sibling', to_person_id, siblingId, true);
         if (!existingSibling) {
           const link = await getSiblingLinkMeta(repository, c.env, layerId, to_person_id, siblingId);
@@ -264,8 +265,9 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     if (!existing) {
       return c.json({ error: 'Relationship not found' }, 404);
     }
+    const existingRel = existing as unknown as Relationship;
 
-    const layerId = String((existing as any).layer_id || resolveLayerId(c, body));
+    const layerId = String(existingRel.layer_id || resolveLayerId(c, body));
     if (type !== undefined) {
       if (!isRelationshipType(type)) {
         return c.json({ error: 'type must be parent_child, spouse, ex_spouse, sibling, or in_law' }, 400);
@@ -304,9 +306,9 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const updatePayload = Object.fromEntries(updates.map((entry, index) => [entry.split(' = ')[0], values[index]]));
     await repository.updateRelationshipById(id, updatePayload);
 
-    const nextFrom = (from_person_id ?? (existing as any).from_person_id) as string;
-    const nextTo = (to_person_id ?? (existing as any).to_person_id) as string;
-    const nextType = type ?? (existing as any).type;
+    const nextFrom = from_person_id ?? existingRel.from_person_id;
+    const nextTo = to_person_id ?? existingRel.to_person_id;
+    const nextType = type ?? existingRel.type;
     const now = new Date().toISOString();
 
     if (nextType === 'parent_child' && !shouldSkipAutoLink) {
@@ -315,7 +317,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
 
       const otherChildren = await repository.listChildrenForParent(layerId, nextFrom, nextTo);
       for (const child of otherChildren) {
-        const siblingId = (child as any).to_person_id;
+        const childRel = child as unknown as Relationship;
+        const siblingId = childRel.to_person_id;
         const existingSibling = await repository.findRelationship(layerId, 'sibling', nextTo, siblingId, true);
         if (!existingSibling) {
           const link = await getSiblingLinkMeta(repository, c.env, layerId, nextTo, siblingId);
@@ -335,8 +338,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     if (nextType === 'sibling' && !shouldSkipAutoLink) {
       const preferredHandles = metadata && typeof metadata === 'object'
         ? {
-          sourceHandle: (metadata as any).sourceHandle,
-          targetHandle: (metadata as any).targetHandle
+          sourceHandle: (metadata as Record<string, unknown>).sourceHandle as string | undefined,
+          targetHandle: (metadata as Record<string, unknown>).targetHandle as string | undefined
         }
         : undefined;
       const link = await getSiblingLinkMeta(repository, c.env, layerId, nextFrom, nextTo, preferredHandles);
@@ -365,8 +368,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       type: nextType
     };
     if (metadata !== undefined && typeof metadata === 'object') {
-      updateDetails.source_handle = (metadata as any)?.sourceHandle;
-      updateDetails.target_handle = (metadata as any)?.targetHandle;
+      updateDetails.source_handle = (metadata as Record<string, unknown>)?.sourceHandle;
+      updateDetails.target_handle = (metadata as Record<string, unknown>)?.targetHandle;
     }
     notifyUpdate(c, 'relationships:update', updateDetails);
     await recordAuditLog(c, {
@@ -417,11 +420,11 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       if (!existing) {
         return c.json({ error: 'Relationship not found' }, 404);
       }
-      const existingAny = existing as any;
-      const layerId = String(existingAny.layer_id || DEFAULT_LAYER_ID);
+      const existingRel = existing as unknown as Relationship;
+      const layerId = String(existingRel.layer_id || DEFAULT_LAYER_ID);
       const personNames = await getPersonNameMap(repository, layerId, [
-        existingAny.from_person_id as string,
-        existingAny.to_person_id as string
+        existingRel.from_person_id,
+        existingRel.to_person_id
       ]);
 
       const result = await repository.deleteRelationshipById(id);
@@ -431,23 +434,23 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       if (result.changes > 0) {
         notifyUpdate(c, 'relationships:delete', {
           id,
-          from_person_id: existingAny.from_person_id as string,
-          to_person_id: existingAny.to_person_id as string,
-          from_person_name: personNames.get(existingAny.from_person_id as string) ?? null,
-          to_person_name: personNames.get(existingAny.to_person_id as string) ?? null,
-          type: existingAny.type as string
+          from_person_id: existingRel.from_person_id,
+          to_person_id: existingRel.to_person_id,
+          from_person_name: personNames.get(existingRel.from_person_id) ?? null,
+          to_person_name: personNames.get(existingRel.to_person_id) ?? null,
+          type: existingRel.type
         });
         await recordAuditLog(c, {
           action: 'delete',
           resourceType: 'relationships',
           resourceId: id,
-          summary: `刪除關係 ${personNames.get(existingAny.from_person_id as string) || existingAny.from_person_id} -> ${personNames.get(existingAny.to_person_id as string) || existingAny.to_person_id}`,
+          summary: `刪除關係 ${personNames.get(existingRel.from_person_id) || existingRel.from_person_id} -> ${personNames.get(existingRel.to_person_id) || existingRel.to_person_id}`,
           details: {
-            from_person_id: existingAny.from_person_id as string,
-            to_person_id: existingAny.to_person_id as string,
-            from_person_name: personNames.get(existingAny.from_person_id as string) ?? null,
-            to_person_name: personNames.get(existingAny.to_person_id as string) ?? null,
-            type: existingAny.type as string
+            from_person_id: existingRel.from_person_id,
+            to_person_id: existingRel.to_person_id,
+            from_person_name: personNames.get(existingRel.from_person_id) ?? null,
+            to_person_name: personNames.get(existingRel.to_person_id) ?? null,
+            type: existingRel.type
           }
         });
         return c.json({ success: true, id });
