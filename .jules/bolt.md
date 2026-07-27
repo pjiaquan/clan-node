@@ -17,3 +17,7 @@
 ## 2024-07-27 - [Concurrent Database Writes Optimization]
 **Learning:** [Using sequential awaits in loops creates a severe N+1 problem against remote databases (like Cloudflare D1). For independent record insertions (e.g. custom fields for a person), resolving promises concurrently yields substantial speedups.]
 **Action:** [When batching data insertions/updates that are not reliant on each other, prefer `Promise.all` mapping over `for...of` await loops to minimize RTT (Round Trip Time).]
+
+## 2024-07-27 - N+1 Query in Sibling Link Creation
+**Learning:** In `src/relationships.ts`, the process of creating missing sibling relationships and linking sibling networks ran in a sequential `for...of` loop over `otherChildren`. This caused an N+1 query pattern, where database roundtrips happened sequentially and blocked each other, resulting in significantly slower performance for large families.
+**Action:** Always leverage concurrency when performing independent, async I/O operations in a loop (like database queries) by mapping over the array and wrapping it in `await Promise.all(...)`.
