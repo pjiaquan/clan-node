@@ -144,17 +144,20 @@ export async function linkSiblingNetworks(
     getSiblingIds(repository, layerId, personB),
   ]);
 
-  for (const siblingId of siblingsB) {
-    if (siblingId !== personA) {
-      await ensureSiblingLink(repository, env, layerId, personA, siblingId, now, createdRelationshipIds);
-    }
-  }
-
-  for (const siblingId of siblingsA) {
-    if (siblingId !== personB) {
-      await ensureSiblingLink(repository, env, layerId, personB, siblingId, now, createdRelationshipIds);
-    }
-  }
+  // Execute independent async tasks concurrently instead of sequentially
+  // to reduce overall latency when linking networks.
+  await Promise.all([
+    ...siblingsB.map(async (siblingId) => {
+      if (siblingId !== personA) {
+        await ensureSiblingLink(repository, env, layerId, personA, siblingId, now, createdRelationshipIds);
+      }
+    }),
+    ...siblingsA.map(async (siblingId) => {
+      if (siblingId !== personB) {
+        await ensureSiblingLink(repository, env, layerId, personB, siblingId, now, createdRelationshipIds);
+      }
+    }),
+  ]);
 }
 
 export async function ensureParentChildLink(
