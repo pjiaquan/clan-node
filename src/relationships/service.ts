@@ -265,13 +265,16 @@ export async function linkSpousePairExistingChildren(
     getChildIds(repository, layerId, personB),
   ]);
 
-  for (const childId of aChildren) {
-    await ensureParentChildLink(repository, layerId, personB, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(repository, env, layerId, personB, childId, now, createdRelationshipIds);
-  }
-
-  for (const childId of bChildren) {
-    await ensureParentChildLink(repository, layerId, personA, childId, now, createdRelationshipIds);
-    await linkParentToSiblingChildren(repository, env, layerId, personA, childId, now, createdRelationshipIds);
-  }
+  // Execute independent async tasks concurrently instead of sequentially
+  // to reduce overall latency when linking children.
+  await Promise.all([
+    ...aChildren.map(async (childId) => {
+      await ensureParentChildLink(repository, layerId, personB, childId, now, createdRelationshipIds);
+      await linkParentToSiblingChildren(repository, env, layerId, personB, childId, now, createdRelationshipIds);
+    }),
+    ...bChildren.map(async (childId) => {
+      await ensureParentChildLink(repository, layerId, personA, childId, now, createdRelationshipIds);
+      await linkParentToSiblingChildren(repository, env, layerId, personA, childId, now, createdRelationshipIds);
+    }),
+  ]);
 }
