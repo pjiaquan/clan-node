@@ -29,3 +29,7 @@
 ## 2024-05-15 - N+1 Query Parallelization in Relationships
 **Learning:** Sequential DB queries (like findRelationship, createRelationship) inside for...of loops for sibling relationship generation cause N+1 performance bottlenecks.
 **Action:** Use Promise.all with array.map for independent relationship creations to parallelize I/O bounds tasks in Cloudflare D1 / SQLite setups where concurrent connections are supported or queued efficiently by the driver.
+
+## 2024-07-27 - Sequential Execution of Promise-based Database Loops
+**Learning:** In `src/relationships/service.ts`, `linkSiblingNetworks` used sequential `for...of` loops to execute database operations for two arrays of sibling IDs. This caused I/O operations to block on each other unnecessarily, leading to high latency for parents with multiple children (N+1 query bottleneck).
+**Action:** When performing independent I/O tasks that do not depend on the result of the previous iteration (such as iterating over sibling networks to create links), replace `for...of` loops with `Promise.all` combined with `.map()` to enable concurrent execution and substantially reduce overall response time.
