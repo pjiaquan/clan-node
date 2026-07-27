@@ -204,16 +204,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     const customFields = extractCustomFields(body, metadata);
     if (customFields) {
-      for (const field of customFields) {
-        if (!field?.label && !field?.value) continue;
-        await repository.insertCustomField({
-          personId: id,
-          label: field.label || '',
-          value: (await encryptProtectedValue(c.env, field.value || '')) || '',
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      await Promise.all(
+        customFields
+          .filter(field => field?.label || field?.value)
+          .map(async (field) => repository.insertCustomField({
+            personId: id,
+            label: field.label || '',
+            value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+            createdAt: now,
+            updatedAt: now,
+          }))
+      );
     }
 
     const inputAvatars = Array.isArray(body?.avatars) ? body.avatars : [];
@@ -397,16 +398,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     if (customFields !== null) {
       await repository.deleteCustomFieldsByPersonId(id);
-      for (const field of customFields) {
-        if (!field?.label && !field?.value) continue;
-        await repository.insertCustomField({
-          personId: id,
-          label: field.label || '',
-          value: (await encryptProtectedValue(c.env, field.value || '')) || '',
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      await Promise.all(
+        customFields
+          .filter(field => field?.label || field?.value)
+          .map(async (field) => repository.insertCustomField({
+            personId: id,
+            label: field.label || '',
+            value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+            createdAt: now,
+            updatedAt: now,
+          }))
+      );
     }
 
     if (avatar_url !== undefined) {
