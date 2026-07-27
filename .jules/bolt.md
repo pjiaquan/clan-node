@@ -21,3 +21,7 @@
 ## 2024-07-27 - N+1 Query in Sibling Link Creation
 **Learning:** In `src/relationships.ts`, the process of creating missing sibling relationships and linking sibling networks ran in a sequential `for...of` loop over `otherChildren`. This caused an N+1 query pattern, where database roundtrips happened sequentially and blocked each other, resulting in significantly slower performance for large families.
 **Action:** Always leverage concurrency when performing independent, async I/O operations in a loop (like database queries) by mapping over the array and wrapping it in `await Promise.all(...)`.
+
+## 2025-02-28 - N+1 Queries in Custom Field Insertions
+**Learning:** Consecutive database writes inside a for-loop (awaiting each insertion) create a severe N+1 bottleneck, causing sequential I/O blocking.
+**Action:** Always batch database inserts or use `Promise.all()` to run independent insertions concurrently when possible.

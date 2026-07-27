@@ -316,14 +316,9 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       await linkParentToSiblingChildren(repository, c.env, layerId, nextFrom, nextTo, now);
 
       const otherChildren = await repository.listChildrenForParent(layerId, nextFrom, nextTo);
-<<<<<<< HEAD
-      for (const child of otherChildren) {
+      await Promise.all(otherChildren.map(async (child) => {
         const childRel = child as unknown as Relationship;
         const siblingId = childRel.to_person_id;
-=======
-      await Promise.all(otherChildren.map(async (child) => {
-        const siblingId = (child as any).to_person_id;
->>>>>>> 55414e1 (perf(relationships): parallelize sibling link creation)
         const existingSibling = await repository.findRelationship(layerId, 'sibling', nextTo, siblingId, true);
         if (!existingSibling) {
           const link = await getSiblingLinkMeta(repository, c.env, layerId, nextTo, siblingId);
