@@ -50,15 +50,26 @@ export async function getSiblingLinkMeta(
 
   const a = results.find((person) => person.id === aId) as Record<string, unknown> | undefined;
   const b = results.find((person) => person.id === bId) as Record<string, unknown> | undefined;
-  const aDob = a?.dob ? new Date((await decryptProtectedValue(env, a.dob as string | null)) || '').getTime() : 0;
-  const bDob = b?.dob ? new Date((await decryptProtectedValue(env, b.dob as string | null)) || '').getTime() : 0;
+
+  const [aDobRaw, bDobRaw] = await Promise.all([
+    a?.dob ? decryptProtectedValue(env, a.dob as string | null) : Promise.resolve(null),
+    b?.dob ? decryptProtectedValue(env, b.dob as string | null) : Promise.resolve(null),
+  ]);
+
+  const aDob = aDobRaw ? new Date(aDobRaw).getTime() : 0;
+  const bDob = bDobRaw ? new Date(bDobRaw).getTime() : 0;
+
   return buildSiblingLinkMeta(aId, bId, aDob, bDob, preferredHandles);
 }
 
 export async function getSiblingIds(repository: RelationshipRepository, layerId: string, personId: string) {
   const ids = new Set<string>();
 
-  const siblingEdges = await repository.listSiblingEdges(layerId, personId);
+  const [siblingEdges, parentEdges] = await Promise.all([
+    repository.listSiblingEdges(layerId, personId),
+    repository.listParentEdgesForChild(layerId, personId),
+  ]);
+
   for (const rel of siblingEdges) {
     const otherId = rel.from_person_id === personId ? rel.to_person_id : rel.from_person_id;
     if (typeof otherId === 'string' && otherId !== personId) {
@@ -66,10 +77,10 @@ export async function getSiblingIds(repository: RelationshipRepository, layerId:
     }
   }
 
-  const parentEdges = await repository.listParentEdgesForChild(layerId, personId);
   const parentIds = parentEdges
     .map((edge) => edge.from_person_id)
     .filter((id): id is string => typeof id === 'string');
+
   if (parentIds.length) {
     const siblingChildren = await repository.listChildrenForParents(layerId, parentIds, personId);
     for (const rel of siblingChildren) {
