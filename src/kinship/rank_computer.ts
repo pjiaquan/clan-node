@@ -11,6 +11,8 @@ export class SiblingRankComputer {
   private readonly childrenMap = new Map<string, Set<string>>();
   private readonly peopleMap = new Map<string, Person>();
 
+  private sortedSiblingsCache = new Map<string, Person[]>();
+
   constructor(
     private readonly people: Person[],
     private readonly relationships: Relationship[],
@@ -45,9 +47,22 @@ export class SiblingRankComputer {
       return { relation: 'younger', rank: 0 };
     }
 
-    const siblingIds = new Set<string>(this.siblingMap.get(reference.id) || []);
+    const sameGenderSiblings = this.getSortedSameGenderSiblings(reference, sibling.gender);
 
+    const index = sameGenderSiblings.findIndex((person) => person.id === sibling.id);
+    if (index === -1) return null;
+    return { relation: 'older', rank: index + 1 };
+  }
+
+  private getSortedSameGenderSiblings(reference: Person, gender: string): Person[] {
+    const cacheKey = `${reference.id}:${gender}`;
+    if (this.sortedSiblingsCache.has(cacheKey)) {
+      return this.sortedSiblingsCache.get(cacheKey)!;
+    }
+
+    const siblingIds = new Set<string>(this.siblingMap.get(reference.id) || []);
     const parentIds = this.parentsMap.get(reference.id) || new Set<string>();
+
     parentIds.forEach((parentId) => {
       const children = this.childrenMap.get(parentId) || new Set<string>();
       children.forEach((childId) => {
@@ -60,15 +75,13 @@ export class SiblingRankComputer {
     const sameGenderSiblings: Person[] = [];
     siblingIds.forEach((id) => {
       const person = this.peopleMap.get(id);
-      if (person && person.gender === sibling.gender && person.dob) {
+      if (person && person.gender === gender && person.dob) {
         sameGenderSiblings.push(person);
       }
     });
 
     sameGenderSiblings.sort((left, right) => new Date(left.dob!).getTime() - new Date(right.dob!).getTime());
-
-    const index = sameGenderSiblings.findIndex((person) => person.id === sibling.id);
-    if (index === -1) return null;
-    return { relation: 'older', rank: index + 1 };
+    this.sortedSiblingsCache.set(cacheKey, sameGenderSiblings);
+    return sameGenderSiblings;
   }
 }
