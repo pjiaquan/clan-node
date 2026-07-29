@@ -114,6 +114,8 @@ export class D1GraphRepository implements GraphRepository {
   }
 }
 
+const isValidColumnName = (name: string) => /^[a-zA-Z0-9_]+$/.test(name);
+
 export class D1RelationshipRepository implements RelationshipRepository {
   constructor(private readonly db: D1Database) {}
 
@@ -193,7 +195,12 @@ export class D1RelationshipRepository implements RelationshipRepository {
     if (!entries.length) {
       return { lastRowId: null, changes: 0 };
     }
-    const columns = entries.map(([column]) => `${column} = ?`);
+    const columns = entries.map(([column]) => {
+      if (!isValidColumnName(column)) {
+        throw new Error(`Invalid column name: ${column}`);
+      }
+      return `${column} = ?`;
+    });
     const values = entries.map(([, value]) => value);
     const result = await this.db.prepare(
       `UPDATE relationships SET ${columns.join(', ')} WHERE id = ?`
@@ -306,7 +313,12 @@ export class D1PeopleRepository implements PeopleRepository {
 
   async insertPerson(fields: Record<string, unknown>) {
     const entries = Object.entries(fields);
-    const columns = entries.map(([column]) => column);
+    const columns = entries.map(([column]) => {
+      if (!isValidColumnName(column)) {
+        throw new Error(`Invalid column name: ${column}`);
+      }
+      return column;
+    });
     const values = entries.map(([, value]) => value);
     const result = await this.db.prepare(
       `INSERT INTO people (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`
@@ -319,7 +331,12 @@ export class D1PeopleRepository implements PeopleRepository {
     if (!entries.length) {
       return { lastRowId: null, changes: 0 };
     }
-    const columns = entries.map(([column]) => `${column} = ?`);
+    const columns = entries.map(([column]) => {
+      if (!isValidColumnName(column)) {
+        throw new Error(`Invalid column name: ${column}`);
+      }
+      return `${column} = ?`;
+    });
     const values = entries.map(([, value]) => value);
     const result = await this.db.prepare(
       `UPDATE people SET ${columns.join(', ')} WHERE id = ?`
