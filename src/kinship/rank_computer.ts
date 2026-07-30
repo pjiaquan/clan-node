@@ -80,7 +80,9 @@ export class SiblingRankComputer {
       }
     });
 
-    sameGenderSiblings.sort((left, right) => new Date(left.dob!).getTime() - new Date(right.dob!).getTime());
+    // Bolt Optimization: ISO 8601 strings can be sorted lexicographically.
+    // Avoids creating Date objects inside the sort comparator.
+    sameGenderSiblings.sort((left, right) => left.dob! < right.dob! ? -1 : (left.dob! > right.dob! ? 1 : 0));
     this.sortedSiblingsCache.set(cacheKey, sameGenderSiblings);
     return sameGenderSiblings;
   }
