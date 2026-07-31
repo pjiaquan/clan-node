@@ -75,8 +75,9 @@ export const SetupPage: React.FC<SetupPageProps> = ({ error, onSetup }) => {
             />
           </div>
           {(localError || error) && <div className="login-error">{localError || error}</div>}
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? t('setup.submitting') : t('setup.submit')}
+          <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+            {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+            <span>{submitting ? t('setup.submitting') : t('setup.submit')}</span>
           </button>
         </form>
       </div>

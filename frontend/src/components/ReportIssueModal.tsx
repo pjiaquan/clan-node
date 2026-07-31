@@ -82,8 +82,9 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
 
           <div className="form-actions">
             <button type="button" onClick={onClose} disabled={submitting}>{t('common.cancel')}</button>
-            <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? t('report.submitting') : t('report.submit')}
+            <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+              {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+              <span>{submitting ? t('report.submitting') : t('report.submit')}</span>
             </button>
           </div>
         </form>

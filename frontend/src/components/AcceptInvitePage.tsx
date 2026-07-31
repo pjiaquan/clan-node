@@ -67,8 +67,9 @@ export const AcceptInvitePage: React.FC<AcceptInvitePageProps> = ({ error, onSub
             />
           </div>
           {(localError || error) && <div className="login-error">{localError || error}</div>}
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? t('invite.submitting') : t('invite.submit')}
+          <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+            {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+            <span>{submitting ? t('invite.submitting') : t('invite.submit')}</span>
           </button>
           <button type="button" className="user-admin-btn secondary auth-secondary-btn" onClick={onCancel} disabled={submitting}>
             {t('invite.cancel')}
