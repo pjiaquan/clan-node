@@ -142,8 +142,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
               {notice && <div className="notice-info">{notice}</div>}
               {error && <div className="login-error">{error}</div>}
-              <button type="submit" className="btn-primary" disabled={submitting}>
-                {submitting ? t('login.mfaVerifying') : t('login.verifyMfa')}
+              <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+                {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+                <span>{submitting ? t('login.mfaVerifying') : t('login.verifyMfa')}</span>
               </button>
               <div className="login-secondary-actions">
                 {pendingMfa.methods.includes('email') && pendingMfaMethod !== 'email' && onUseEmailMfa && (
@@ -231,10 +232,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   {resendBusy ? t('login.resendingVerification') : t('login.resendVerification')}
                 </button>
               )}
-              <button type="submit" className="btn-primary" disabled={submitting}>
-                {submitting
-                  ? (isRegistering ? t('setup.submitting') : t('login.signingIn'))
-                  : (isRegistering ? t('login.register') : t('login.signIn'))}
+              <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+                {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+                <span>
+                  {submitting
+                    ? (isRegistering ? t('setup.submitting') : t('login.signingIn'))
+                    : (isRegistering ? t('login.register') : t('login.signIn'))}
+                </span>
               </button>
               {!isRegistering && onLoginWithPasskey && (
                 <button type="button" className="auth-secondary-btn" onClick={() => { void onLoginWithPasskey(); }} disabled={submitting}>

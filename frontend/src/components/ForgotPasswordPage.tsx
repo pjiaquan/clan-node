@@ -50,8 +50,9 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
           </div>
           {notice && <div className="notice-info">{notice}</div>}
           {error && <div className="login-error">{error}</div>}
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? t('forgotPassword.submitting') : t('forgotPassword.submit')}
+          <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+            {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+            <span>{submitting ? t('forgotPassword.submitting') : t('forgotPassword.submit')}</span>
           </button>
           <button type="button" className="auth-secondary-btn" onClick={onCancel} disabled={submitting}>
             {t('login.backToSignIn')}

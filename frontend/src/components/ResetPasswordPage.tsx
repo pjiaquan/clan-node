@@ -73,8 +73,9 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
           </div>
           {notice && <div className="notice-info">{notice}</div>}
           {(localError || error) && <div className="login-error">{localError || error}</div>}
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? t('resetPassword.submitting') : t('resetPassword.submit')}
+          <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+            {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+            <span>{submitting ? t('resetPassword.submitting') : t('resetPassword.submit')}</span>
           </button>
           <button type="button" className="auth-secondary-btn" onClick={onCancel} disabled={submitting}>
             {t('login.backToSignIn')}
