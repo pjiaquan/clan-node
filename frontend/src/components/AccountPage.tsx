@@ -252,7 +252,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({
                     <strong>{formatDate(account?.updated_at, locale)}</strong>
                   </div>
                 </div>
-                <button type="submit" className="session-btn secondary" disabled={busy}>
+                <button type="submit" className={`session-btn secondary${busy ? ' is-loading' : ''}`} disabled={busy}>
+                  {busy && <span className="btn-inline-spinner" aria-hidden="true" />}
                   {busy ? t('common.saving') : t('account.saveProfile')}
                 </button>
               </form>
@@ -297,7 +298,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({
                     required
                   />
                 </div>
-                <button type="submit" className="session-btn secondary" disabled={busy}>
+                <button type="submit" className={`session-btn secondary${busy ? ' is-loading' : ''}`} disabled={busy}>
+                  {busy && <span className="btn-inline-spinner" aria-hidden="true" />}
                   {busy ? t('common.saving') : t('account.savePassword')}
                 </button>
               </form>

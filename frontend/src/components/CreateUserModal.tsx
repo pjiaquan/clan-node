@@ -61,7 +61,8 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
             </select>
           </div>
           <p className="name-lock-hint">{t('createUser.inviteHelp')}</p>
-          <button type="submit" className="btn-primary" disabled={isSaving}>
+          <button type="submit" className={`btn-primary${isSaving ? ' is-loading' : ''}`} disabled={isSaving}>
+            {isSaving && <span className="btn-inline-spinner" aria-hidden="true" />}
             {isSaving ? t('createUser.creating') : t('createUser.submit')}
           </button>
           {error && <div className="login-error">{error}</div>}
