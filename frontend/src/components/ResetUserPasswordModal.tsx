@@ -73,7 +73,8 @@ export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ 
             <button type="button" className="user-admin-btn secondary" onClick={onClose} disabled={isSaving}>
               {t('common.cancel')}
             </button>
-            <button type="submit" className="user-admin-btn primary" disabled={isSaving}>
+            <button type="submit" className={`user-admin-btn primary${isSaving ? ' is-loading' : ''}`} disabled={isSaving}>
+              {isSaving && <span className="btn-inline-spinner" aria-hidden="true" />}
               {isSaving ? t('userMgmt.passwordResetting') : t('userMgmt.passwordResetSubmit')}
             </button>
           </div>
