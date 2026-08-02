@@ -15,7 +15,7 @@ interface AddPersonModalProps {
     tob?: string,
     tod?: string,
     blood_type?: string
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({
@@ -24,6 +24,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   onSubmit,
 }) => {
   const { t } = useI18n();
+  const [submitting, setSubmitting] = useState(false);
   const [dobYear, setDobYear] = useState('');
   const [dobMonth, setDobMonth] = useState('');
   const [dobDay, setDobDay] = useState('');
@@ -83,19 +84,24 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{t('addPerson.title')}</h2>
-        <form onSubmit={(e) => {
+        <form onSubmit={async (e) => {
           e.preventDefault();
-          const formData = new FormData(e.currentTarget);
-          onSubmit(
-            formData.get('name') as string,
-            (formData.get('english_name') as string) || undefined,
-            formData.get('gender') as 'M' | 'F' | 'O',
-            dobUnknown ? undefined : dob || undefined,
-            dodUnknown ? undefined : dod || undefined,
-            normalizeTraditionalHour(formData.get('tob') as string || ''),
-            (dodUnknown || !dod) ? undefined : normalizeTraditionalHour(tod || ''),
-            (formData.get('blood_type') as string) || undefined
-          );
+          setSubmitting(true);
+          try {
+            const formData = new FormData(e.currentTarget);
+            await onSubmit(
+              formData.get('name') as string,
+              (formData.get('english_name') as string) || undefined,
+              formData.get('gender') as 'M' | 'F' | 'O',
+              dobUnknown ? undefined : dob || undefined,
+              dodUnknown ? undefined : dod || undefined,
+              normalizeTraditionalHour(formData.get('tob') as string || ''),
+              (dodUnknown || !dod) ? undefined : normalizeTraditionalHour(tod || ''),
+              (formData.get('blood_type') as string) || undefined
+            );
+          } finally {
+            setSubmitting(false);
+          }
         }}>
           <div className="form-group">
             <label htmlFor="add-person-name">{t('personForm.name')}</label>
@@ -342,11 +348,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             </>
           )}
           <div className="form-actions">
-            <button type="button" onClick={onClose}>
+            <button type="button" onClick={onClose} disabled={submitting}>
               {t('common.cancel')}
             </button>
-            <button type="submit" className="btn-primary">
-              {t('addPerson.submit')}
+            <button type="submit" className={`btn-primary${submitting ? ' is-loading' : ''}`} disabled={submitting}>
+              {submitting && <span className="btn-inline-spinner" aria-hidden="true" />}
+              <span>{submitting ? t('common.saving') : t('addPerson.submit')}</span>
             </button>
           </div>
         </form>
