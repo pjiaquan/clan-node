@@ -117,7 +117,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   }
 
   private findDirectAncestorPath(centerId: string, targetId: string, parentMap: Map<string, string[]>) {
-    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
+    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId], inlawCount: 0 }];
     const visited = new Set<string>([centerId]);
     let head = 0;
 
@@ -134,6 +134,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
             id: parentId,
             path: [...current.path, 'up'],
             nodePath: [...current.nodePath, parentId],
+            inlawCount: 0,
           });
         }
       }
