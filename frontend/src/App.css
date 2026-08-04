@@ -2992,6 +2992,8 @@ button:disabled:hover {
   gap: 0.35rem;
   font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
 }
 
 .date-year-btn:hover {
