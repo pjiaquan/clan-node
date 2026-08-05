@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2024-05-15 - Array Filtering in BFS Queues
+**Learning:** In the kinship BFS logic, re-evaluating properties of a growing path array (like counting 'inlaw' segments via `.filter().length`) inside the tight loop caused O(N) operations inside an O(V+E) algorithm.
+**Action:** Track these metrics incrementally as O(1) integer counters added to the state/queue object (`TraversalStep`). Also, ensure that internal tracking fields are explicitly removed before returning Maps to avoid violating strict structural subtyping of Typescript Maps.
