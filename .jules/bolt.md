@@ -7,3 +7,7 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+
+## 2024-05-24 - O(N) Array Operations in BFS Inner Loops
+**Learning:** In highly recursive or iterative graph algorithms (like BFS kinship calculations), relying on array methods like `.filter().length` on dynamic paths during queue processing introduces severe `O(N)` bottlenecks, drastically increasing latency in large overlapping graphs.
+**Action:** Always prefer initializing and tracking a cumulative metric (e.g., `inlawCount`) iteratively as an `O(1)` integer counter attached to the traversal state or queue object (`TraversalStep`). When dealing with invariant map values (like `Map<string, { path: string[]; nodePath: string[] }>`), perform tracking internally and explicitly remap to strictly conform to the expected interface without leaking the internal state tracking properties.
