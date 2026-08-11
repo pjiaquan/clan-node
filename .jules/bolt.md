@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2024-05-18 - [Incremental Tracking for BFS Traversals]
+**Learning:** In highly recursive or deep BFS graph traversals (like `kinship/calculator.ts`), using `.filter()` on the current path history for tie-breaking results in `O(N)` loop penalties inside the traversal queue, leading to unintended `O(N^2)` latency spikes on deep family trees.
+**Action:** Always prefer carrying incremental counters directly on the `TraversalStep` state object for `O(1)` access during BFS operations instead of recalculating metrics over historical arrays. Ensure Type maps are strictly returned by re-mapping entries when scrubbing internal traversal properties.
