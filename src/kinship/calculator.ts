@@ -26,6 +26,7 @@ type TraversalStep = {
   id: string;
   path: string[];
   nodePath: string[];
+  inlawCount: number;
 };
 
 type AdjacencyEdge = {
@@ -116,7 +117,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   }
 
   private findDirectAncestorPath(centerId: string, targetId: string, parentMap: Map<string, string[]>) {
-    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
+    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId], inlawCount: 0 }];
     const visited = new Set<string>([centerId]);
     let head = 0;
 
@@ -133,6 +134,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
             id: parentId,
             path: [...current.path, 'up'],
             nodePath: [...current.nodePath, parentId],
+            inlawCount: current.inlawCount,
           });
         }
       }
@@ -183,10 +185,11 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   }
 
   private findShortestPreferredPath(centerId: string, targetId: string, adjacency: Map<string, AdjacencyEdge[]>) {
-    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId] }];
+    const queue: TraversalStep[] = [{ id: centerId, path: [], nodePath: [centerId], inlawCount: 0 }];
     const visited = new Set<string>([centerId]);
     let foundDepth: number | null = null;
     let bestPath: { path: string[]; nodePath: string[] } | null = null;
+    let bestInlawCount = Number.POSITIVE_INFINITY;
     let head = 0;
 
     while (head < queue.length) {
@@ -196,13 +199,11 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
         if (foundDepth === null) {
           foundDepth = current.path.length;
           bestPath = { path: current.path, nodePath: current.nodePath };
+          bestInlawCount = current.inlawCount;
         } else if (current.path.length === foundDepth) {
-          const currentInlawCount = current.path.filter((segment) => segment === 'inlaw').length;
-          const bestInlawCount = bestPath
-            ? bestPath.path.filter((segment) => segment === 'inlaw').length
-            : Number.POSITIVE_INFINITY;
-          if (currentInlawCount < bestInlawCount) {
+          if (current.inlawCount < bestInlawCount) {
             bestPath = { path: current.path, nodePath: current.nodePath };
+            bestInlawCount = current.inlawCount;
           }
         }
         continue;
@@ -224,6 +225,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
             id: neighbor.id,
             path: [...current.path, neighbor.direction],
             nodePath: [...current.nodePath, neighbor.id],
+            inlawCount: current.inlawCount + (neighbor.direction === 'inlaw' ? 1 : 0),
           });
         }
       }
@@ -267,8 +269,8 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
     centerId: string,
     adjacency: Map<string, AdjacencyEdge[]>
   ): Map<string, { path: string[]; nodePath: string[] }> {
-    const paths = new Map<string, { path: string[]; nodePath: string[] }>();
-    paths.set(centerId, { path: [], nodePath: [centerId] });
+    const pathsWithInlaws = new Map<string, { path: string[]; nodePath: string[]; inlawCount: number }>();
+    pathsWithInlaws.set(centerId, { path: [], nodePath: [centerId], inlawCount: 0 });
 
     const queue: string[] = [centerId];
     const visitedDepth = new Map<string, number>();
@@ -277,7 +279,7 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
 
     while (head < queue.length) {
       const currentId = queue[head++];
-      const currentPathObj = paths.get(currentId)!;
+      const currentPathObj = pathsWithInlaws.get(currentId)!;
       const currentDepth = currentPathObj.path.length;
 
       const neighbors = adjacency.get(currentId) || [];
@@ -285,29 +287,37 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
       for (const neighbor of neighbors) {
         const nextDepth = currentDepth + 1;
         const prevDepth = visitedDepth.get(neighbor.id);
+        const nextInlawCount = currentPathObj.inlawCount + (neighbor.direction === 'inlaw' ? 1 : 0);
 
         if (prevDepth === undefined || nextDepth < prevDepth) {
           visitedDepth.set(neighbor.id, nextDepth);
-          paths.set(neighbor.id, {
+          pathsWithInlaws.set(neighbor.id, {
             path: [...currentPathObj.path, neighbor.direction],
             nodePath: [...currentPathObj.nodePath, neighbor.id],
+            inlawCount: nextInlawCount,
           });
           queue.push(neighbor.id);
         } else if (nextDepth === prevDepth) {
-          const currentInlawCount = currentPathObj.path.filter((segment) => segment === 'inlaw').length + (neighbor.direction === 'inlaw' ? 1 : 0);
-          const existingPathObj = paths.get(neighbor.id);
+          const existingPathObj = pathsWithInlaws.get(neighbor.id);
           const existingInlawCount = existingPathObj
-            ? existingPathObj.path.filter((segment) => segment === 'inlaw').length
+            ? existingPathObj.inlawCount
             : Number.POSITIVE_INFINITY;
 
-          if (currentInlawCount < existingInlawCount) {
-            paths.set(neighbor.id, {
+          if (nextInlawCount < existingInlawCount) {
+            pathsWithInlaws.set(neighbor.id, {
               path: [...currentPathObj.path, neighbor.direction],
               nodePath: [...currentPathObj.nodePath, neighbor.id],
+              inlawCount: nextInlawCount,
             });
           }
         }
       }
+    }
+
+    // Explicitly strip inlawCount to satisfy TS map signature exactness
+    const paths = new Map<string, { path: string[]; nodePath: string[] }>();
+    for (const [id, pathObj] of pathsWithInlaws) {
+      paths.set(id, { path: pathObj.path, nodePath: pathObj.nodePath });
     }
     return paths;
   }
