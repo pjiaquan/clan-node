@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2026-08-13 - Incremental O(1) in-law counting during BFS
+**Learning:** Recalculating path metrics like `.filter((segment) => segment === 'inlaw').length` inside `BreadthFirstKinshipCalculator` traversal loops causes O(N) array operations for every state transition, slowing down batch calculations significantly.
+**Action:** Track these metrics incrementally as O(1) counters attached directly to the `TraversalStep` objects (e.g. `inlawCount`). Avoid doing array reductions or filtering at evaluation time within the loop.
