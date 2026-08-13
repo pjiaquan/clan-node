@@ -458,7 +458,7 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Relationship not found' }, 404);
     } catch (error) {
       console.error('Error deleting relationship:', error);
-      return c.json({ error: 'Internal Server Error', details: error instanceof Error ? error.message : String(error) }, 500);
+      return c.json({ error: 'Internal Server Error' }, 500);
     }
   });
 }
