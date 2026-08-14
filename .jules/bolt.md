@@ -7,3 +7,7 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+
+## 2026-08-14 - Expensive O(N) array operations in graph traversals
+**Learning:** When calculating metrics (e.g. counting inlaw segments in paths) during graph algorithms like BFS in `calculator.ts`, calling `.filter().length` inside the loop introduces a massive O(N) overhead as path sizes grow.
+**Action:** Avoid recalculating path metrics with array operations inside tight loops. Instead, track metrics incrementally as O(1) counters within the traversal state or queue objects (e.g., `TraversalStep.inlawCount`).
