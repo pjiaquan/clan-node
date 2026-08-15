@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2024-05-15 - Fast Invariant Typing with Zero-Cost Casts
+**Learning:** TypeScript `Map<K, V>` types are invariant in their value types. When modifying internal Map values to add tracking properties during algorithm execution, conditionally rebuilding the map with `new Map(Array.from(...))` to strip the property at the end introduces an unnecessary O(V) performance overhead, violating the premise of performance enhancement.
+**Action:** Use a zero-cost type assertion (`as unknown as Map<K, ExpectedType>`) to safely circumvent invariant subtyping constraints without introducing runtime cost in the hot path.
