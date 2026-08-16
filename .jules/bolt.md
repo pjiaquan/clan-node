@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2024-05-24 - Expensive Array Filtering in Breadth-First Search Loop
+**Learning:** Recalculating path segment metrics (e.g. counting 'inlaw' segments via `.filter().length`) inside tight loops like BFS pathfinding is an O(N) operation per node visited, leading to significant overhead across deep graph traversals.
+**Action:** When tracking path metrics in BFS or DFS, increment and persist them as O(1) integer counters attached to the queue states (`TraversalStep`) instead of repeatedly scanning the accumulated array history.
