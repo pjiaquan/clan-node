@@ -7,3 +7,6 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2026-08-17 - O(1) Metric Tracking in Graph Traversals
+**Learning:** Filtering arrays on every visited node during graph traversals (e.g. `.filter(segment => segment === 'inlaw').length`) creates hidden O(N) bottlenecks inside loops that become problematic for deeper tree depths.
+**Action:** Track performance metrics incrementally as O(1) state variables within the traversal node or queue object itself, modifying the metric during the transition step instead of recounting on read.
