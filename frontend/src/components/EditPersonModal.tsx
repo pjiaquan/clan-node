@@ -320,7 +320,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     };
   }, []);
 
-  const createCroppedAvatar = async () => {
+  const createCroppedAvatar = useCallback(async () => {
     if (!avatarFile || !avatarImage) return null;
     const canvas = document.createElement('canvas');
     const outputSize = 256;
@@ -356,7 +356,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (!blob) return null;
     return new File([blob], `avatar-${person.id}.png`, { type: 'image/png' });
-  };
+  }, [avatarFile, avatarImage, cropSize, effectiveZoom, offset.x, offset.y, person.id]);
 
   const saveChanges = useCallback(async () => {
     const croppedAvatar = avatarFile
@@ -414,6 +414,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
       hasAvatarActions ? avatarActions : undefined
     );
   }, [
+    avatarFile,
     createCroppedAvatar,
     customFields,
     deleteAvatarIds,
@@ -428,6 +429,8 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     initialPrimaryAvatarId,
     name,
     onSubmit,
+    person.email,
+    person.email_verified_at,
     person.id,
     person.metadata,
     removeAvatar,
@@ -528,7 +531,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     } finally {
       setIsInviting(false);
     }
-  }, [email, isInviting, isSaving, isVerifiedEmailLocked, onInvite, person.id, t]);
+  }, [email, inviteRole, isInviting, isSaving, isVerifiedEmailLocked, onInvite, person.id, t]);
 
   const handleUnlockNameEdit = useCallback(() => {
     if (isNameEditable) return;

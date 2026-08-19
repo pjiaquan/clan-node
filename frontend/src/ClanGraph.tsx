@@ -1403,7 +1403,7 @@ export function ClanGraph({
     }).catch(() => {
       // Keep existing preview state if background avatar fetch fails.
     });
-  }, [avatarBlobs]);
+  }, [avatarBlobs, activeLayerId]);
 
 
   const onNodeContextMenu = useCallback(
@@ -1480,7 +1480,7 @@ export function ClanGraph({
     if (flowPoint) {
       setLastMousePosition(flowPoint);
     }
-  }, [reactFlowInstance, graphData, getSpouseId]);
+  }, [reactFlowInstance]);
   const handleNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
     setHoveredNodeId(node.id);
   }, []);
@@ -3342,7 +3342,7 @@ export function ClanGraph({
     } catch (error) {
       console.error(`Failed to undo ${entry.type}:`, error);
     }
-  }, [ensureEditable, undoStack, fetchGraph, setCenterId, setNodes, updatePersonPosition]);
+  }, [activeLayerId, ensureEditable, undoStack, fetchGraph, persistViewportState, setCenterId, setNodes, updatePersonPosition]);
 
   const handleDuplicateBottomRight = useCallback(async (id: string) => {
     if (!ensureEditable()) return;
@@ -3573,7 +3573,7 @@ export function ClanGraph({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming, t]);
+  }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming, t, editingPersonId, showAddModal]);
 
   if (loading) {
     return (

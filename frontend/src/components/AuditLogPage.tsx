@@ -125,7 +125,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
       if (!searchText.includes(query)) return false;
       return true;
     })
-  ), [logs, actionFilter, resourceFilter, keyword]);
+  ), [logs, actionFilter, resourceFilter, keyword, prettyAction, prettyResource]);
 
   return (
     <div className="notice-page">

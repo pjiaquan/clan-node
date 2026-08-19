@@ -522,7 +522,7 @@ function App() {
   useEffect(() => {
     if (!pendingMfa) return;
     setPendingMfaMethod(pendingMfa.preferred_method);
-  }, [pendingMfa?.session_id, pendingMfa?.preferred_method]);
+  }, [pendingMfa]);
 
   const handleSetupAdmin = useCallback(async (email: string, password: string) => {
     setAuthError(null);
@@ -606,12 +606,12 @@ function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isAuthed, isZh, navigateTo]);
+  }, [isAuthed, navigateTo, t]);
 
   useEffect(() => {
     if (!isAuthed || !authUser) return;
     setGraphSettings(loadGraphSettings(authUser.username || null));
-  }, [isAuthed, authUser?.username]);
+  }, [isAuthed, authUser]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -922,7 +922,6 @@ function App() {
     navigateTo,
     themeMode,
     toggleTheme,
-    isZh,
     resendingVerification,
   ]);
 
