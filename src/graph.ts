@@ -180,7 +180,7 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       });
     } catch (error) {
       console.error('Fatal error in GET /api/graph:', error);
-      return c.json({ error: 'Internal Server Error', details: error instanceof Error ? error.message : String(error) }, 500);
+      return c.json({ error: 'Internal Server Error' }, 500);
     }
   });
 }
