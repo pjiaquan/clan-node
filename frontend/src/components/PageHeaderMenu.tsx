@@ -98,6 +98,8 @@ export const PageHeaderMenu: React.FC<PageHeaderMenuProps> = ({
         type="button"
         aria-label={t('common.moreActions')}
         title={t('common.moreActions')}
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
       >
         <span className="btn-icon">

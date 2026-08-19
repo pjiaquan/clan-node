@@ -563,6 +563,8 @@ export const Header: React.FC<HeaderProps> = ({
             className="btn-secondary btn-icon icon-only-btn"
             aria-label={t('header.menu')}
             title={t('header.menu')}
+            aria-haspopup="menu"
+            aria-expanded={mobileMenuOpen}
             onClick={() => setMobileMenuOpen((prev) => !prev)}
           >
             <span className="btn-icon">
@@ -957,6 +959,8 @@ export const Header: React.FC<HeaderProps> = ({
               }}
               aria-label={t('header.nodeActions')}
               title={t('header.nodeActions')}
+              aria-haspopup="menu"
+              aria-expanded={actionMenuOpen}
             >
               <span className="btn-icon">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1075,6 +1079,8 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             aria-label={t('header.moreActions')}
             title={t('header.moreActions')}
+            aria-haspopup="menu"
+            aria-expanded={desktopMenuOpen}
           >
             <span className="btn-icon">
               <svg viewBox="0 0 24 24" aria-hidden="true">
