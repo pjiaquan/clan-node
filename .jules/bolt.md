@@ -7,3 +7,4 @@
 ## 2024-05-24 - Expensive Date Instantiation in Sort Loops
 **Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
 **Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
+## 2024-05-18 - Replacing O(N) array filter with O(1) counter in BFS traversals\n**Learning:** In highly recursive or deep BFS tree traversals like `kinship/calculator.ts`, calculating segment features like `inlawCount` using `.filter().length` on the path arrays creates an unnecessary O(N) overhead per node visit, creating O(N^2) behaviour.\n**Action:** Always track path metrics incrementally via counters in the traversal state (e.g. `TraversalStep.inlawCount`) to turn O(N) recalculations into O(1) property reads.\n
