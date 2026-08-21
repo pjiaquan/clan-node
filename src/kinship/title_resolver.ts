@@ -628,7 +628,14 @@ export class KinshipTitleResolver {
     }
 
     if (path[path.length - 1] === 'up') {
-      const inlawSteps = path.filter((segment) => segment === 'spouse' || segment === 'inlaw' || segment === 'ex_spouse').length;
+      // Bolt Optimization: Replaced O(N) path.filter(...).length with a single loop
+      // to avoid allocating an intermediate array and improve traversal performance.
+      let inlawSteps = 0;
+      for (const segment of path) {
+        if (segment === 'spouse' || segment === 'inlaw' || segment === 'ex_spouse') {
+          inlawSteps++;
+        }
+      }
       if (inlawSteps >= 2) {
         return this.getInLawElderTitle(target);
       }
@@ -646,16 +653,24 @@ export class KinshipTitleResolver {
       || pathStr.startsWith('up-down-down')
     ) {
       let sibling: Person | undefined;
+      // Bolt Optimization: Replaced O(N) path.slice(X).filter(X).length with a standard loop
+      // to avoid allocating intermediate arrays on every resolution step.
       let downCount = 0;
       if (pathStr.startsWith('sibling-sibling-down')) {
         sibling = this.getPerson(nodePath[2]);
-        downCount = path.slice(2).filter((segment) => segment === 'down').length;
+        for (let i = 2; i < path.length; i++) {
+          if (path[i] === 'down') downCount++;
+        }
       } else if (path[0] === 'sibling') {
         sibling = this.getPerson(nodePath[1]);
-        downCount = path.slice(1).filter((segment) => segment === 'down').length;
+        for (let i = 1; i < path.length; i++) {
+          if (path[i] === 'down') downCount++;
+        }
       } else if (path[0] === 'up' && path[1] === 'down') {
         sibling = this.getPerson(nodePath[2]);
-        downCount = path.slice(2).filter((segment) => segment === 'down').length;
+        for (let i = 2; i < path.length; i++) {
+          if (path[i] === 'down') downCount++;
+        }
       }
 
       if (sibling && downCount >= 1) {
