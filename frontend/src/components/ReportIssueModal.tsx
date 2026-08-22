@@ -59,16 +59,17 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
         <p className="report-issue-person">{t('report.targetPerson', { name: personName })}</p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>{t('report.issueType')}</label>
-            <select value={type} onChange={(event) => setType(event.target.value as NotificationType)}>
+            <label htmlFor="report-issue-type">{t('report.issueType')}</label>
+            <select id="report-issue-type" value={type} onChange={(event) => setType(event.target.value as NotificationType)}>
               {issueTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </div>
           <div className="form-group">
-            <label>{t('report.details')}</label>
+            <label htmlFor="report-issue-details">{t('report.details')}</label>
             <textarea
+              id="report-issue-details"
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               rows={5}
