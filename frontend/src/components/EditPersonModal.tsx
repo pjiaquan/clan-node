@@ -624,6 +624,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setDobYear(nextYearText);
     setDobDay((prev) => clampDay(nextYearText, dobMonth, prev));
   };
+  const adjustDodYear = (delta: number) => {
+    const yearNum = Number.parseInt(dodYear, 10);
+    if (!Number.isFinite(yearNum)) return;
+    const nextYear = Math.max(1, Math.min(9999, yearNum + delta));
+    const nextYearText = String(nextYear);
+    setDodYear(nextYearText);
+    setDodDay((prev) => clampDay(nextYearText, dodMonth, prev));
+  };
   const calculateWesternAge = () => {
     if (!birthYear) return null;
     const hasDod = Boolean(deathYear);
@@ -1078,6 +1086,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   onClick={() => adjustDobYear(-1)}
                   disabled={dobUnknown || !dobYear}
                   title={t('editPerson.decreaseYear')}
+                  aria-label={t('editPerson.decreaseYear')}
                 >
                   {t('editPerson.decreaseYearShort')}
                 </button>
@@ -1087,6 +1096,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                   onClick={() => adjustDobYear(1)}
                   disabled={dobUnknown || !dobYear}
                   title={t('editPerson.increaseYear')}
+                  aria-label={t('editPerson.increaseYear')}
                 >
                   {t('editPerson.increaseYearShort')}
                 </button>
@@ -1192,6 +1202,26 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                         );
                       })}
                     </select>
+                    <button
+                      type="button"
+                      className="date-year-btn"
+                      onClick={() => adjustDodYear(-1)}
+                      disabled={dodUnknown || !dodYear}
+                      title={t('editPerson.decreaseYear')}
+                      aria-label={t('editPerson.decreaseYear')}
+                    >
+                      {t('editPerson.decreaseYearShort')}
+                    </button>
+                    <button
+                      type="button"
+                      className="date-year-btn"
+                      onClick={() => adjustDodYear(1)}
+                      disabled={dodUnknown || !dodYear}
+                      title={t('editPerson.increaseYear')}
+                      aria-label={t('editPerson.increaseYear')}
+                    >
+                      {t('editPerson.increaseYearShort')}
+                    </button>
                   </div>
                   <label className="date-unknown-toggle">
                     <input
