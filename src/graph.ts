@@ -25,7 +25,8 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       const centerId = c.req.query('center');
       const layerId = resolveLayerId(c);
       console.log('GET /api/graph request for center:', centerId);
-      const depth = parseInt(c.req.query('depth') || '3');
+      // Bound the max depth to 10 to prevent DoS via expensive queries
+      const depth = Math.min(parseInt(c.req.query('depth') || '3', 10), 10);
 
       if (!centerId) {
         return c.json({ error: 'center query parameter is required' }, 400);

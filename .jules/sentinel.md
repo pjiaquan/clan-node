@@ -6,3 +6,7 @@
 **Vulnerability:** SQL Injection in dynamic D1 database queries.
 **Learning:** Object keys generated via `Object.entries(updates)` were directly interpolated into SQL strings (e.g. `` `UPDATE people SET ${columns.join(', ')}` ``) without validation, which could allow attackers to execute arbitrary SQL commands if they could control the object keys.
 **Prevention:** Validate all dynamically generated column names against an allowlist pattern (e.g., `/^[a-zA-Z0-9_]+$/`) before allowing them to be interpolated into queries.
+## 2025-05-18 - [DoS via Unbounded Depth Parameter]
+**Vulnerability:** The `depth` parameter in the `GET /api/graph` endpoint was parsed from the query string without any upper bounds, allowing attackers to pass excessively large values (e.g., `9999`) and trigger expensive graph queries, leading to CPU and memory exhaustion (Denial of Service).
+**Learning:** Merely passing a radix of 10 to `parseInt` does not protect against unbounded numerical values, as modern JS environments default to base 10 anyway; the real danger is the lack of domain-specific bounds checking.
+**Prevention:** Always validate and bound user-controlled parameters that dictate iteration depth or resource allocation, such as by using `Math.min(parseInt(val, 10), MAX_SAFE_LIMIT)`.
