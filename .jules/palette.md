@@ -10,3 +10,6 @@
 ## 2024-05-20 - Ensure loading states for generic modals
 **Learning:** We implemented a loading state in `AddPersonModal`. I've observed that some modals like `AddPersonModal` don't disable their 'Cancel' buttons or display proper feedback with inline spinners during async submissions. This leaves the interface unresponsive during a network call or creation flow, breaking expectations for async actions in similar components.
 **Action:** When adding async submission functions in forms and modals, always apply the `btn-inline-spinner` class, set standard `disabled={submitting}` states on inputs/buttons, and provide clear user feedback during submission (e.g., text changing from 'Submit' to 'Saving...').
+## 2024-08-26 - Keyboard Accessibility in Modals
+**Learning:** Found an accessibility issue pattern where several modals (AddPersonModal, CreateUserModal, ResetUserPasswordModal, ReportIssueModal) lacked `Escape` key support to close, whereas `EditPersonModal` already had it implemented. Users rely on standard keyboard shortcuts to navigate and close overlays quickly without needing a mouse.
+**Action:** When adding or reviewing new modals, always ensure `Escape` key listeners (via `useEffect`) are attached to allow for consistent and accessible modal closure.
