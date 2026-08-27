@@ -65,6 +65,16 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     : 31;
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
     if (!dobDay) return;
     const nextDay = clampDay(dobYear, dobMonth, dobDay);
     if (nextDay !== dobDay) {
