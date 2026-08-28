@@ -10,3 +10,7 @@
 **Vulnerability:** The `depth` parameter in the `GET /api/graph` endpoint was parsed from the query string without any upper bounds, allowing attackers to pass excessively large values (e.g., `9999`) and trigger expensive graph queries, leading to CPU and memory exhaustion (Denial of Service).
 **Learning:** Merely passing a radix of 10 to `parseInt` does not protect against unbounded numerical values, as modern JS environments default to base 10 anyway; the real danger is the lack of domain-specific bounds checking.
 **Prevention:** Always validate and bound user-controlled parameters that dictate iteration depth or resource allocation, such as by using `Math.min(parseInt(val, 10), MAX_SAFE_LIMIT)`.
+## 2025-05-18 - [CPU Exhaustion DoS via Missing Password Length Bounds in Login/Register]
+**Vulnerability:** The `/api/auth/login` and `/api/auth/register` endpoints allowed unbounded password lengths to be passed directly to PBKDF2 hashing routines.
+**Learning:** Checking password complexity (like minimum length) often misses checking for maximum length. If the max length check is omitted, attackers can submit massive strings that exhaust CPU resources during password verification/hashing (Denial of Service).
+**Prevention:** Consistently apply `PASSWORD_MAX_LENGTH` limits early in request handlers before any cryptographic operations, and verify that shared validation utilities actually enforce upper bounds across all entry points.
