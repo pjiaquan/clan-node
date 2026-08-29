@@ -1920,6 +1920,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!email || !password) {
       return c.json({ error: 'email and password are required' }, 400);
     }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Invalid email or password' }, 401);
+    }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
     }
