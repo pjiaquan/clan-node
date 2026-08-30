@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { NotificationType } from '../types';
 import { useI18n } from '../i18n';
 
@@ -14,6 +14,16 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const issueTypeOptions: Array<{ value: NotificationType; label: string }> = useMemo(() => ([
     { value: 'rename', label: t('notification.type.rename') },
