@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Expensive Date Instantiation in Deep Graph Traversals
+**Learning:** Instantiating `new Date(string)` inside hot path traversals (like resolving kinship titles recursively in `title_resolver.ts`) is extremely slow and causes unnecessary garbage collection pressure because it happens hundreds or thousands of times per request.
+**Action:** When comparing dates that are stored in standard ISO 8601 format (`YYYY-MM-DD`), bypass native `Date` instantiation entirely. Use direct lexicographical string comparison (`<` and `>`) and simple truthiness checks (`dob || ''`) for identical semantic logic with a fraction of the overhead.
