@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 
 interface CreateUserModalProps {
@@ -32,6 +32,17 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
       setIsSaving(false);
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>

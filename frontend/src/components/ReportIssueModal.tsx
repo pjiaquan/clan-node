@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { NotificationType } from '../types';
 import { useI18n } from '../i18n';
 
@@ -51,6 +51,17 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
