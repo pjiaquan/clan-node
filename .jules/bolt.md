@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Preserving Falsy Fallbacks in Date String Optimizations
+**Learning:** When replacing `new Date(obj.dob).getTime()` with `obj.dob || ""` for performance, truthiness checks in subsequent comparisons (e.g., `if (parentDob && uncleDob)`) MUST be strictly maintained for both operands. Failing to do so causes empty strings `""` to incorrectly evaluate in comparisons (e.g., `"" < "1990-01-01"` is true), leading to broken logic flows.
+**Action:** When performing micro-optimizations that change underlying primitive types (like parsing dates to string comparison), rigidly review the subsequent conditional blocks to ensure they properly defend against the new fallback types.
