@@ -43,8 +43,8 @@ export function trackInsertedRowId(result: any, collector?: number[]) {
 export function buildSiblingLinkMeta(
   aId: string,
   bId: string,
-  aDob: number,
-  bDob: number,
+  aDob: number | string,
+  bDob: number | string,
   preferredHandles?: SiblingHandlePreference
 ): SiblingLink {
   if (aDob && bDob && aDob !== bDob) {

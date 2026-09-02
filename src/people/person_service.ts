@@ -188,9 +188,7 @@ export const loadPersonCustomFields = async (
 export async function updateSiblingOrdering(env: Env, repository: PeopleRepository, personId: string, layerId: string) {
   const person = await repository.getPersonByIdInLayer(personId, layerId);
 
-  const personDob = person && person.dob
-    ? new Date((await decryptProtectedValue(env, person.dob as string | null)) || '').getTime()
-    : 0;
+  const personDob = person && person.dob ? (await decryptProtectedValue(env, person.dob as string | null)) || "" : "";
   if (!personDob) return;
 
   const results = await repository.listSiblingEdges(layerId, personId);
@@ -198,9 +196,7 @@ export async function updateSiblingOrdering(env: Env, repository: PeopleReposito
   for (const rel of results) {
     const otherId = rel.from_person_id === personId ? String(rel.to_person_id) : String(rel.from_person_id);
     const other = await repository.getPersonByIdInLayer(otherId, layerId);
-    const otherDob = other && other.dob
-      ? new Date((await decryptProtectedValue(env, other.dob as string | null)) || '').getTime()
-      : 0;
+    const otherDob = other && other.dob ? (await decryptProtectedValue(env, other.dob as string | null)) || "" : "";
     if (!otherDob || otherDob === personDob) continue;
 
     const link = buildSiblingLinkMeta(personId, otherId, personDob, otherDob);

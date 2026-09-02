@@ -56,8 +56,8 @@ export async function getSiblingLinkMeta(
     b?.dob ? decryptProtectedValue(env, b.dob as string | null) : Promise.resolve(null),
   ]);
 
-  const aDob = aDobRaw ? new Date(aDobRaw).getTime() : 0;
-  const bDob = bDobRaw ? new Date(bDobRaw).getTime() : 0;
+  const aDob = aDobRaw || "";
+  const bDob = bDobRaw || "";
 
   return buildSiblingLinkMeta(aId, bId, aDob, bDob, preferredHandles);
 }
