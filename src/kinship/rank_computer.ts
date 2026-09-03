@@ -40,8 +40,8 @@ export class SiblingRankComputer {
   }
 
   private getRelativeSiblingRank(reference: Person, sibling: Person): RelativeRank | null {
-    const referenceDob = reference.dob ? new Date(reference.dob).getTime() : 0;
-    const siblingDob = sibling.dob ? new Date(sibling.dob).getTime() : 0;
+    const referenceDob = reference.dob || '';
+    const siblingDob = sibling.dob || '';
     if (!referenceDob || !siblingDob) return null;
     if (siblingDob >= referenceDob) {
       return { relation: 'younger', rank: 0 };

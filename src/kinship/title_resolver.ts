@@ -13,6 +13,15 @@ type ResolveState = ResolveInput & {
 };
 
 export class KinshipTitleResolver {
+
+  // Bolt Optimization: Replaced O(N) array slice().every() allocation with a standard zero-allocation loop
+  private isAllUp(path: string[], count: number): boolean {
+    for (let i = 0; i < count; i++) {
+      if (path[i] !== 'up') return false;
+    }
+    return true;
+  }
+
   private readonly rankComputer: SiblingRankComputer;
   private readonly peopleMap = new Map<string, Person>();
   private readonly childrenOfParentMap = new Map<string, Set<string>>();
@@ -151,8 +160,8 @@ export class KinshipTitleResolver {
 
   private getCousinInLawTitle(reference: Person | undefined, cousin: Person | undefined) {
     if (!reference || !cousin) return '姻親表親配偶';
-    const referenceDob = reference.dob ? new Date(reference.dob).getTime() : 0;
-    const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
+    const referenceDob = reference.dob || '';
+    const cousinDob = cousin.dob || '';
     const isOlder = referenceDob && cousinDob ? cousinDob < referenceDob : null;
 
     if (cousin.gender === 'F') {
@@ -271,7 +280,7 @@ export class KinshipTitleResolver {
       return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
     }
 
-    if (path.length >= 4 && path.slice(0, -1).every((segment) => segment === 'up') && path[path.length - 1] === 'spouse') {
+    if (path.length >= 4 && this.isAllUp(path, path.length - 1) && path[path.length - 1] === 'spouse') {
       const ancestorDepth = path.length - 1;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
@@ -358,8 +367,8 @@ export class KinshipTitleResolver {
       if (parent && spouseChild) {
         if (parent.gender === 'M') {
           if (spouseChild.gender === 'M') {
-            const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-            const uncleDob = spouseChild.dob ? new Date(spouseChild.dob).getTime() : 0;
+            const parentDob = parent.dob || '';
+            const uncleDob = spouseChild.dob || '';
             if (parentDob && uncleDob) {
               return uncleDob < parentDob ? '伯母' : '嬸嬸';
             }
@@ -443,8 +452,8 @@ export class KinshipTitleResolver {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '堂' : '表';
         if (target.gender === 'M') {
-          const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-          const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+          const parentDob = parent.dob || '';
+          const targetDob = target.dob || '';
           if (parentDob && targetDob) {
             return targetDob < parentDob ? `${prefix}伯` : `${prefix}叔`;
           }
@@ -465,8 +474,8 @@ export class KinshipTitleResolver {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '堂' : '表';
         if (cousin.gender === 'M') {
-          const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-          const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
+          const parentDob = parent.dob || '';
+          const cousinDob = cousin.dob || '';
           if (parentDob && cousinDob) {
             return cousinDob < parentDob ? `${prefix}伯母` : `${prefix}嬸`;
           }
@@ -484,8 +493,8 @@ export class KinshipTitleResolver {
       if (parent && grandparent && grandparentSibling) {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '再堂' : '再表';
-        const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-        const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+        const centerDob = this.centerPerson.dob || '';
+        const targetDob = target.dob || '';
         const isOlder = centerDob && targetDob ? targetDob < centerDob : null;
         const genderLabel = target.gender === 'M'
           ? (isOlder === false ? '弟' : '兄')
@@ -762,8 +771,8 @@ export class KinshipTitleResolver {
     if (pathStr === 'up-down-spouse-sibling' || pathStr === 'sibling-spouse-sibling') {
       const linkingSibling = pathStr === 'sibling-spouse-sibling' ? this.getPerson(nodePath[1]) : this.getPerson(nodePath[2]);
       if (linkingSibling) {
-        const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-        const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+        const centerDob = this.centerPerson.dob || '';
+        const targetDob = target.dob || '';
         if (target.gender === 'M') {
           if (centerDob && targetDob) return targetDob < centerDob ? '親家大哥' : '親家弟弟';
           return '親家兄弟';
@@ -781,8 +790,8 @@ export class KinshipTitleResolver {
       || pathStr === 'sibling-spouse-sibling-down-sibling'
     ) {
       const inLawChild = this.getPerson(nodePath[nodePath.length - 2]);
-      const inLawChildDob = inLawChild?.dob ? new Date(inLawChild.dob).getTime() : 0;
-      const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+      const inLawChildDob = inLawChild?.dob || '';
+      const targetDob = target.dob || '';
       const isOlder = inLawChildDob && targetDob ? targetDob < inLawChildDob : null;
 
       if (target.gender === 'M') {
@@ -921,8 +930,8 @@ export class KinshipTitleResolver {
     if (pathStr === 'up-up-down-down' || pathStr === 'up-sibling-down') {
       const parent = this.getPerson(nodePath[1]);
       const auntUncle = this.getPerson(pathStr === 'up-sibling-down' ? nodePath[2] : nodePath[2]);
-      const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-      const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+      const centerDob = this.centerPerson.dob || '';
+      const targetDob = target.dob || '';
       const isOlder = centerDob && targetDob ? targetDob < centerDob : null;
       const genderLabel = target.gender === 'M'
         ? (isOlder === false ? '弟' : '兄')
@@ -998,8 +1007,8 @@ export class KinshipTitleResolver {
       const parent = this.getPerson(nodePath[1]);
       const auntUncle = this.getPerson(nodePath[auntUncleIndex]);
       const cousin = this.getPerson(nodePath[cousinIndex]);
-      const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-      const cousinDob = cousin?.dob ? new Date(cousin.dob).getTime() : 0;
+      const centerDob = this.centerPerson.dob || '';
+      const cousinDob = cousin?.dob || '';
       const isOlder = centerDob && cousinDob ? cousinDob < centerDob : null;
       const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
 
