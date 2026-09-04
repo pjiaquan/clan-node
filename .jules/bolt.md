@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Array Object Lookups in Batch Validation
+**Learning:** During batch validation loops traversing arrays of objects (like checking thousands of relationships against valid people and layers), creating both a Set of IDs and a Map of full objects for O(1) lookups is inefficient. Caching full objects consumes unnecessary memory, and repeatedly checking both a Set and a Map increases loop overhead.
+**Action:** Consolidate multiple validation structures into a single Map that only stores the specific scalar values required for validation (e.g., `Map<string, string>` for `personId -> layerId`). Replace `for...of` loops with traditional `for` loops in these tight validation paths to reduce iterator allocation overhead.
