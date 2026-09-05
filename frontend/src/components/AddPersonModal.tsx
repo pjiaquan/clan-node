@@ -60,6 +60,17 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const maxDobDay = birthYear && Number.isFinite(monthNum) && monthNum >= 1 && monthNum <= 12
     ? new Date(birthYear, monthNum, 0).getDate()
     : 31;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
   const maxDodDay = deathYear && Number.isFinite(deathMonthNum) && deathMonthNum >= 1 && deathMonthNum <= 12
     ? new Date(deathYear, deathMonthNum, 0).getDate()
     : 31;
