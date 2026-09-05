@@ -52,6 +52,14 @@ export class KinshipTitleResolver {
     });
   }
 
+  private isAllSegments(path: string[], targetSegment: string, endIndex: number = path.length): boolean {
+    if (endIndex === 0) return false;
+    for (let i = 0; i < endIndex; i++) {
+      if (path[i] !== targetSegment) return false;
+    }
+    return true;
+  }
+
   resolve({ path, nodePath, targetId }: ResolveInput): string {
     const target = this.getPerson(targetId);
     if (!target) return '未知';
@@ -261,7 +269,7 @@ export class KinshipTitleResolver {
       return '祖母/外祖母';
     }
 
-    if (path.length >= 3 && path.every((segment) => segment === 'up')) {
+    if (path.length >= 3 && this.isAllSegments(path, 'up')) {
       const ancestorDepth = path.length;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
@@ -271,7 +279,7 @@ export class KinshipTitleResolver {
       return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
     }
 
-    if (path.length >= 4 && path.slice(0, -1).every((segment) => segment === 'up') && path[path.length - 1] === 'spouse') {
+    if (path.length >= 4 && this.isAllSegments(path, 'up', path.length - 1) && path[path.length - 1] === 'spouse') {
       const ancestorDepth = path.length - 1;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
@@ -616,7 +624,15 @@ export class KinshipTitleResolver {
       if (parent && possibleSibling && possibleSpouse) {
         const parentIds = this.parentsOfChildMap.get(parent.id) || new Set();
         const siblingParentIds = this.parentsOfChildMap.get(possibleSibling.id) || new Set();
-        const sharesParent = [...parentIds].some((id) => siblingParentIds.has(id));
+
+        let sharesParent = false;
+        for (const id of parentIds) {
+          if (siblingParentIds.has(id)) {
+            sharesParent = true;
+            break;
+          }
+        }
+
         const spouses = this.spouseOfPersonMap.get(possibleSibling.id);
         const isSpouse = spouses ? spouses.has(possibleSpouse.id) : false;
 

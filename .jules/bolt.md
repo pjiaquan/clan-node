@@ -1,13 +1,7 @@
-## 2024-05-24 - Unsafe Parallelization of Read-Modify-Write in Relationships
-**Learning:** The relationship linkage functions (e.g. `linkSpouseToChild`, `linkParentToSiblingChildren`) rely on a read-modify-write pattern (`findRelationship`, if missing -> `createRelationship`). Parallelizing outer loops (e.g., across siblings or spouses) causes overlapping concurrent checks that fail to see uncommitted inserts from parallel threads, leading to duplicate edges and constraint violations due to the lack of DB-level upserts or transactions in SQLite D1.
-**Action:** When parallelizing queries, ensure they are strictly read-only (`getSiblingIds`, `getSiblingLinkMeta`) or write-only independent operations. Avoid parallelizing `ensure*Link` or complex graph traversal writes unless a strict lock or `INSERT OR IGNORE` strategy exists at the database level.
-## 2024-05-18 - Cached sorted sibling lists in SiblingRankComputer
-**Learning:** Repeating identical sort operations (e.g. sorting same-gender siblings by DOB) inside loops during batch graph calculation causes massive slowdowns (O(N * M log M) complexity).
-**Action:** Always cache the results of expensive operations (like sorting arrays based on static data) when calculating relative values for many nodes across a graph. Use `Map` keyed by `reference.id` + `gender`.
-## 2024-05-24 - Expensive Date Instantiation in Sort Loops
-**Learning:** Instantiating `new Date(string)` inside `.sort()` comparators is extremely slow (approx. 10x slower) because the string parsing happens O(N log N) times.
-**Action:** When sorting dates that are already in ISO 8601 format, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely.
-## 2024-05-18 - Replacing O(N) array filter with O(1) counter in BFS traversals\n**Learning:** In highly recursive or deep BFS tree traversals like `kinship/calculator.ts`, calculating segment features like `inlawCount` using `.filter().length` on the path arrays creates an unnecessary O(N) overhead per node visit, creating O(N^2) behaviour.\n**Action:** Always track path metrics incrementally via counters in the traversal state (e.g. `TraversalStep.inlawCount`) to turn O(N) recalculations into O(1) property reads.\n
-## 2024-05-24 - Avoiding Array Allocation in Hot Paths
-**Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
-**Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Zero-Allocation Set Iteration
+**Learning:** Using `[...set].some(...)` inside hot path resolution logic creates unnecessary intermediate arrays and invokes callback overhead, acting as a hidden bottleneck during complex graph traversals.
+**Action:** Always replace spread syntax on Sets with zero-allocation `for...of` loops when checking for intersections or existence in performance-critical paths.
+
+## 2024-05-24 - Array Method Allocation Traps
+**Learning:** Chaining array methods like `path.slice(0, -1).every(...)` in tight loops creates intermediate array copies (`slice`) and incurs callback overhead (`every`), degrading performance in hot paths like `title_resolver.ts`.
+**Action:** Replace allocating array chain operations with custom zero-allocation helper methods (e.g., `isAllSegments`) utilizing traditional `for` loops in hot paths.
