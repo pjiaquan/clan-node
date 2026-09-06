@@ -10,3 +10,6 @@
 ## 2024-05-20 - Ensure loading states for generic modals
 **Learning:** We implemented a loading state in `AddPersonModal`. I've observed that some modals like `AddPersonModal` don't disable their 'Cancel' buttons or display proper feedback with inline spinners during async submissions. This leaves the interface unresponsive during a network call or creation flow, breaking expectations for async actions in similar components.
 **Action:** When adding async submission functions in forms and modals, always apply the `btn-inline-spinner` class, set standard `disabled={submitting}` states on inputs/buttons, and provide clear user feedback during submission (e.g., text changing from 'Submit' to 'Saving...').
+## 2024-11-20 - Ensure Escape key closes modals
+**Learning:** Most modal components built internally did not properly implement the Escape key listener, violating common accessibility and keyboard navigation expectations for dialog windows.
+**Action:** Always include a `useEffect` hook listening to the `keydown` event on the window to close the modal when `event.key === 'Escape'` is triggered.

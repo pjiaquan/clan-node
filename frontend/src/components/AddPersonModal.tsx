@@ -43,6 +43,17 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const dod = composePartialDate({ year: dodYear, month: dodMonth, day: dodDay });
   const tobRange = tob ? getModernTimeRange(tob) : '';
   const todRange = tod ? getModernTimeRange(tod) : '';
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const birthYearParsed = Number.parseInt(dobYear, 10);
   const birthYear = Number.isFinite(birthYearParsed) && birthYearParsed >= 1 && birthYearParsed <= 9999
     ? birthYearParsed
