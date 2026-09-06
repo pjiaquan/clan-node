@@ -11,3 +11,7 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+
+## 2024-05-25 - Zero-Allocation Arrays in TitleResolver
+**Learning:** In hot loops like graph resolution (e.g., `TitleResolver`), array slice and higher-order functions (`path.slice().every()`, `path.every()`) cause frequent memory allocations and GC pauses, leading to degraded performance at scale.
+**Action:** Replace `Array.prototype.slice().every()` with standard, early-returning O(N) `for` loops wrapped in a helper function (`isAllSegments`) to eliminate temporary array overhead in tight traversal loops.

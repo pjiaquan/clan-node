@@ -137,6 +137,15 @@ export class KinshipTitleResolver {
     return false;
   }
 
+  // Bolt Optimization: Replaces O(N) array allocation (.slice) and callback overhead (.every)
+  // with a zero-allocation, early-returning O(N) loop to reduce GC pressure in hot paths.
+  private isAllSegments(path: string[], segmentType: string, endIdx: number): boolean {
+    for (let i = 0; i < endIdx; i++) {
+      if (path[i] !== segmentType) return false;
+    }
+    return true;
+  }
+
   private getInLawElderTitle(target: Person) {
     if (target.gender === 'M') return this.formatDualTitle('伯父', '姻伯父');
     if (target.gender === 'F') return this.formatDualTitle('伯母', '姻伯母');
@@ -261,7 +270,7 @@ export class KinshipTitleResolver {
       return '祖母/外祖母';
     }
 
-    if (path.length >= 3 && path.every((segment) => segment === 'up')) {
+    if (path.length >= 3 && this.isAllSegments(path, 'up', path.length)) {
       const ancestorDepth = path.length;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
@@ -271,7 +280,7 @@ export class KinshipTitleResolver {
       return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
     }
 
-    if (path.length >= 4 && path.slice(0, -1).every((segment) => segment === 'up') && path[path.length - 1] === 'spouse') {
+    if (path.length >= 4 && this.isAllSegments(path, 'up', path.length - 1) && path[path.length - 1] === 'spouse') {
       const ancestorDepth = path.length - 1;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
