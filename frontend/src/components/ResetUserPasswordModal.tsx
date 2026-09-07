@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 
 interface ResetUserPasswordModalProps {
@@ -10,6 +10,16 @@ interface ResetUserPasswordModalProps {
 export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ email, onClose, onSubmit }) => {
   const { t } = useI18n();
   const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);

@@ -25,6 +25,17 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 }) => {
   const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const [dobYear, setDobYear] = useState('');
   const [dobMonth, setDobMonth] = useState('');
   const [dobDay, setDobDay] = useState('');

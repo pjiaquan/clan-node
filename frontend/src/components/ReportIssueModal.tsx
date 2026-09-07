@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { NotificationType } from '../types';
 import { useI18n } from '../i18n';
 
@@ -11,6 +11,16 @@ type ReportIssueModalProps = {
 export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, onClose, onSubmit }) => {
   const { t } = useI18n();
   const [type, setType] = useState<NotificationType>('rename');
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
