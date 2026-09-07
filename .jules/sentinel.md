@@ -1,12 +1,4 @@
-## 2023-10-27 - [CPU Exhaustion DoS via Hash Inputs]
-**Vulnerability:** Long passwords could cause ReDoS or CPU-exhaustion if they reach PBKDF2 hashing routines.
-**Learning:** PBKDF2 is computationally expensive by design. Unbounded inputs combined with expensive hashing algorithms expose the server to CPU exhaustion attacks.
-**Prevention:** Always bound the maximum length of user inputs (e.g., passwords, emails) *before* passing them to hashing functions or complex regular expressions.
-## 2025-05-18 - [SQL Injection via Dynamic Column Names in Repositories]
-**Vulnerability:** SQL Injection in dynamic D1 database queries.
-**Learning:** Object keys generated via `Object.entries(updates)` were directly interpolated into SQL strings (e.g. `` `UPDATE people SET ${columns.join(', ')}` ``) without validation, which could allow attackers to execute arbitrary SQL commands if they could control the object keys.
-**Prevention:** Validate all dynamically generated column names against an allowlist pattern (e.g., `/^[a-zA-Z0-9_]+$/`) before allowing them to be interpolated into queries.
-## 2025-05-18 - [DoS via Unbounded Depth Parameter]
-**Vulnerability:** The `depth` parameter in the `GET /api/graph` endpoint was parsed from the query string without any upper bounds, allowing attackers to pass excessively large values (e.g., `9999`) and trigger expensive graph queries, leading to CPU and memory exhaustion (Denial of Service).
-**Learning:** Merely passing a radix of 10 to `parseInt` does not protect against unbounded numerical values, as modern JS environments default to base 10 anyway; the real danger is the lack of domain-specific bounds checking.
-**Prevention:** Always validate and bound user-controlled parameters that dictate iteration depth or resource allocation, such as by using `Math.min(parseInt(val, 10), MAX_SAFE_LIMIT)`.
+## 2025-02-14 - Unbounded Input in CPU-Heavy Hashing
+**Vulnerability:** The `/api/auth/login` and `/api/admin/users/:id` endpoints accepted arbitrarily long passwords, which were passed directly to PBKDF2 (100,000 iterations). An attacker could send massive strings (e.g., megabytes long) to exhaust server CPU and cause Denial of Service (DoS).
+**Learning:** Even though Hono might have global request limits, specific fields passed to computationally expensive crypto functions must be bounded explicitly. The codebase had `PASSWORD_MAX_LENGTH` but missed checking it in a few endpoints.
+**Prevention:** Always enforce string length bounds immediately upon reading untrusted input, especially before any hashing or cryptographic operations. For optional fields (like `password` in the admin update endpoint), ensure the check uses `if (password && password.length > LIMIT)`.
