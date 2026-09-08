@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Avoiding Array Allocation on Sets in Hot Paths
+**Learning:** In hot loops, doing `[...set].some(...)` to find intersection forces an O(N) array allocation.
+**Action:** Always replace `[...set].some(...)` with a `for...of` loop directly over the Set to achieve zero-allocation comparisons in tight loops.
