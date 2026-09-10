@@ -616,7 +616,15 @@ export class KinshipTitleResolver {
       if (parent && possibleSibling && possibleSpouse) {
         const parentIds = this.parentsOfChildMap.get(parent.id) || new Set();
         const siblingParentIds = this.parentsOfChildMap.get(possibleSibling.id) || new Set();
-        const sharesParent = [...parentIds].some((id) => siblingParentIds.has(id));
+        // Bolt Optimization: Replace [...parentIds].some(...) with a standard for-of loop.
+        // This avoids O(N) array allocation from the Set when evaluating in-law bridges.
+        let sharesParent = false;
+        for (const id of parentIds) {
+          if (siblingParentIds.has(id)) {
+            sharesParent = true;
+            break;
+          }
+        }
         const spouses = this.spouseOfPersonMap.get(possibleSibling.id);
         const isSpouse = spouses ? spouses.has(possibleSpouse.id) : false;
 
