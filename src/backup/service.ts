@@ -298,40 +298,51 @@ export const validateRelations = (
   relationships: BackupRelationship[],
   customFields: BackupCustomField[],
 ) => {
-  const layerIds = new Set(layers.map((layer) => layer.id));
-  const personIds = new Set(people.map((person) => person.id));
+  const layerIds = new Set<string>();
+  for (let i = 0; i < layers.length; i++) {
+    layerIds.add(layers[i].id);
+  }
 
-  // Cache people by ID for O(1) lookups during relationship validation
-  const personMap = new Map(people.map((person) => [person.id, person]));
-
-  for (const person of people) {
+  // Cache person layer IDs for O(1) lookups during relationship validation,
+  // avoiding full object allocation and redundant Set arrays
+  const personLayerMap = new Map<string, string>();
+  for (let i = 0; i < people.length; i++) {
+    const person = people[i];
     if (!layerIds.has(person.layer_id)) {
       throw new Error(`Person "${person.id}" references unknown layer "${person.layer_id}"`);
     }
+    personLayerMap.set(person.id, person.layer_id);
   }
-  for (const avatar of avatars) {
-    if (!personIds.has(avatar.person_id)) {
+
+  for (let i = 0; i < avatars.length; i++) {
+    const avatar = avatars[i];
+    if (!personLayerMap.has(avatar.person_id)) {
       throw new Error(`Avatar references unknown person "${avatar.person_id}"`);
     }
   }
-  for (const relation of relationships) {
+
+  for (let i = 0; i < relationships.length; i++) {
+    const relation = relationships[i];
     if (!layerIds.has(relation.layer_id)) {
       throw new Error(`Relationship references unknown layer "${relation.layer_id}"`);
     }
-    if (!personIds.has(relation.from_person_id) || !personIds.has(relation.to_person_id)) {
+    const fromLayerId = personLayerMap.get(relation.from_person_id);
+    const toLayerId = personLayerMap.get(relation.to_person_id);
+
+    if (fromLayerId === undefined || toLayerId === undefined) {
       throw new Error(`Relationship references unknown person: ${relation.from_person_id} -> ${relation.to_person_id}`);
     }
-    const fromPerson = personMap.get(relation.from_person_id);
-    const toPerson = personMap.get(relation.to_person_id);
-    if (!fromPerson || !toPerson || fromPerson.layer_id !== relation.layer_id || toPerson.layer_id !== relation.layer_id) {
+    if (fromLayerId !== relation.layer_id || toLayerId !== relation.layer_id) {
       throw new Error(`Relationship crosses layers: ${relation.from_person_id} -> ${relation.to_person_id}`);
     }
     if (relation.from_person_id === relation.to_person_id) {
       throw new Error('Relationship cannot reference the same person');
     }
   }
-  for (const field of customFields) {
-    if (!personIds.has(field.person_id)) {
+
+  for (let i = 0; i < customFields.length; i++) {
+    const field = customFields[i];
+    if (!personLayerMap.has(field.person_id)) {
       throw new Error(`Custom field references unknown person "${field.person_id}"`);
     }
   }

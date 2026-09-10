@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2025-02-12 - Optimize Backup Validation Loop
+**Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
+**Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
