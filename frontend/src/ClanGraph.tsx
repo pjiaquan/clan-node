@@ -1306,6 +1306,22 @@ export function ClanGraph({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [avatarPreview, goToNextAvatar, goToPrevAvatar]);
 
+  useEffect(() => {
+    if (!pendingRelationshipChoice && !pendingSiblingOrderChoice && !pendingParentChildOrderChoice) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (pendingRelationshipChoice) setPendingRelationshipChoice(null);
+        if (pendingSiblingOrderChoice) setPendingSiblingOrderChoice(null);
+        if (pendingParentChildOrderChoice) setPendingParentChildOrderChoice(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingRelationshipChoice, pendingSiblingOrderChoice, pendingParentChildOrderChoice]);
+
   const handleEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault();
     event.stopPropagation();

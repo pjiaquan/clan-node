@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { NotificationType } from '../types';
 import { useI18n } from '../i18n';
 
@@ -21,6 +21,17 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
     { value: 'relationship', label: t('notification.type.relationship') },
     { value: 'other', label: t('notification.type.other') },
   ]), [t]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const hint = useMemo(() => {
     const hints: Record<NotificationType, string> = {
