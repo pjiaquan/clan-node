@@ -1920,6 +1920,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!email || !password) {
       return c.json({ error: 'email and password are required' }, 400);
     }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Invalid email or password' }, 401);
+    }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
     }
@@ -2057,6 +2060,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const email = normalizeEmail((body as any)?.email ?? (body as any)?.username);
     if (!email || !password) {
       return c.json({ error: 'email and password are required' }, 400);
+    }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Invalid email or password' }, 401);
     }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
@@ -2820,6 +2826,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
     if (!token || !password) {
       return c.json({ error: 'token and password are required' }, 400);
+    }
+    if (password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: `Password must be at most ${PASSWORD_MAX_LENGTH} characters` }, 400);
     }
 
     const tokenHash = await sha256Base64(token);
@@ -3602,6 +3611,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const nextEmail = hasEmailUpdate ? normalizeEmail((body as any).email) : '';
     if (!role && !password && !hasEmailUpdate) {
       return c.json({ error: 'role or password or email is required' }, 400);
+    }
+    if (password && password.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: `Password must be at most ${PASSWORD_MAX_LENGTH} characters` }, 400);
     }
     if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
       return c.json({ error: 'Invalid email format' }, 400);
