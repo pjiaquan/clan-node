@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 
 interface CreateUserModalProps {
@@ -12,6 +12,17 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
   const [role, setRole] = useState<'admin' | 'readonly'>('readonly');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
