@@ -4220,6 +4220,12 @@ export function ClanGraph({
                 mergedMetadata = { ...existingMetadata };
               }
               delete (mergedMetadata as any).avatarHash;
+              if (person?.avatars && person.avatars.length > 0 && deleteAvatarIds.length === 0) {
+                for (const av of person.avatars) {
+                  await api.deletePersonAvatar(id, av.id, activeLayerId);
+                }
+                avatarOperationApplied = true;
+              }
             }
 
             if (avatarFile) {

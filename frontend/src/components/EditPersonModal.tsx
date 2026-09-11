@@ -104,7 +104,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   const [email, setEmail] = useState(person.email || '');
   const [gender, setGender] = useState(person.gender);
   const [bloodType, setBloodType] = useState(person.blood_type || '');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'readonly'>('readonly');
   const initialDobParts = parsePartialDate(person.dob);
   const [dobYear, setDobYear] = useState(initialDobParts.year);
   const [dobMonth, setDobMonth] = useState(initialDobParts.month);
@@ -169,7 +168,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setAvatarImage(null);
     setIsSaving(false);
     setIsInviting(false);
-    setInviteRole('readonly');
     setSaveError(null);
     setInviteNotice(null);
     setZoom(1);
@@ -188,19 +186,28 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     () => initialAvatars.filter((avatar) => !deleteAvatarIds.includes(avatar.id)),
     [initialAvatars, deleteAvatarIds]
   );
-  const activePrimaryAvatarId = selectedPrimaryAvatarId && availableAvatars.some((avatar) => avatar.id === selectedPrimaryAvatarId)
-    ? selectedPrimaryAvatarId
-    : (availableAvatars.find((avatar) => avatar.is_primary)?.id || availableAvatars[0]?.id || null);
+  const activePrimaryAvatarId = !removeAvatar
+    ? (selectedPrimaryAvatarId && availableAvatars.some((avatar) => avatar.id === selectedPrimaryAvatarId)
+        ? selectedPrimaryAvatarId
+        : (availableAvatars.find((avatar) => avatar.is_primary)?.id || availableAvatars[0]?.id || null))
+    : null;
   const activePrimaryAvatarUrl = useMemo(() => {
+    if (removeAvatar) return null;
     const selected = availableAvatars.find((avatar) => avatar.id === activePrimaryAvatarId);
-    return selected?.avatar_url || null;
-  }, [availableAvatars, activePrimaryAvatarId]);
+    return selected?.avatar_url || (!deleteAvatarIds.length && !person.avatars?.length ? (person.avatar_url || null) : null);
+  }, [availableAvatars, activePrimaryAvatarId, removeAvatar, deleteAvatarIds.length, person.avatars?.length, person.avatar_url]);
 
   useEffect(() => {
+    if (removeAvatar) {
+      if (selectedPrimaryAvatarId !== null) {
+        setSelectedPrimaryAvatarId(null);
+      }
+      return;
+    }
     if (activePrimaryAvatarId !== selectedPrimaryAvatarId) {
       setSelectedPrimaryAvatarId(activePrimaryAvatarId);
     }
-  }, [activePrimaryAvatarId, selectedPrimaryAvatarId]);
+  }, [activePrimaryAvatarId, selectedPrimaryAvatarId, removeAvatar]);
 
   useEffect(() => {
     let active = true;
@@ -522,7 +529,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setSaveError(null);
     setInviteNotice(null);
     try {
-      await onInvite(person.id, normalizedEmail, inviteRole);
+      await onInvite(person.id, normalizedEmail, 'readonly');
       setEmail(normalizedEmail);
       setInviteNotice(t('editPerson.inviteSent', { email: normalizedEmail }));
     } catch (error) {
@@ -531,7 +538,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     } finally {
       setIsInviting(false);
     }
-  }, [email, inviteRole, isInviting, isSaving, isVerifiedEmailLocked, onInvite, person.id, t]);
+  }, [email, isInviting, isSaving, isVerifiedEmailLocked, onInvite, person.id, t]);
 
   const handleUnlockNameEdit = useCallback(() => {
     if (isNameEditable) return;
@@ -577,6 +584,10 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
 
   const undoDeleteAvatar = (avatarId: string) => {
     setDeleteAvatarIds((prev) => prev.filter((id) => id !== avatarId));
+    if (avatarId === initialPrimaryAvatarId) {
+      setRemoveAvatar(false);
+      setSelectedPrimaryAvatarId(avatarId);
+    }
   };
 
   const updateCustomField = (index: number, key: 'label' | 'value', value: string) => {
@@ -624,6 +635,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
     setDobYear(nextYearText);
     setDobDay((prev) => clampDay(nextYearText, dobMonth, prev));
   };
+  const adjustDodYear = (delta: number) => {
+    const yearNum = Number.parseInt(dodYear, 10);
+    if (!Number.isFinite(yearNum)) return;
+    const nextYear = Math.max(1, Math.min(9999, yearNum + delta));
+    const nextYearText = String(nextYear);
+    setDodYear(nextYearText);
+    setDodDay((prev) => clampDay(nextYearText, dodMonth, prev));
+  };
   const calculateWesternAge = () => {
     if (!birthYear) return null;
     const hasDod = Boolean(deathYear);
@@ -660,7 +679,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
   };
   const westernAge = calculateWesternAge();
   const traditionalAge = calculateTraditionalAge();
-  const canRemoveAvatar = Boolean(avatarPreview || activePrimaryAvatarUrl || avatarFile);
+  const canRemoveAvatar = Boolean((!removeAvatar && (avatarPreview || activePrimaryAvatarUrl)) || avatarFile);
   const avatarStatusTone = removeAvatar
     ? 'warning'
     : avatarFile
@@ -753,20 +772,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             </div>
             {isVerifiedEmailLocked && (
               <small className="person-email-hint">{t('editPerson.emailManagedInAccount')}</small>
-            )}
-            {!isVerifiedEmailLocked && canInvite && onInvite && (
-              <div className="form-group" style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
-                <label htmlFor="invite-role">{t('createUser.role')}</label>
-                <select
-                  id="invite-role"
-                  value={inviteRole}
-                  onChange={(event) => setInviteRole(event.target.value === 'admin' ? 'admin' : 'readonly')}
-                  disabled={isInviting || isSaving}
-                >
-                  <option value="readonly">{t('createUser.roleReadonly')}</option>
-                  <option value="admin">{t('createUser.roleAdmin')}</option>
-                </select>
-              </div>
             )}
             {inviteNotice && (
               <small className="person-email-hint is-success">{inviteNotice}</small>
@@ -880,9 +885,14 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                         onClick={() => {
                           const confirmed = window.confirm(t('editPerson.removePrimaryConfirm'));
                           if (!confirmed) return;
+                          if (activePrimaryAvatarId) {
+                            markAvatarForDelete(activePrimaryAvatarId);
+                          }
                           setAvatarFile(null);
                           setSelectedPrimaryAvatarId(null);
                           setRemoveAvatar(true);
+                          setAvatarPreview(null);
+                          setAvatarImage(null);
                         }}
                       >
                         {t('editPerson.removePrimary')}
@@ -1018,22 +1028,44 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
             </label>
             <div className="date-input-row">
               <div className="date-input-main">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder={t('personForm.yearPlaceholder')}
-                  value={dobYear}
-                  onChange={(e) => {
-                    const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
-                    setDobYear(nextYear);
-                    if (!nextYear) {
-                      setDobMonth('');
-                      setDobDay('');
-                    }
-                  }}
-                  disabled={dobUnknown}
-                  className="date-year-input"
-                />
+                <div className="date-year-group">
+                  <button
+                    type="button"
+                    className="date-year-btn date-year-btn-prev"
+                    onClick={() => adjustDobYear(-1)}
+                    disabled={dobUnknown || !dobYear}
+                    title={t('editPerson.decreaseYear')}
+                    aria-label={t('editPerson.decreaseYear')}
+                  >
+                    −
+                  </button>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder={t('personForm.yearPlaceholder')}
+                    value={dobYear}
+                    onChange={(e) => {
+                      const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setDobYear(nextYear);
+                      if (!nextYear) {
+                        setDobMonth('');
+                        setDobDay('');
+                      }
+                    }}
+                    disabled={dobUnknown}
+                    className="date-year-input"
+                  />
+                  <button
+                    type="button"
+                    className="date-year-btn date-year-btn-next"
+                    onClick={() => adjustDobYear(1)}
+                    disabled={dobUnknown || !dobYear}
+                    title={t('editPerson.increaseYear')}
+                    aria-label={t('editPerson.increaseYear')}
+                  >
+                    +
+                  </button>
+                </div>
                 <select
                   value={dobMonth}
                   onChange={(e) => {
@@ -1072,24 +1104,6 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                     );
                   })}
                 </select>
-                <button
-                  type="button"
-                  className="date-year-btn"
-                  onClick={() => adjustDobYear(-1)}
-                  disabled={dobUnknown || !dobYear}
-                  title={t('editPerson.decreaseYear')}
-                >
-                  {t('editPerson.decreaseYearShort')}
-                </button>
-                <button
-                  type="button"
-                  className="date-year-btn"
-                  onClick={() => adjustDobYear(1)}
-                  disabled={dobUnknown || !dobYear}
-                  title={t('editPerson.increaseYear')}
-                >
-                  {t('editPerson.increaseYearShort')}
-                </button>
               </div>
               <label className="date-unknown-toggle">
                 <input
@@ -1137,23 +1151,45 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
                 </label>
                 <div className="date-input-row">
                   <div className="date-input-main">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder={t('personForm.yearPlaceholder')}
-                      value={dodYear}
-                      onChange={(e) => {
-                        const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
-                        setDodYear(nextYear);
-                        if (!nextYear) {
-                          setDodMonth('');
-                          setDodDay('');
-                          setTod('');
-                        }
-                      }}
-                      disabled={dodUnknown}
-                      className="date-year-input"
-                    />
+                    <div className="date-year-group">
+                      <button
+                        type="button"
+                        className="date-year-btn date-year-btn-prev"
+                        onClick={() => adjustDodYear(-1)}
+                        disabled={dodUnknown || !dodYear}
+                        title={t('editPerson.decreaseYear')}
+                        aria-label={t('editPerson.decreaseYear')}
+                      >
+                        −
+                      </button>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder={t('personForm.yearPlaceholder')}
+                        value={dodYear}
+                        onChange={(e) => {
+                          const nextYear = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setDodYear(nextYear);
+                          if (!nextYear) {
+                            setDodMonth('');
+                            setDodDay('');
+                            setTod('');
+                          }
+                        }}
+                        disabled={dodUnknown}
+                        className="date-year-input"
+                      />
+                      <button
+                        type="button"
+                        className="date-year-btn date-year-btn-next"
+                        onClick={() => adjustDodYear(1)}
+                        disabled={dodUnknown || !dodYear}
+                        title={t('editPerson.increaseYear')}
+                        aria-label={t('editPerson.increaseYear')}
+                      >
+                        +
+                      </button>
+                    </div>
                     <select
                       value={dodMonth}
                       onChange={(e) => {

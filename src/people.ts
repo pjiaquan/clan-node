@@ -413,9 +413,16 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     if (avatar_url !== undefined) {
       if (!avatar_url) {
-        await c.env.DB.prepare(
-          'UPDATE person_avatars SET is_primary = 0, updated_at = ? WHERE person_id = ? AND is_primary = 1'
-        ).bind(now, id).run();
+        const avatarsToDelete = await c.env.DB.prepare(
+          'SELECT id, avatar_url, storage_key FROM person_avatars WHERE person_id = ?'
+        ).bind(id).all();
+        for (const row of (avatarsToDelete.results || [])) {
+          const key = (row as any).storage_key || deriveStorageKeyFromUrl(String((row as any).avatar_url || ''));
+          if (key) {
+            await c.env.AVATARS.delete(key);
+          }
+        }
+        await c.env.DB.prepare('DELETE FROM person_avatars WHERE person_id = ?').bind(id).run();
         await repository.updatePersonById(id, { avatar_url: null, updated_at: now });
       } else {
         const existingAvatar = await c.env.DB.prepare(
