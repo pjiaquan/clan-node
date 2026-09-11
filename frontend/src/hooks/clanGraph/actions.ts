@@ -59,10 +59,13 @@ export const fetchGraphAction = async (
   setLoading: SetLoading,
   setError: SetError,
   setGraphData: SetGraphData,
+  options?: { silent?: boolean },
 ) => {
   if (!centerId || !activeLayerId || !enabled) return;
   try {
-    setLoading(true);
+    if (!options?.silent) {
+      setLoading(true);
+    }
     setError(null);
     const data = await api.fetchGraph(centerId, activeLayerId);
     setGraphData(data);
@@ -70,7 +73,9 @@ export const fetchGraphAction = async (
     console.error('Failed to fetch graph:', err);
     setError(err instanceof Error ? err.message : 'Unknown error');
   } finally {
-    setLoading(false);
+    if (!options?.silent) {
+      setLoading(false);
+    }
   }
 };
 
@@ -152,13 +157,13 @@ export const updatePersonAction = async (
   id: string,
   updates: unknown,
   activeLayerId: string,
-  fetchGraph: () => Promise<void>,
+  fetchGraph: (options?: { silent?: boolean }) => Promise<void>,
   options?: { focusZoom?: number },
 ) => {
   const focusZoom = options?.focusZoom ?? 1.0;
   persistLastEditedFocus(id, activeLayerId, focusZoom);
   await api.updatePerson(id, { ...(updates as Record<string, unknown>), layer_id: activeLayerId });
-  await fetchGraph();
+  await fetchGraph({ silent: true });
 };
 
 export const updatePersonPositionAction = async (

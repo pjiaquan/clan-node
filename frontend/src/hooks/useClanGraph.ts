@@ -52,8 +52,8 @@ export function useClanGraph(options?: { enabled?: boolean }) {
     return fetchLayersAction(setLayers);
   }, []);
 
-  const fetchGraph = useCallback(async () => {
-    await fetchGraphAction(centerId, activeLayerId, enabled, setLoading, setError, setGraphData);
+  const fetchGraph = useCallback(async (options?: { silent?: boolean }) => {
+    await fetchGraphAction(centerId, activeLayerId, enabled, setLoading, setError, setGraphData, options);
   }, [centerId, activeLayerId, enabled]);
 
   const refreshEdges = useCallback(async () => {

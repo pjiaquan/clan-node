@@ -1939,9 +1939,14 @@ export function ClanGraph({
     const bounds = flowWrapperRef.current?.getBoundingClientRect();
     const width = bounds?.width || window.innerWidth;
     const height = bounds?.height || window.innerHeight;
+    const targetNode = nodesRef.current.find(node => node.id === id);
+    const nodeWidth = targetNode?.width ?? FLOW_RECOVERY_NODE_WIDTH;
+    const nodeHeight = targetNode?.height ?? FLOW_RECOVERY_NODE_HEIGHT;
+    const centerX = focusPosition.x + nodeWidth / 2;
+    const centerY = focusPosition.y + nodeHeight / 2;
     return {
-      x: width / 2 - focusPosition.x * zoom,
-      y: height / 2 - focusPosition.y * zoom,
+      x: width / 2 - centerX * zoom,
+      y: height / 2 - centerY * zoom,
       zoom,
     };
   }, [getFocusPosition]);
@@ -2097,11 +2102,17 @@ export function ClanGraph({
     }, 1400);
   }, [graphData, collapsedNodeIds, hiddenNodeIds, persistPendingViewport, revealCollapsedNodeBySearch, showToast, t]);
 
-  const focusNodeById = useCallback((id: string, zoom = 1.0) => {
+  const focusNodeById = useCallback((id: string, zoom?: number) => {
     if (!reactFlowInstance) return false;
-    const viewport = getViewportForNode(id, zoom);
+    const currentZoom = typeof zoom === 'number' ? zoom : (reactFlowInstance.getZoom?.() ?? 1.0);
+    const viewport = getViewportForNode(id, currentZoom);
     const focusPosition = getFocusPosition(id);
     if (!viewport || !focusPosition || !reactFlowInstance.setCenter) return false;
+    const targetNode = nodesRef.current.find(node => node.id === id);
+    const nodeWidth = targetNode?.width ?? FLOW_RECOVERY_NODE_WIDTH;
+    const nodeHeight = targetNode?.height ?? FLOW_RECOVERY_NODE_HEIGHT;
+    const centerX = focusPosition.x + nodeWidth / 2;
+    const centerY = focusPosition.y + nodeHeight / 2;
     const instance = reactFlowInstance as ReactFlowInstance & {
       setViewport?: (viewport: { x: number; y: number; zoom: number }) => void;
       setCenter?: (x: number, y: number, opts?: { zoom?: number }) => void;
@@ -2110,7 +2121,7 @@ export function ClanGraph({
       if (instance.setViewport) {
         instance.setViewport(viewport);
       } else {
-        instance.setCenter?.(focusPosition.x, focusPosition.y, { zoom });
+        instance.setCenter?.(centerX, centerY, { zoom: currentZoom });
       }
       persistViewportState(viewport);
     };
@@ -2759,7 +2770,7 @@ export function ClanGraph({
 
   useEffect(() => {
     blankCanvasRecoveryDoneRef.current = false;
-  }, [activeLayerId, centerId, graphData]);
+  }, [activeLayerId, centerId]);
 
   useEffect(() => {
     if (initialViewportRestoreDoneRef.current) return;
@@ -3060,9 +3071,10 @@ export function ClanGraph({
       window.clearInterval(lastEditedFocusTimer.current);
     }
     let attempts = 0;
+    const targetZoom = reactFlowInstance.getZoom?.() ?? 1.0;
     lastEditedFocusTimer.current = window.setInterval(() => {
       attempts += 1;
-      const focused = focusNodeById(lastEditedId, 1.0);
+      const focused = focusNodeById(lastEditedId, targetZoom);
       if (focused || attempts >= 40) {
         if (lastEditedFocusTimer.current) {
           window.clearInterval(lastEditedFocusTimer.current);
@@ -3575,7 +3587,7 @@ export function ClanGraph({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedEdge, selectedNode, graphData, copiedPerson, deleteRelationshipWithFocus, createPerson, handleUndo, lastMousePosition, handleDeletePerson, isReadOnly, showToast, hasActiveDimming, clearAllDimming, t, editingPersonId, showAddModal]);
 
-  if (loading) {
+  if (loading && !graphData) {
     return (
       <div className="app">
         <div className="loading">
@@ -3590,7 +3602,7 @@ export function ClanGraph({
       <div className="app">
         <div className="loading">
           <p style={{ color: '#ef4444' }}>{t('graph.errorPrefix', { error })}</p>
-          <button onClick={fetchGraph} className="btn-primary" style={{ marginTop: '1rem' }}>
+          <button onClick={() => void fetchGraph()} className="btn-primary" style={{ marginTop: '1rem' }}>
             {t('common.retry')}
           </button>
         </div>
@@ -4180,7 +4192,19 @@ export function ClanGraph({
             const nextUpdates = { ...updates } as Partial<Person> & { avatar_url?: string | null };
             const person = graphData.nodes.find(p => p.id === id);
             const existingMetadata = person?.metadata ?? {};
-            const focusZoom = reactFlowInstance?.getZoom?.() ?? 1.0;
+            const currentViewport = reactFlowInstance?.getViewport?.();
+            const focusZoom = currentViewport?.zoom ?? reactFlowInstance?.getZoom?.() ?? 1.0;
+            const restoreViewport = () => {
+              const targetViewport = (currentViewport && Number.isFinite(currentViewport.x) && Number.isFinite(currentViewport.y))
+                ? currentViewport
+                : getViewportForNode(id, focusZoom);
+              if (targetViewport && reactFlowInstance?.setViewport) {
+                reactFlowInstance.setViewport(targetViewport);
+                persistViewportState(targetViewport, { pending: true });
+              } else {
+                focusNodeById(id, focusZoom);
+              }
+            };
             const persistEditedNodeFocus = () => {
               setLastEditedId(id);
               try {
@@ -4277,15 +4301,10 @@ export function ClanGraph({
 
             if (Object.keys(filteredUpdates).length === 0) {
               if (avatarOperationApplied) {
-                await fetchGraph();
+                await fetchGraph({ silent: true });
                 setEditingPersonId(null);
                 showToast(t('graph.saved'), 'success');
-                const viewport = getViewportForNode(id, focusZoom);
-                if (viewport && reactFlowInstance?.setViewport) {
-                  reactFlowInstance.setViewport(viewport);
-                  persistViewportState(viewport, { pending: true });
-                }
-                focusNodeById(id, focusZoom);
+                restoreViewport();
                 return;
               }
               setEditingPersonId(null);
@@ -4297,12 +4316,7 @@ export function ClanGraph({
               await updatePerson(id, filteredUpdates, { focusZoom });
               setEditingPersonId(null);
               showToast(t('graph.saved'), 'success');
-              const viewport = getViewportForNode(id, focusZoom);
-              if (viewport && reactFlowInstance?.setViewport) {
-                reactFlowInstance.setViewport(viewport);
-                persistViewportState(viewport, { pending: true });
-              }
-              focusNodeById(id, focusZoom);
+              restoreViewport();
             } catch (error) {
               const message = error instanceof Error ? error.message : t('graph.saveFailed');
               showToast(message, 'warning');
