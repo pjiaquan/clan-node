@@ -182,7 +182,7 @@ test('POST /api/auth/register respects ALLOWED_EMAILS', async () => {
   }, env);
 
   assert.equal(rejectRes.status, 403);
-  const rejectBody = await rejectRes.json();
+  const rejectBody = (await rejectRes.json()) as Record<string, unknown>;
   assert.equal(rejectBody.error, 'Registration is restricted to authorized emails');
 
   // Attempting to register the allowed email should pass authorization
@@ -238,7 +238,7 @@ test('requireAuth rejects active sessions for non-authorized non-admin emails', 
     headers: { Cookie: 'clan_session=session-blocked' }
   }, env);
   assert.equal(blockedRes.status, 403);
-  const blockedBody = await blockedRes.json();
+  const blockedBody = (await blockedRes.json()) as Record<string, unknown>;
   assert.equal(blockedBody.error, 'Account not authorized to access this database');
 
   // Allowed session
@@ -246,6 +246,6 @@ test('requireAuth rejects active sessions for non-authorized non-admin emails', 
     headers: { Cookie: 'clan_session=session-allowed' }
   }, env);
   assert.equal(allowedRes.status, 200);
-  const allowedBody = await allowedRes.json();
+  const allowedBody = (await allowedRes.json()) as Record<string, unknown>;
   assert.equal(allowedBody.ok, true);
 });
