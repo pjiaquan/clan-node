@@ -205,6 +205,30 @@ const normalizeEmail = (value: unknown): string => {
   return normalizeIdentifier(value).toLowerCase();
 };
 
+export const getAllowedEmails = (env?: Env): Set<string> | null => {
+  const raw = env?.ALLOWED_EMAILS;
+  if (!raw || typeof raw !== 'string' || !raw.trim()) {
+    return null;
+  }
+  const entries = raw
+    .split(/[\s,;]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return entries.length > 0 ? new Set(entries) : null;
+};
+
+export const isEmailAuthorized = (email: string, env?: Env, role?: UserRole): boolean => {
+  if (role === 'admin') {
+    return true;
+  }
+  const allowedSet = getAllowedEmails(env);
+  if (!allowedSet) {
+    return true;
+  }
+  const normalized = normalizeEmail(email);
+  return allowedSet.has(normalized);
+};
+
 type PasskeyClientData = {
   type: string;
   challenge: string;
@@ -1145,6 +1169,7 @@ async function getSessionUser(db: D1Database, sessionId: string) {
     sessionId: (row as any).session_id as string,
     userId: (row as any).user_id as string,
     username: (row as any).username as string,
+    email: ((row as any).email as string | undefined) || ((row as any).username as string),
     role
   };
 }
@@ -1194,9 +1219,16 @@ export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
+  const userEmail = sessionUser.email || sessionUser.username;
+  if (!isEmailAuthorized(userEmail, c.env, sessionUser.role)) {
+    clearSessionCookie(c);
+    return c.json({ error: 'Account not authorized to access this database' }, 403);
+  }
+
   c.set('sessionUser', {
     userId: sessionUser.userId,
     username: sessionUser.username,
+    email: userEmail,
     role: sessionUser.role
   });
 
@@ -1930,6 +1962,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (passwordValidationError) {
       return c.json({ error: passwordValidationError }, 400);
     }
+    if (!isEmailAuthorized(email, c.env)) {
+      return c.json({ error: 'Registration is restricted to authorized emails' }, 403);
+    }
 
     const registerIp = getRequestIpAddress(c) || 'unknown-ip';
     const rateLimit = await checkAndConsumeRateLimit(c.env.DB, {
@@ -2120,8 +2155,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const loginField = userSchema.hasEmail ? 'email' : 'username';
     const verifyField = userSchema.hasEmailVerifiedAt ? ', email_verified_at' : '';
     const totpField = userSchema.hasMfaTotpSecret ? ', mfa_totp_secret' : '';
+    const emailField = userSchema.hasEmail ? ', email' : '';
     const user = await c.env.DB.prepare(
-      `SELECT id, username, password_hash, password_salt, role${verifyField}${totpField},
+      `SELECT id, username${emailField}, password_hash, password_salt, role${verifyField}${totpField},
               EXISTS(SELECT 1 FROM sessions s WHERE s.user_id = users.id LIMIT 1) AS has_logged_in_before
        FROM users
        WHERE ${loginField} = ?`
@@ -2163,6 +2199,17 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+    const userEmail = normalizeEmail((user as any).email ?? (user as any).username);
+    if (!isEmailAuthorized(userEmail, c.env, userRole)) {
+      await recordLoginAttempt(c, {
+        email,
+        success: false,
+        reason: 'email_not_authorized',
+        userId: (user as any).id as string,
+        role: userRole
+      });
+      return c.json({ error: 'Account not authorized to access this database' }, 403);
+    }
     const totpEnabled = Boolean(userSchema.hasMfaTotpSecret && (user as any).mfa_totp_secret);
     const hasLoggedInBefore = Boolean((user as any).has_logged_in_before);
 
@@ -2656,6 +2703,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const email = (user as any).email as string;
+    if (!isEmailAuthorized(email, c.env)) {
+      return c.json({ error: 'Account not authorized to access this database' }, 403);
+    }
     const passwordValidationError = validatePasswordStrength(password, [email]);
     if (passwordValidationError) {
       return c.json({ error: passwordValidationError }, 400);
@@ -3067,6 +3117,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
+    const userEmail = sessionUser.email || sessionUser.username;
+    if (!isEmailAuthorized(userEmail, c.env, sessionUser.role)) {
+      clearSessionCookie(c);
+      return c.json({ error: 'Account not authorized to access this database' }, 403);
+    }
+
     const accountData = await getAccountById(c.env.DB, sessionUser.userId);
     if (!accountData) {
       clearSessionCookie(c);
@@ -3452,6 +3508,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
     if (!isValidEmail(email)) {
       return c.json({ error: 'Invalid email format' }, 400);
+    }
+    if (!isEmailAuthorized(email, c.env)) {
+      return c.json({ error: 'Email is not in the allowed emails list (ALLOWED_EMAILS)' }, 400);
     }
 
     const finalRole: UserRole = role === 'admin' ? 'admin' : 'readonly';
@@ -4196,6 +4255,17 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+    const userEmail = normalizeEmail((user as any).email ?? (user as any).username);
+    if (!isEmailAuthorized(userEmail, c.env, userRole)) {
+      await recordLoginAttempt(c, {
+        email: userEmail,
+        success: false,
+        reason: 'email_not_authorized',
+        userId: (user as any).id as string,
+        role: userRole
+      });
+      return c.json({ error: 'Account not authorized to access this database' }, 403);
+    }
     await createSession(c, {
       id: (user as any).id as string,
       username: (user as any).username as string,

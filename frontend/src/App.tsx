@@ -410,7 +410,10 @@ function App() {
         console.warn('Failed to persist pending focus:', error);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('app.signInFailed');
+      let message = err instanceof Error ? err.message : t('app.signInFailed');
+      if (message.includes('not authorized to access this database')) {
+        message = t('login.emailNotAuthorized');
+      }
       setAuthError(message);
       setIsAuthed(false);
       setAuthUser(null);
@@ -432,7 +435,10 @@ function App() {
         setAuthNotice(`${t('login.registerSuccessVerify', { email: result.email })}${debugSuffix}`);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('login.registerFailed');
+      let message = err instanceof Error ? err.message : t('login.registerFailed');
+      if (message.includes('restricted to authorized emails')) {
+        message = t('login.registrationRestricted');
+      }
       setAuthError(message);
       throw err;
     }
@@ -451,12 +457,15 @@ function App() {
       setPendingMfaMethod('email');
       setAuthNotice(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : passkeyErrorMessage(err);
+      let message = err instanceof Error ? err.message : passkeyErrorMessage(err);
+      if (message.includes('not authorized to access this database')) {
+        message = t('login.emailNotAuthorized');
+      }
       setAuthError(message);
       setIsAuthed(false);
       setAuthUser(null);
     }
-  }, []);
+  }, [t]);
 
   const handleVerifyMfa = useCallback(async (code: string) => {
     if (!pendingMfa) return;

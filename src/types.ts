@@ -18,6 +18,7 @@ export type Env = {
   DUAL_WRITE_REMOTE_USER?: string;
   DUAL_WRITE_REMOTE_PASS?: string;
   DUAL_WRITE_SHARED_SECRET?: string;
+  ALLOWED_EMAILS?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';
@@ -29,6 +30,7 @@ export type NotificationStatus = 'pending' | 'in_progress' | 'resolved' | 'rejec
 export type SessionUser = {
   userId: string;
   username: string;
+  email?: string;
   role: UserRole;
 };
 
