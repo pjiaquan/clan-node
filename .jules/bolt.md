@@ -11,3 +11,6 @@
 ## 2024-05-24 - Avoiding Array Allocation in Hot Paths
 **Learning:** In heavily used title resolution functions (`resolveSiblingDescendantLine`, `resolveExtendedInLawLine`), using chaining array methods like `path.slice().filter().length` on string arrays creates unnecessary temporary array allocations during hot loops, leading to memory overhead and potential GC pauses.
 **Action:** Replace `Array.prototype.slice().filter().length` with standard `for` loops in path iteration segments to achieve O(1) space complexity and maintain high throughput during batch title resolutions.
+## 2024-05-24 - Rejecting Date String Comparison Optimization
+**Learning:** While replacing `new Date(string).getTime()` with string comparisons (`dob || ''`) provides a measurable micro-optimization in JavaScript for ISO 8601 strings, it carries hidden risks (e.g., if strings are not strictly zero-padded like `1990-1-1`). This was rejected as a "premature micro-optimization" that introduced date string comparison risks.
+**Action:** Do not attempt to replace native `Date` parsing with string comparison unless there is an absolute architectural guarantee and test coverage proving the date strings are always strictly zero-padded ISO 8601. Favor readability and safety over this specific micro-optimization.
