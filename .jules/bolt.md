@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-12 - Replacing Array Allocations Over Sets with For-Of Loops
+**Learning:** In hot loops, particularly in graph algorithms like `KinshipTitleResolver`, converting a `Set` to an array using the spread operator (`[...mySet]`) solely to iterate over its elements or use array methods (like `.some()`) is an anti-pattern. This incurs an unnecessary O(N) memory allocation and adds garbage collection pressure on high throughput code.
+**Action:** Always prefer direct iteration over `Set` objects via `for...of` loops, as they perform zero memory allocation and support early exits (`break`/`return`).
