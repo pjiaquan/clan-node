@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2026-09-13 - Avoiding Set to Array Allocation Trap in Kinship Resolution
+**Learning:** In hot loops like 'resolveInLawBridgeLine' in `title_resolver.ts`, converting a Set to an array using the spread operator (`[...set]`) just to call `.some()` creates O(N) allocation overhead per resolution path, slowing down bulk graph calculations.
+**Action:** Replace `[...set].some(fn)` with a zero-allocation `for...of` loop directly over the Set elements.
