@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-13 - Avoid Set to Array conversions in hot paths
+**Learning:** Using `[...set].some(...)` or `Array.from(set)` inside a tight traversal loop (like graph path resolving) forces the JavaScript engine to allocate a new Array object on every iteration, leading to O(N) memory overhead and increased garbage collection pressure.
+**Action:** Replace `[...set].some(fn)` or `Array.from(set)` with a zero-allocation `for...of` loop over the Set, using an early `break` when the condition is met. Ensure you include an inline comment explaining the optimization and its impact.
