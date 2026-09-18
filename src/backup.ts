@@ -132,6 +132,9 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     try {
       const contentLengthHeader = c.req.header('content-length');
       if (contentLengthHeader) {
+        if (contentLengthHeader.length > 20) {
+          return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
+        }
         const contentLength = parseInt(contentLengthHeader, 10);
         if (Number.isFinite(contentLength) && contentLength > 50 * 1024 * 1024) {
           return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
