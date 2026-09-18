@@ -86,6 +86,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
               rows={5}
               maxLength={2000}
               placeholder={hint}
+              autoFocus
             />
             <div className="report-issue-hint">{message.length}/2000</div>
           </div>
