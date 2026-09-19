@@ -616,7 +616,14 @@ export class KinshipTitleResolver {
       if (parent && possibleSibling && possibleSpouse) {
         const parentIds = this.parentsOfChildMap.get(parent.id) || new Set();
         const siblingParentIds = this.parentsOfChildMap.get(possibleSibling.id) || new Set();
-        const sharesParent = [...parentIds].some((id) => siblingParentIds.has(id));
+        // Bolt Optimization: Replaced O(N) [...set].some array allocation with a zero-allocation loop
+        let sharesParent = false;
+        for (const id of parentIds) {
+          if (siblingParentIds.has(id)) {
+            sharesParent = true;
+            break;
+          }
+        }
         const spouses = this.spouseOfPersonMap.get(possibleSibling.id);
         const isSpouse = spouses ? spouses.has(possibleSpouse.id) : false;
 
