@@ -58,6 +58,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
               onChange={(event) => setEmail(event.target.value)}
               placeholder={t('createUser.emailPlaceholder')}
               autoComplete="email"
+              autoFocus
             />
           </div>
           <div className="form-group">

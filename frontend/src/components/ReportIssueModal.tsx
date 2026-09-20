@@ -71,7 +71,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="report-issue-type">{t('report.issueType')}</label>
-            <select id="report-issue-type" value={type} onChange={(event) => setType(event.target.value as NotificationType)}>
+            <select id="report-issue-type" value={type} onChange={(event) => setType(event.target.value as NotificationType)} autoFocus>
               {issueTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
