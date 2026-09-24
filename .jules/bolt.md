@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-12 - Optimize Chained Array Allocations
+**Learning:** Chaining array operations like `.map().filter()` inside a `Set` constructor (e.g., `Array.from(new Set(arr.map().filter()))`) allocates multiple intermediate arrays in memory. For batch data processing, this leads to unnecessary garbage collection overhead and slower execution times.
+**Action:** Consolidate these operations into a single, zero-allocation `for` loop over the source array, inserting valid/normalized items directly into the `Set`.
