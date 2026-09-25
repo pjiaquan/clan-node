@@ -65,6 +65,7 @@ export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ 
               autoComplete="new-password"
               minLength={12}
               required
+              autoFocus
             />
             <small className="name-lock-hint">{t('createUser.passwordPolicy')}</small>
           </div>
