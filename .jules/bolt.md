@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2026-09-25 - Halving Hash Lookups in Hot Paths
+**Learning:** In tight batch loops (like `buildAdjacency` processing 100,000+ relationships), using `Map.has()` followed by `Map.get()` doubles the hashing overhead unnecessarily. Additionally, array iterators (`forEach`, `for...of`) allocate functions or iterator objects that strain the garbage collector.
+**Action:** For performance-critical map insertions, always use a single `Map.get()` to retrieve the value, falling back to initializing it if `undefined`. Combine this with standard index-based `for` loops to achieve zero-allocation O(1) lookups.
