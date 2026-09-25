@@ -2,3 +2,7 @@
 **Vulnerability:** Multiple critical authentication endpoints (/login, /reset-password, /users/:id) lacked maximum length validation on the password input, exposing the application to resource exhaustion (DoS) attacks via computationally expensive hashing algorithms.
 **Learning:** `PASSWORD_MAX_LENGTH` was defined in `src/auth.ts` but its enforcement was inconsistent across routes, particularly in routes added later or less frequently audited.
 **Prevention:** Always enforce both minimum and maximum length bounds consistently across all user input endpoints before passing data to expensive cryptographic operations. Ensure bounds check is conditionally applied for optional fields.
+## 2025-02-23 - Fix cryptographic modulo bias in MFA code generation
+**Vulnerability:** The MFA code generator (`createMfaCode` in `src/auth.ts`) previously generated numbers using direct modulo arithmetic (`crypto.getRandomValues(new Uint32Array(1))[0] % 1000000`). This results in modulo bias because the upper bound of a 32-bit integer (4,294,967,295) is not perfectly divisible by 1,000,000. Codes in the lower range are slightly more likely to be generated.
+**Learning:** Even with secure random number generators, mathematically altering the output with `%` introduces bias unless the generated range is an exact multiple of the desired modulus.
+**Prevention:** Always use rejection sampling (discarding randomly generated numbers that fall outside the largest complete multiple of the modulus) when converting large random integers into a smaller uniformly distributed range.
