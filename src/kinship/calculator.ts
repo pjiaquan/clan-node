@@ -106,11 +106,16 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   }
 
   private buildParentMap(relationships: Relationship[]) {
+    // Optimization: Consolidate Map.has() and Map.get() into a single Map.get() call to halve hash overhead
     const parentMap = new Map<string, string[]>();
     relationships.forEach((relationship) => {
       if (relationship.type === 'parent_child') {
-        if (!parentMap.has(relationship.to_person_id)) parentMap.set(relationship.to_person_id, []);
-        parentMap.get(relationship.to_person_id)?.push(relationship.from_person_id);
+        let parents = parentMap.get(relationship.to_person_id);
+        if (parents === undefined) {
+          parents = [];
+          parentMap.set(relationship.to_person_id, parents);
+        }
+        parents.push(relationship.from_person_id);
       }
     });
     return parentMap;
@@ -144,16 +149,23 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   }
 
   private buildAdjacency(relationships: Relationship[]) {
+    // Optimization: Consolidate Map.has() and Map.get() into a single Map.get() call to halve hash overhead
     const adjacency = new Map<string, AdjacencyEdge[]>();
 
     for (const relationship of relationships) {
       if (!relationship.from_person_id || !relationship.to_person_id) continue;
-      if (!adjacency.has(relationship.from_person_id)) adjacency.set(relationship.from_person_id, []);
-      if (!adjacency.has(relationship.to_person_id)) adjacency.set(relationship.to_person_id, []);
 
-      const fromNode = adjacency.get(relationship.from_person_id);
-      const toNode = adjacency.get(relationship.to_person_id);
-      if (!fromNode || !toNode) continue;
+      let fromNode = adjacency.get(relationship.from_person_id);
+      if (fromNode === undefined) {
+        fromNode = [];
+        adjacency.set(relationship.from_person_id, fromNode);
+      }
+
+      let toNode = adjacency.get(relationship.to_person_id);
+      if (toNode === undefined) {
+        toNode = [];
+        adjacency.set(relationship.to_person_id, toNode);
+      }
 
       if (relationship.type === 'parent_child') {
         fromNode.push({ id: relationship.to_person_id, direction: 'down' });

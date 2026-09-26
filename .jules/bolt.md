@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-12 - Consolidate Map Check and Assignment
+**Learning:** Checking `Map.has()` followed by `Map.get()` or `Map.set()` inside hot loops (like graph edge building in `buildAdjacency` and `buildParentMap`) creates redundant hash lookups, causing measurable O(N) overhead during large batched calculations.
+**Action:** When working with Maps in hot paths, consolidate double map lookups into a single `Map.get()` call combined with a strict `undefined` check, effectively halving the hash overhead.
