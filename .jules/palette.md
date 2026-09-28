@@ -10,3 +10,9 @@
 ## 2024-05-20 - Ensure loading states for generic modals
 **Learning:** We implemented a loading state in `AddPersonModal`. I've observed that some modals like `AddPersonModal` don't disable their 'Cancel' buttons or display proper feedback with inline spinners during async submissions. This leaves the interface unresponsive during a network call or creation flow, breaking expectations for async actions in similar components.
 **Action:** When adding async submission functions in forms and modals, always apply the `btn-inline-spinner` class, set standard `disabled={submitting}` states on inputs/buttons, and provide clear user feedback during submission (e.g., text changing from 'Submit' to 'Saving...').
+
+## 2024-05-20 - Adding autoFocus to the first interactive element of generic modals
+
+**Learning:** This application inconsistently implements `autoFocus` on the first interactive elements in critical modals (`CreateUserModal`, `ResetUserPasswordModal`, `ReportIssueModal`). While `AddPersonModal` uses `autoFocus` appropriately, the majority of forms lack keyboard-friendly focus when the modal opens. This results in users experiencing disruption to their keyboard workflow and breaking accessibility expectations for keyboard navigators and screen reader users.
+
+**Action:** When adding modal components, always apply the `autoFocus` attribute to the very first interactive input element, whether it's an `<input>` or `<select>`, so that users can immediately start typing or navigating with the keyboard.
