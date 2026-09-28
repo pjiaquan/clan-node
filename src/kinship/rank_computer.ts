@@ -21,16 +21,35 @@ export class SiblingRankComputer {
 
     relationships.forEach((relationship) => {
       if (relationship.type === 'sibling') {
-        if (!this.siblingMap.has(relationship.from_person_id)) this.siblingMap.set(relationship.from_person_id, new Set());
-        if (!this.siblingMap.has(relationship.to_person_id)) this.siblingMap.set(relationship.to_person_id, new Set());
-        this.siblingMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
-        this.siblingMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
-      } else if (relationship.type === 'parent_child') {
-        if (!this.parentsMap.has(relationship.to_person_id)) this.parentsMap.set(relationship.to_person_id, new Set());
-        this.parentsMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
+        // ⚡ Bolt Optimization: Combine .has() and .get() into a single lookup to halve hash overhead
+        let fromSiblings = this.siblingMap.get(relationship.from_person_id);
+        if (fromSiblings === undefined) {
+          fromSiblings = new Set();
+          this.siblingMap.set(relationship.from_person_id, fromSiblings);
+        }
 
-        if (!this.childrenMap.has(relationship.from_person_id)) this.childrenMap.set(relationship.from_person_id, new Set());
-        this.childrenMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
+        let toSiblings = this.siblingMap.get(relationship.to_person_id);
+        if (toSiblings === undefined) {
+          toSiblings = new Set();
+          this.siblingMap.set(relationship.to_person_id, toSiblings);
+        }
+
+        fromSiblings.add(relationship.to_person_id);
+        toSiblings.add(relationship.from_person_id);
+      } else if (relationship.type === 'parent_child') {
+        let parents = this.parentsMap.get(relationship.to_person_id);
+        if (parents === undefined) {
+          parents = new Set();
+          this.parentsMap.set(relationship.to_person_id, parents);
+        }
+        parents.add(relationship.from_person_id);
+
+        let children = this.childrenMap.get(relationship.from_person_id);
+        if (children === undefined) {
+          children = new Set();
+          this.childrenMap.set(relationship.from_person_id, children);
+        }
+        children.add(relationship.to_person_id);
       }
     });
   }

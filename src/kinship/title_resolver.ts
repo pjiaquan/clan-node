@@ -29,25 +29,34 @@ export class KinshipTitleResolver {
 
     relationships.forEach((rel) => {
       if (rel.type === 'parent_child') {
-        if (!this.childrenOfParentMap.has(rel.from_person_id)) {
-          this.childrenOfParentMap.set(rel.from_person_id, new Set());
+        // ⚡ Bolt Optimization: Combine .has() and .get() into a single lookup to halve hash overhead
+        let children = this.childrenOfParentMap.get(rel.from_person_id);
+        if (children === undefined) {
+          children = new Set();
+          this.childrenOfParentMap.set(rel.from_person_id, children);
         }
-        this.childrenOfParentMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        children.add(rel.to_person_id);
 
-        if (!this.parentsOfChildMap.has(rel.to_person_id)) {
-          this.parentsOfChildMap.set(rel.to_person_id, new Set());
+        let parents = this.parentsOfChildMap.get(rel.to_person_id);
+        if (parents === undefined) {
+          parents = new Set();
+          this.parentsOfChildMap.set(rel.to_person_id, parents);
         }
-        this.parentsOfChildMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        parents.add(rel.from_person_id);
       } else if (rel.type === 'spouse') {
-        if (!this.spouseOfPersonMap.has(rel.from_person_id)) {
-          this.spouseOfPersonMap.set(rel.from_person_id, new Set());
+        let fromSpouses = this.spouseOfPersonMap.get(rel.from_person_id);
+        if (fromSpouses === undefined) {
+          fromSpouses = new Set();
+          this.spouseOfPersonMap.set(rel.from_person_id, fromSpouses);
         }
-        this.spouseOfPersonMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        fromSpouses.add(rel.to_person_id);
 
-        if (!this.spouseOfPersonMap.has(rel.to_person_id)) {
-          this.spouseOfPersonMap.set(rel.to_person_id, new Set());
+        let toSpouses = this.spouseOfPersonMap.get(rel.to_person_id);
+        if (toSpouses === undefined) {
+          toSpouses = new Set();
+          this.spouseOfPersonMap.set(rel.to_person_id, toSpouses);
         }
-        this.spouseOfPersonMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        toSpouses.add(rel.from_person_id);
       }
     });
   }
