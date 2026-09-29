@@ -107,12 +107,18 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
 
   private buildParentMap(relationships: Relationship[]) {
     const parentMap = new Map<string, string[]>();
-    relationships.forEach((relationship) => {
+    // ⚡ Bolt: Use for loop and single Map.get() with undefined check to halve hash overhead and avoid O(N) allocation
+    for (let i = 0; i < relationships.length; i++) {
+      const relationship = relationships[i];
       if (relationship.type === 'parent_child') {
-        if (!parentMap.has(relationship.to_person_id)) parentMap.set(relationship.to_person_id, []);
-        parentMap.get(relationship.to_person_id)?.push(relationship.from_person_id);
+        let parents = parentMap.get(relationship.to_person_id);
+        if (parents === undefined) {
+          parents = [];
+          parentMap.set(relationship.to_person_id, parents);
+        }
+        parents.push(relationship.from_person_id);
       }
-    });
+    }
     return parentMap;
   }
 

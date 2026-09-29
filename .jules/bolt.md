@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2026-09-29 - Optimize Map Lookups in Graph Builders
+**Learning:** Iterating large datasets (like relationships) using `.forEach` inside graph initializers allocates a closure per element, which accumulates noticeable GC pressure. Additionally, standard `Map.has()` followed by `Map.set()` or `Map.get()` forces the hash table to be queried twice for the same key.
+**Action:** Replace `.forEach` with index-based `for` loops and consolidate map queries by reading with `Map.get()` directly. If the returned value is `undefined`, initialize the object and set it in the map. This halves the hash lookups and eliminates closure allocations.

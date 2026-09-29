@@ -27,29 +27,39 @@ export class KinshipTitleResolver {
     this.rankComputer = new SiblingRankComputer(people, relationships);
     people.forEach((p) => this.peopleMap.set(p.id, p));
 
-    relationships.forEach((rel) => {
+    // ⚡ Bolt: Use for loop and single Map.get() with undefined check to halve hash overhead and avoid O(N) allocation
+    for (let i = 0; i < relationships.length; i++) {
+      const rel = relationships[i];
       if (rel.type === 'parent_child') {
-        if (!this.childrenOfParentMap.has(rel.from_person_id)) {
-          this.childrenOfParentMap.set(rel.from_person_id, new Set());
+        let children = this.childrenOfParentMap.get(rel.from_person_id);
+        if (children === undefined) {
+          children = new Set();
+          this.childrenOfParentMap.set(rel.from_person_id, children);
         }
-        this.childrenOfParentMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        children.add(rel.to_person_id);
 
-        if (!this.parentsOfChildMap.has(rel.to_person_id)) {
-          this.parentsOfChildMap.set(rel.to_person_id, new Set());
+        let parents = this.parentsOfChildMap.get(rel.to_person_id);
+        if (parents === undefined) {
+          parents = new Set();
+          this.parentsOfChildMap.set(rel.to_person_id, parents);
         }
-        this.parentsOfChildMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        parents.add(rel.from_person_id);
       } else if (rel.type === 'spouse') {
-        if (!this.spouseOfPersonMap.has(rel.from_person_id)) {
-          this.spouseOfPersonMap.set(rel.from_person_id, new Set());
+        let fromSpouse = this.spouseOfPersonMap.get(rel.from_person_id);
+        if (fromSpouse === undefined) {
+          fromSpouse = new Set();
+          this.spouseOfPersonMap.set(rel.from_person_id, fromSpouse);
         }
-        this.spouseOfPersonMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        fromSpouse.add(rel.to_person_id);
 
-        if (!this.spouseOfPersonMap.has(rel.to_person_id)) {
-          this.spouseOfPersonMap.set(rel.to_person_id, new Set());
+        let toSpouse = this.spouseOfPersonMap.get(rel.to_person_id);
+        if (toSpouse === undefined) {
+          toSpouse = new Set();
+          this.spouseOfPersonMap.set(rel.to_person_id, toSpouse);
         }
-        this.spouseOfPersonMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        toSpouse.add(rel.from_person_id);
       }
-    });
+    }
   }
 
   resolve({ path, nodePath, targetId }: ResolveInput): string {
