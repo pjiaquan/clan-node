@@ -52,6 +52,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
           <div className="form-group">
             <label htmlFor="new-email">{t('createUser.email')}</label>
             <input
+              autoFocus
               id="new-email"
               type="email"
               value={email}

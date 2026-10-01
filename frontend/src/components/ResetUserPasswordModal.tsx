@@ -58,6 +58,7 @@ export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ 
           <div className="form-group">
             <label htmlFor="reset-user-password">{t('userMgmt.newPassword')}</label>
             <input
+              autoFocus
               id="reset-user-password"
               type="password"
               value={password}
