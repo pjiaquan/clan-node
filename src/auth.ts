@@ -628,7 +628,15 @@ const createPasswordResetToken = async () => {
 };
 
 const createMfaCode = async () => {
-  const randomValue = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+  // Prevent cryptographic modulo bias via rejection sampling
+  const maxSafeValue = 4294000000; // Highest multiple of 1,000,000 <= 2^32 - 1
+  const array = new Uint32Array(1);
+  let randomValue: number;
+  do {
+    crypto.getRandomValues(array);
+    randomValue = array[0] ?? 0;
+  } while (randomValue >= maxSafeValue);
+
   const code = String(randomValue % 1000000).padStart(6, '0');
   const codeHash = await sha256Base64(code);
   const expiresAt = new Date(Date.now() + MFA_TTL_MS).toISOString();
