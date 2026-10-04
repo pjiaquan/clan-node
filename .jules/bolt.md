@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2024-05-18 - Avoid array allocation in `buildParentMap` and double map lookups in `calculator.ts`
+**Learning:** `buildParentMap` was using `.forEach()`, adding closure allocation overhead, and both `buildParentMap` and `buildAdjacency` used the double hash lookup pattern (`Map.has()` followed by `Map.get()`), doubling map lookup operations in hot execution paths.
+**Action:** Replace `Map.has()`/`Map.get()` patterns with single `.get()` calls followed by `undefined` checks, and replace array iterator methods with zero-allocation standard `for` loops in hot path logic.
