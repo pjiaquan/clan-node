@@ -19,20 +19,41 @@ export class SiblingRankComputer {
   ) {
     people.forEach((p) => this.peopleMap.set(p.id, p));
 
-    relationships.forEach((relationship) => {
+    // Bolt Optimization: Replace double map lookups with a single .get() + undefined check,
+    // and use traditional for loop to avoid closure overhead.
+    // Expected impact: Faster graph traversal construction time and reduced GC overhead.
+    for (let i = 0; i < relationships.length; i++) {
+      const relationship = relationships[i];
       if (relationship.type === 'sibling') {
-        if (!this.siblingMap.has(relationship.from_person_id)) this.siblingMap.set(relationship.from_person_id, new Set());
-        if (!this.siblingMap.has(relationship.to_person_id)) this.siblingMap.set(relationship.to_person_id, new Set());
-        this.siblingMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
-        this.siblingMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
-      } else if (relationship.type === 'parent_child') {
-        if (!this.parentsMap.has(relationship.to_person_id)) this.parentsMap.set(relationship.to_person_id, new Set());
-        this.parentsMap.get(relationship.to_person_id)!.add(relationship.from_person_id);
+        let fromSet = this.siblingMap.get(relationship.from_person_id);
+        if (fromSet === undefined) {
+          fromSet = new Set();
+          this.siblingMap.set(relationship.from_person_id, fromSet);
+        }
+        fromSet.add(relationship.to_person_id);
 
-        if (!this.childrenMap.has(relationship.from_person_id)) this.childrenMap.set(relationship.from_person_id, new Set());
-        this.childrenMap.get(relationship.from_person_id)!.add(relationship.to_person_id);
+        let toSet = this.siblingMap.get(relationship.to_person_id);
+        if (toSet === undefined) {
+          toSet = new Set();
+          this.siblingMap.set(relationship.to_person_id, toSet);
+        }
+        toSet.add(relationship.from_person_id);
+      } else if (relationship.type === 'parent_child') {
+        let toParents = this.parentsMap.get(relationship.to_person_id);
+        if (toParents === undefined) {
+          toParents = new Set();
+          this.parentsMap.set(relationship.to_person_id, toParents);
+        }
+        toParents.add(relationship.from_person_id);
+
+        let fromChildren = this.childrenMap.get(relationship.from_person_id);
+        if (fromChildren === undefined) {
+          fromChildren = new Set();
+          this.childrenMap.set(relationship.from_person_id, fromChildren);
+        }
+        fromChildren.add(relationship.to_person_id);
       }
-    });
+    }
   }
 
   getSiblingRank(reference: Person, sibling: Person): RelativeRank | null {

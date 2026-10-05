@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-12 - Consolidate Map Lookups in Graph Building
+**Learning:** Initializing maps with nested relationships using `.has()` followed by `.get()` forces the JS engine to compute the hash and search the map buckets twice. Additionally, using `Array.prototype.forEach` allocates closures unnecessarily in hot paths.
+**Action:** Always replace `.forEach` with traditional `for` loops in hot path relationship ingestion functions, and consolidate double map lookups into a single `let node = map.get(key); if (node === undefined) { node = new Set(); map.set(key, node); }` to halve hash evaluation overhead.
