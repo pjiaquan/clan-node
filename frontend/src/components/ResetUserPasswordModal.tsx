@@ -78,6 +78,7 @@ export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ 
               autoComplete="new-password"
               minLength={12}
               required
+              autoFocus
             />
           </div>
           <div className="user-admin-modal-actions">
