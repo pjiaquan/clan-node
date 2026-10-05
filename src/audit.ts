@@ -102,7 +102,9 @@ export function registerAuditRoutes(app: Hono<AppBindings>) {
       return c.json([]);
     }
 
-    const rawLimit = Number(c.req.query('limit') || 200);
+    // Truncate length before Number() to prevent CPU exhaustion DoS
+    const rawLimitStr = c.req.query('limit')?.slice(0, 10) || '200';
+    const rawLimit = Number(rawLimitStr);
     const limit = Number.isFinite(rawLimit)
       ? Math.max(1, Math.min(Math.trunc(rawLimit), 500))
       : 200;
