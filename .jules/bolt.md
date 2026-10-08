@@ -14,3 +14,6 @@
 ## 2025-02-12 - Optimize Backup Validation Loop
 **Learning:** Using `Array.prototype.map` followed by `new Map()` or `new Set()` object initialization creates O(N) allocation overhead that is visible as a bottleneck when handling large arrays like backup snapshots.
 **Action:** When validating dependencies across large disconnected datasets (like relationships referencing people and layers), consolidate constraints by iterating with standard `for` loops and constructing a minimal reference map mapping only required scalar fields (like `id` -> `layer_id`) rather than caching full row objects, avoiding intermediary allocations.
+## 2025-02-12 - Avoiding O(N) Set-to-Array Conversions in Hot Paths
+**Learning:** Using `[...set].some(...)` to check for intersection between Sets creates an unnecessary `O(N)` memory allocation during the Set-to-Array conversion. In hot paths like relationship and title resolution (`src/kinship/title_resolver.ts`), this can cause performance overhead and frequent Garbage Collection pauses.
+**Action:** When performing Set intersections or lookups in hot paths, use a zero-allocation `for...of` loop over the Set and break early, entirely avoiding intermediate array creations.
