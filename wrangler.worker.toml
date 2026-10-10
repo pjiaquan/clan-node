@@ -9,6 +9,7 @@ compatibility_flags = ["nodejs_compat"]
 # published: it sets ENVIRONMENT = "development" (non-Secure cookies, no HSTS,
 # no AUTH_ENCRYPTION_KEY requirement) while still being bound to the bindings
 # below. Deploys go through `npm run deploy`, which passes --env production.
+
 workers_dev = false
 
 # D1 Database binding
@@ -34,6 +35,15 @@ EMAIL_VERIFICATION_URL_BASE = "http://localhost:5173"
 BREVO_FROM_EMAIL = "no-reply@hinoki.my"
 BREVO_FROM_NAME = "Family Tree"
 ALLOWED_EMAILS = "pjiaquan@gmail.com"
+
+[env.production]
+# Re-enabled over the inherited top-level `workers_dev = false`: this Worker is
+# served at clan-node-production.<subdomain>.workers.dev, which the Pages
+# Function proxies to.
+workers_dev = true
+# Per-version preview hostnames are an extra public entry point to the same
+# Worker and the same production database, and nothing needs them.
+preview_urls = false
 
 [env.production.vars]
 ENVIRONMENT = "production"
