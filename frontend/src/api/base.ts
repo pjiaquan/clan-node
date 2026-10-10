@@ -24,9 +24,19 @@ const configuredApiBase = hasExplicitApiBase
 
 export const API_BASE = normalizeApiBase(configuredApiBase);
 
+/**
+ * Resolves a stored avatar path against the API origin.
+ *
+ * Absolute URLs are refused. They used to be passed through unchanged, and
+ * because the graph prefetches every visible person's avatar with
+ * `credentials: 'include'`, a writer could point one at a host of their
+ * choosing and learn the IP, user agent and viewing time of every other
+ * member. The server now rejects them on write; this also covers rows stored
+ * before that, and keeps such a URL from being fetched or rendered.
+ */
 export const resolveAvatarUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;
-  if (/^https?:\/\//i.test(avatarUrl)) return avatarUrl;
+  if (!avatarUrl.startsWith('/api/avatars/')) return null;
   return `${API_BASE}${avatarUrl}`;
 };
 

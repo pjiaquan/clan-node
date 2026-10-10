@@ -25,3 +25,21 @@ export const isSafeStorageKey = (key: unknown): key is string => {
 export const safeStorageKey = (key: unknown): string | null => (
   isSafeStorageKey(key) ? key : null
 );
+
+/** Path prefix of the route that serves avatars out of the bucket. */
+export const AVATAR_URL_PREFIX = '/api/avatars/';
+
+/**
+ * Whether an avatar URL is one this server minted.
+ *
+ * Arbitrary absolute URLs used to be accepted and stored. Every client that
+ * opens the graph prefetches each visible person's avatar with credentials
+ * included, so anyone who could write a person turned that into a tracking
+ * beacon: the chosen host learns the IP, user agent and viewing time of every
+ * other member, and controls what image they see.
+ */
+export const isServerMintedAvatarUrl = (url: unknown): url is string => (
+  typeof url === 'string'
+  && url.startsWith(AVATAR_URL_PREFIX)
+  && isSafeStorageKey(url.slice(AVATAR_URL_PREFIX.length))
+);

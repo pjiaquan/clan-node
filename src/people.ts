@@ -14,7 +14,7 @@ import {
 } from './data_protection';
 import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 import { getPeopleSchemaSupport } from './schema';
-import { safeStorageKey } from './storage_keys';
+import { isServerMintedAvatarUrl, safeStorageKey } from './storage_keys';
 import {
   appendAvatar,
   deriveStorageKeyFromUrl,
@@ -165,6 +165,9 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!name) {
       return c.json({ error: 'Name is required' }, 400);
     }
+    if (avatar_url && !isServerMintedAvatarUrl(avatar_url)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
+    }
     await ensureLayerSchemaSupport(c.env.DB);
     if (!await assertLayerExists(c.env.DB, layerId)) {
       return c.json({ error: 'Layer not found' }, 404);
@@ -227,6 +230,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           sort_order: Number.isFinite(entry?.sort_order) ? Number(entry.sort_order) : index
         }))
         .filter((entry: any) => Boolean(entry.avatar_url));
+      const rejected = candidates.find((entry: any) => !isServerMintedAvatarUrl(entry.avatar_url));
+      if (rejected) {
+        return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
+      }
 
       let primaryPicked = false;
       for (const entry of candidates) {
@@ -345,6 +352,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
     const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+
+    // An empty string clears the avatar; anything else has to be a path this
+    // server minted.
+    if (avatar_url && !isServerMintedAvatarUrl(avatar_url)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
+    }
 
     const existing = await repository.getPersonByIdInLayerDetailed(id, layerId, peopleSchema.hasEmail);
 

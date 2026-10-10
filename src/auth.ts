@@ -2,6 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
 import { isDevelopmentEnv, isProductionEnv } from './environment';
+import { isServerMintedAvatarUrl } from './storage_keys';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
@@ -3543,6 +3544,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
     if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
       return c.json({ error: 'Invalid email format' }, 400);
+    }
+    // Account avatars were also stored verbatim, and user management renders
+    // them, so the same beacon applied to whoever views the user list.
+    if (nextAvatarUrl && !isServerMintedAvatarUrl(nextAvatarUrl)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
     }
 
     const existing = await c.env.DB.prepare(

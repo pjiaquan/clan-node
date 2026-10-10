@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { isSafeStorageKey, safeStorageKey } from './storage_keys';
+import { isSafeStorageKey, isServerMintedAvatarUrl, safeStorageKey } from './storage_keys';
 import { LocalR2Bucket } from './selfhost/local_r2';
 import { deriveStorageKeyFromUrl } from './people/avatar_service';
 
@@ -113,4 +113,25 @@ test('GET /api/avatars/:key rejects percent-encoded traversal before reaching th
   const res = await app.request(`http://local.test/api/avatars/${LEGITIMATE_KEYS[0]}`);
   assert.equal(res.status, 200);
   assert.deepEqual(requestedKeys, [LEGITIMATE_KEYS[0]]);
+});
+
+test('isServerMintedAvatarUrl accepts only paths this server produced', () => {
+  assert.equal(isServerMintedAvatarUrl(`/api/avatars/${LEGITIMATE_KEYS[0]}`), true);
+  assert.equal(isServerMintedAvatarUrl(`/api/avatars/${LEGITIMATE_KEYS[1]}`), true);
+
+  // The tracking-beacon shapes: any host the writer chooses.
+  assert.equal(isServerMintedAvatarUrl('https://attacker.test/p.png'), false);
+  assert.equal(isServerMintedAvatarUrl('http://attacker.test/p.png'), false);
+  assert.equal(isServerMintedAvatarUrl('//attacker.test/p.png'), false);
+  assert.equal(isServerMintedAvatarUrl('https://attacker.test/api/avatars/x.png'), false);
+  // Traversal through the prefix.
+  assert.equal(isServerMintedAvatarUrl('/api/avatars/../clan-node.sqlite'), false);
+  assert.equal(isServerMintedAvatarUrl('/api/avatars/sub/dir.png'), false);
+  // Other shapes that are not an avatar path.
+  assert.equal(isServerMintedAvatarUrl('/api/people/1'), false);
+  assert.equal(isServerMintedAvatarUrl('javascript:alert(1)'), false);
+  assert.equal(isServerMintedAvatarUrl('data:image/png;base64,AAAA'), false);
+  assert.equal(isServerMintedAvatarUrl('/api/avatars/'), false);
+  assert.equal(isServerMintedAvatarUrl(''), false);
+  assert.equal(isServerMintedAvatarUrl(null), false);
 });
