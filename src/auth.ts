@@ -1,6 +1,7 @@
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
+import { isDevelopmentEnv, isProductionEnv } from './environment';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
@@ -383,7 +384,7 @@ const parseEncryptionKeyBytes = (value: string): Uint8Array => {
 const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keySource = env.AUTH_ENCRYPTION_KEY?.trim() || '';
   if (!keySource) {
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       throw new Error('AUTH_ENCRYPTION_KEY must be set in production to protect sensitive data.');
     }
     if (!encryptionKeyWarningShown) {
@@ -419,7 +420,7 @@ const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
  * means a missing or misspelled `ENVIRONMENT` is safe by default.
  */
 const debugTokensEnabled = (env: Env) => (
-  env.ENVIRONMENT === 'development'
+  isDevelopmentEnv(env)
   && ['1', 'true', 'yes'].includes((env.EXPOSE_DEBUG_TOKENS || '').trim().toLowerCase())
 );
 
@@ -428,7 +429,7 @@ const requireProductionSecret = (
   key: keyof Pick<Env, 'AUTH_ENCRYPTION_KEY' | 'ADMIN_SETUP_TOKEN'>,
   feature: string
 ) => {
-  if (c.env.ENVIRONMENT !== 'production') return null;
+  if (!isProductionEnv(c.env)) return null;
   if (typeof c.env[key] === 'string' && c.env[key]?.trim()) {
     return null;
   }
@@ -1112,7 +1113,7 @@ const issueEmailFallbackChallenge = async (
     userId: input.userId,
     email: input.email
   });
-  if (!challenge.delivered && c.env.ENVIRONMENT === 'production') {
+  if (!challenge.delivered && isProductionEnv(c.env)) {
     await c.env.DB.prepare(
       'DELETE FROM auth_mfa_challenges WHERE id = ?'
     ).bind(challenge.challengeId).run();
@@ -1190,7 +1191,7 @@ async function getSessionUser(db: D1Database, sessionId: string) {
   };
 }
 
-const isSecureRequest = (env: Env) => env.ENVIRONMENT === 'production';
+const isSecureRequest = (env: Env) => isProductionEnv(env);
 
 const clearSessionCookie = (c: Context<AppBindings>) => {
   const isSecure = isSecureRequest(c.env);
@@ -1411,7 +1412,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   };
 
   const getRpId = (env: Env): string => {
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       const origin = (env.FRONTEND_ORIGIN || '').split(',')[0]?.trim() || '';
       try {
         return new URL(origin).hostname;
@@ -1447,7 +1448,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       const normalized = candidate?.trim();
       if (normalized) return normalized;
     }
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       return null;
     }
     return 'dev-passkey-challenge-secret';

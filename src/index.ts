@@ -12,6 +12,7 @@ import { registerKinshipLabelRoutes } from './kinship_labels';
 import { registerBackupRoutes } from './backup';
 import { registerLayerRoutes } from './layers';
 import { verifyDualWriteRequest } from './dual_write';
+import { KNOWN_ENVIRONMENTS, isKnownEnvironment, isProductionEnv } from './environment';
 
 export const app = new Hono<AppBindings>();
 
@@ -21,9 +22,21 @@ app.use('*', async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'no-referrer');
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  if (c.env.ENVIRONMENT === 'production') {
+  if (isProductionEnv(c.env)) {
     c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   }
+});
+
+// Fail closed on a misconfigured environment. Cookie flags, HSTS and the
+// encryption-key requirement all key off ENVIRONMENT, so an unset or
+// misspelled value must not quietly select the weaker development behaviour.
+app.use('*', async (c, next) => {
+  if (!isKnownEnvironment(c.env)) {
+    return c.json({
+      error: `Server misconfiguration: ENVIRONMENT must be one of ${KNOWN_ENVIRONMENTS.join(', ')}`
+    }, 503);
+  }
+  return next();
 });
 
 // Enable CORS for frontend

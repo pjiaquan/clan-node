@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler --config wrangler.worker.toml dev --ip 0.0.0.0",
     "dev:selfhost": "PORT=8787 tsx src/selfhost/server.ts",
-    "deploy": "wrangler --config wrangler.worker.toml deploy",
+    "deploy": "wrangler --config wrangler.worker.toml deploy --env production",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

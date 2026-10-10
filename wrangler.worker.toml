@@ -5,7 +5,18 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# The default environment is for local `wrangler dev` only. It must never be
+# published: it sets ENVIRONMENT = "development" (non-Secure cookies, no HSTS,
+# no AUTH_ENCRYPTION_KEY requirement) while still being bound to the bindings
+# below. Deploys go through `npm run deploy`, which passes --env production.
+workers_dev = false
+
 # D1 Database binding
+#
+# NOTE: this is still the same database_id as [env.production] below. Until a
+# separate development database exists (`wrangler d1 create clan-db-dev`, then
+# replace the id here), `wrangler dev --remote` and any `wrangler d1 execute
+# --remote` without `--env production` read and write production data.
 [[d1_databases]]
 binding = "DB"
 database_name = "clan-db"
