@@ -1255,6 +1255,24 @@ export const claimMfaSessionAttempt = async (db: D1Database, sessionId: string, 
   ).bind(sessionId, nowIso).first()
 );
 
+/**
+ * Whether an admin may complete sign-in with an e-mail code.
+ *
+ * Admins are normally held to an authenticator app, but `/api/auth/setup`
+ * creates the first admin without a session and TOTP can only be enrolled
+ * from one. The e-mail code was refused at both send and verify, so a freshly
+ * set-up admin could not sign in at all -- which made running the server in
+ * development mode the easiest way out. The exemption is therefore limited to
+ * an admin that has never held a session, and closes by itself as soon as
+ * this first sign-in creates one.
+ */
+const adminBootstrapOtpAllowed = async (db: D1Database, userId: string) => {
+  const existingSession = await db.prepare(
+    'SELECT 1 AS present FROM sessions WHERE user_id = ? LIMIT 1'
+  ).bind(userId).first();
+  return !existingSession;
+};
+
 const issueEmailFallbackChallenge = async (
   c: Context<AppBindings>,
   input: { userId: string; email: string; role: UserRole }
@@ -2607,7 +2625,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'Invalid or expired MFA session' }, 400);
     }
-    if (normalizeRole((user as any).role) === 'admin') {
+    if (
+      normalizeRole((user as any).role) === 'admin'
+      && !await adminBootstrapOtpAllowed(c.env.DB, (user as any).id as string)
+    ) {
       return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
     }
 
@@ -2863,9 +2884,25 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
-    if (normalizeRole((user as any).role) === 'admin') {
+    const isAdmin = normalizeRole((user as any).role) === 'admin';
+    const isAdminBootstrap = isAdmin
+      && await adminBootstrapOtpAllowed(c.env.DB, (user as any).id as string);
+    if (isAdmin && !isAdminBootstrap) {
       await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE user_id = ?').bind((consumedChallenge as any).user_id as string).run();
       return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
+    }
+    if (isAdminBootstrap) {
+      await recordAuditLog(c, {
+        action: 'admin_bootstrap_login',
+        resourceType: 'auth',
+        resourceId: (user as any).id as string,
+        summary: `管理員首次登入（Email 驗證碼）${(user as any).username as string}`,
+        details: {
+          email: (consumedChallenge as any).email as string,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -2909,7 +2946,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         email: (user as any).username,
         role: userRole,
         avatar_url: null
-      }
+      },
+      // This session is the one chance to enrol TOTP: the next sign-in will
+      // require it, because the exemption only covers an admin with no
+      // session history.
+      ...(isAdminBootstrap ? { requires_totp_enrollment: true } : {})
     });
   });
 
