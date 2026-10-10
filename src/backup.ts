@@ -33,6 +33,9 @@ import {
   validateRelations,
 } from './backup/service';
 
+/** Hard cap on an import body, enforced against the bytes actually read. */
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+
 const ensureAdmin = (c: Context<AppBindings>) => {
   const sessionUser = c.get('sessionUser');
   if (!sessionUser || sessionUser.role !== 'admin') {
@@ -130,15 +133,27 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     }
 
     try {
+      // The declared length is only a cheap early reject: a chunked request
+      // carries no Content-Length, so the limit has to be enforced against the
+      // bytes actually read as well.
       const contentLengthHeader = c.req.header('content-length');
       if (contentLengthHeader) {
         const contentLength = parseInt(contentLengthHeader, 10);
-        if (Number.isFinite(contentLength) && contentLength > 50 * 1024 * 1024) {
+        if (Number.isFinite(contentLength) && contentLength > MAX_IMPORT_BYTES) {
           return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
         }
       }
 
-      const body = await c.req.json();
+      const rawBody = await c.req.arrayBuffer();
+      if (rawBody.byteLength > MAX_IMPORT_BYTES) {
+        return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(new TextDecoder().decode(rawBody));
+      } catch {
+        return c.json({ error: 'Body must be valid JSON' }, 400);
+      }
       if (!isRecord(body) || body.confirmation_text !== IMPORT_CONFIRMATION_TEXT) {
         return c.json({ error: `confirmation_text must equal ${IMPORT_CONFIRMATION_TEXT}` }, 400);
       }
