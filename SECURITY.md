@@ -63,3 +63,22 @@ the `DUAL_WRITE_*` credentials are set with `wrangler secret put`, or through
   and invite tokens in API responses.
 - Self-host behind a reverse proxy sets `TRUSTED_PROXY=1`, otherwise rate
   limiting and audit entries use the proxy's address for everyone.
+
+## Databases
+
+The two Worker environments use different D1 databases: `clan-db` for
+`[env.production]` and `clan-db-dev` for the default environment. They used to
+share one, so `wrangler dev --remote` wrote to live family data.
+
+`wrangler d1 execute` resolves the database by the **name on the command
+line**, not by the binding, so `--env production` does not protect it. The
+name is what decides which data you touch:
+
+```bash
+npm run d1:query -- "SELECT COUNT(*) FROM people"   # clan-db-dev, local
+npm run d1:migrate                                   # clan-db-dev, local
+npm run d1:migrate:prod                              # clan-db, REMOTE
+```
+
+`scripts/push_local_d1.sh` and `scripts/pull_remote_d1.sh` take the two names
+separately (`REMOTE_DB_NAME`, `LOCAL_DB_NAME`) for the same reason.
