@@ -87,8 +87,11 @@ same key and stays v1. To close that gap once the data has been migrated:
    SELECT COUNT(*) FROM person_custom_fields WHERE value LIKE 'enc:v1:%';
    ```
 
-3. Set `DATA_PROTECTION_REJECT_LEGACY=true`. After that, a v1 value in a
-   protected column fails to decrypt and is never re-encrypted as v2. MFA is
+3. Set `DATA_PROTECTION_REJECT_LEGACY=true`: under `[env.production.vars]` in
+   `wrangler.worker.toml` followed by `npm run deploy`, or in `selfhost.env`
+   followed by `npm run docker:up`. A value set only in the Cloudflare
+   dashboard is dropped by the next `wrangler deploy`. After that, a v1 value in
+   a protected column fails to decrypt and is never re-encrypted as v2. MFA is
    unaffected: TOTP secrets are decrypted by `src/auth.ts`, not by this path.
 
 ## Databases
