@@ -22,6 +22,10 @@ app.use('*', async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'no-referrer');
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // frontend/public/_headers only covers Cloudflare Pages assets, so the API
+  // needs its own. This Worker serves JSON and images, never documents, so
+  // nothing legitimate may be loaded from one of its responses.
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
   if (isProductionEnv(c.env)) {
     c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   }
