@@ -9,6 +9,12 @@ compatibility_flags = ["nodejs_compat"]
 # published: it sets ENVIRONMENT = "development" (non-Secure cookies, no HSTS,
 # no AUTH_ENCRYPTION_KEY requirement) while still being bound to the bindings
 # below. Deploys go through `npm run deploy`, which passes --env production.
+#
+# IMPORTANT: wrangler inherits top-level keys into named environments, so
+# [env.production] re-enables this explicitly. Setting it here alone removes
+# the workers.dev route from the production Worker too, which takes the API
+# offline -- the Pages Function in functions/api/[[path]].ts proxies to that
+# hostname.
 workers_dev = false
 
 # D1 Database binding
@@ -34,6 +40,15 @@ EMAIL_VERIFICATION_URL_BASE = "http://localhost:5173"
 BREVO_FROM_EMAIL = "no-reply@hinoki.my"
 BREVO_FROM_NAME = "Family Tree"
 ALLOWED_EMAILS = "pjiaquan@gmail.com"
+
+[env.production]
+# Re-enabled over the inherited top-level `workers_dev = false`: this Worker is
+# served at clan-node-production.<subdomain>.workers.dev, which the Pages
+# Function proxies to.
+workers_dev = true
+# Per-version preview hostnames are an extra public entry point to the same
+# Worker and the same production database, and nothing needs them.
+preview_urls = false
 
 [env.production.vars]
 ENVIRONMENT = "production"
