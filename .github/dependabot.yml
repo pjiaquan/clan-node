@@ -1,0 +1,35 @@
+# Pinning actions to commit SHAs (see .github/workflows/*.yml) only stays safe
+# if something updates them, so Dependabot covers `github-actions` as well as
+# the two npm manifests.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the toolchain, so a security bump in a runtime dependency
+      # is not buried among wrangler and TypeScript updates.
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
