@@ -1,3 +1,4 @@
+import { tryExecutionCtx } from './background';
 import type { Context } from 'hono';
 import type { AppBindings, Env } from './types';
 
@@ -134,7 +135,7 @@ export const notifyUpdate = (
   })();
 
   try {
-    c.executionCtx?.waitUntil(task);
+    tryExecutionCtx(c)?.waitUntil(task);
   } catch {
     void task;
   }

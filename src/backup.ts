@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { createBackupRepository } from './d1_repositories';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { BACKUP_EXPORT_RATE_LIMIT, BACKUP_IMPORT_RATE_LIMIT } from './rate_limits';
@@ -32,6 +32,9 @@ import {
   requireArrayField,
   validateRelations,
 } from './backup/service';
+
+/** Hard cap on an import body, enforced against the bytes actually read. */
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 
 const ensureAdmin = (c: Context<AppBindings>) => {
   const sessionUser = c.get('sessionUser');
@@ -130,15 +133,27 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
     }
 
     try {
+      // The declared length is only a cheap early reject: a chunked request
+      // carries no Content-Length, so the limit has to be enforced against the
+      // bytes actually read as well.
       const contentLengthHeader = c.req.header('content-length');
       if (contentLengthHeader) {
         const contentLength = parseInt(contentLengthHeader, 10);
-        if (Number.isFinite(contentLength) && contentLength > 50 * 1024 * 1024) {
+        if (Number.isFinite(contentLength) && contentLength > MAX_IMPORT_BYTES) {
           return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
         }
       }
 
-      const body = await c.req.json();
+      const rawBody = await c.req.arrayBuffer();
+      if (rawBody.byteLength > MAX_IMPORT_BYTES) {
+        return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(new TextDecoder().decode(rawBody));
+      } catch {
+        return c.json({ error: 'Body must be valid JSON' }, 400);
+      }
       if (!isRecord(body) || body.confirmation_text !== IMPORT_CONFIRMATION_TEXT) {
         return c.json({ error: `confirmation_text must equal ${IMPORT_CONFIRMATION_TEXT}` }, 400);
       }
@@ -215,6 +230,24 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         })
       );
 
+      // The import batch replaces the whole graph, so the record of who ran it
+      // has to exist first.
+      const auditFailure = await requireAuditLog(c, {
+        action: 'import_backup',
+        resourceType: 'graph',
+        summary: `匯入節點備份（${people.length} 節點）`,
+        details: {
+          people: people.length,
+          layers: layers.length,
+          avatars: avatars.length,
+          relationships: relationships.length,
+          custom_fields: customFields.length,
+          relationship_type_labels: relationshipTypeLabels.length,
+          kinship_labels: kinshipLabels.length,
+        }
+      });
+      if (auditFailure) return auditFailure;
+
       await repository.runImportBatch({
         includeEmail: peopleSchema.hasEmail,
         layers,
@@ -232,21 +265,6 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         hasKinshipLabels,
       });
 
-
-      await recordAuditLog(c, {
-        action: 'import_backup',
-        resourceType: 'graph',
-        summary: `匯入節點備份（${people.length} 節點）`,
-        details: {
-          people: people.length,
-          layers: layers.length,
-          avatars: avatars.length,
-          relationships: relationships.length,
-          custom_fields: customFields.length,
-          relationship_type_labels: relationshipTypeLabels.length,
-          kinship_labels: kinshipLabels.length,
-        }
-      });
 
       queueRemoteJson(c, 'POST', '/api/admin/backup/import', body);
 

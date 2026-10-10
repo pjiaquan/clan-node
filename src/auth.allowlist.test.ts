@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { getAllowedEmails, isEmailAuthorized, registerAuthRoutes, requireAuth } from './auth';
+import { getAllowedEmails, isEmailAuthorized, isUsableSetupToken, registerAuthRoutes, requireAuth } from './auth';
 import type { AppBindings, Env } from './types';
 
 test('getAllowedEmails parses various formats and handles empty cases', () => {
@@ -49,6 +49,8 @@ type MockStatementResult = {
 };
 
 class SimpleMockD1 {
+  insertedUsers: Array<Record<string, unknown>> = [];
+
   users = new Map<string, Record<string, unknown>>();
   sessions = new Map<string, Record<string, unknown>>();
 
@@ -90,6 +92,8 @@ class SimpleMockD1 {
           { name: 'username' },
           { name: 'email' },
           { name: 'email_verified_at' },
+          { name: 'email_verify_token_hash' },
+          { name: 'email_verify_expires_at' },
           { name: 'role' },
           { name: 'created_at' },
           { name: 'updated_at' }
@@ -154,6 +158,10 @@ class SimpleMockD1 {
       return { run: { success: true } };
     }
     if (query.includes('INSERT INTO users')) {
+      const columns = query.slice(query.indexOf('(') + 1, query.indexOf(')'))
+        .split(',')
+        .map((column) => column.trim());
+      this.insertedUsers.push(Object.fromEntries(columns.map((column, index) => [column, args[index]])));
       return { run: { success: true } };
     }
     if (query.includes('SELECT COUNT(*) as count FROM users')) {
@@ -163,36 +171,115 @@ class SimpleMockD1 {
   }
 }
 
-test('POST /api/auth/register respects ALLOWED_EMAILS', async () => {
+const registrationEnv = (db: SimpleMockD1, overrides: Partial<Env> = {}): Env => ({
+  DB: db as any,
+  AVATARS: {} as any,
+  ALLOWED_EMAILS: 'pjiaquan@gmail.com',
+  PUBLIC_REGISTRATION_ENABLED: '1',
+  BREVO_API_KEY: 'test-key',
+  BREVO_FROM_EMAIL: 'no-reply@example.com',
+  ...overrides
+});
+
+const postRegister = (app: Hono<AppBindings>, env: Env, email: string) => app.request(
+  '/api/auth/register',
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: 'Password12345!' })
+  },
+  env
+);
+
+/** Keeps the Brevo delivery attempt off the network. */
+const withStubbedFetch = async (run: () => Promise<void>) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response('{}', { status: 201 })) as typeof fetch;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+
+test('POST /api/auth/register is disabled unless explicitly enabled', async () => {
   const db = new SimpleMockD1();
   const app = new Hono<AppBindings>();
   registerAuthRoutes(app);
 
-  const env: Env = {
-    DB: db as any,
-    AVATARS: {} as any,
-    ALLOWED_EMAILS: 'pjiaquan@gmail.com'
-  };
+  const res = await postRegister(app, registrationEnv(db, { PUBLIC_REGISTRATION_ENABLED: undefined }), 'pjiaquan@gmail.com');
+  assert.equal(res.status, 403);
+  assert.equal(((await res.json()) as Record<string, unknown>).error, 'Registration is disabled');
+  assert.deepEqual(db.insertedUsers, []);
+});
 
-  // Attempting to register an unauthorized email should be rejected with 403
-  const rejectRes = await app.request('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'stranger@example.com', password: 'Password12345!' })
-  }, env);
+test('POST /api/auth/register refuses to run without an allowlist or e-mail delivery', async () => {
+  const app = new Hono<AppBindings>();
+  registerAuthRoutes(app);
 
-  assert.equal(rejectRes.status, 403);
-  const rejectBody = (await rejectRes.json()) as Record<string, unknown>;
-  assert.equal(rejectBody.error, 'Registration is restricted to authorized emails');
+  // An unset ALLOWED_EMAILS means "no restriction", which would make an
+  // enabled registration endpoint open to anyone.
+  const noAllowlist = new SimpleMockD1();
+  const res = await postRegister(app, registrationEnv(noAllowlist, { ALLOWED_EMAILS: undefined }), 'stranger@example.com');
+  assert.equal(res.status, 503);
+  assert.deepEqual(noAllowlist.insertedUsers, []);
 
-  // Attempting to register the allowed email should pass authorization
-  const acceptRes = await app.request('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'pjiaquan@gmail.com', password: 'Password12345!' })
-  }, env);
+  // Without working e-mail the account would have been created pre-verified.
+  const noEmail = new SimpleMockD1();
+  const res2 = await postRegister(app, registrationEnv(noEmail, { BREVO_API_KEY: undefined }), 'pjiaquan@gmail.com');
+  assert.equal(res2.status, 503);
+  assert.deepEqual(noEmail.insertedUsers, []);
+});
 
-  assert.equal(acceptRes.status, 201);
+test('POST /api/auth/register respects ALLOWED_EMAILS', async () => {
+  await withStubbedFetch(async () => {
+    const db = new SimpleMockD1();
+    const app = new Hono<AppBindings>();
+    registerAuthRoutes(app);
+    const env = registrationEnv(db);
+
+    // Attempting to register an unauthorized email should be rejected with 403
+    const rejectRes = await postRegister(app, env, 'stranger@example.com');
+    assert.equal(rejectRes.status, 403);
+    const rejectBody = (await rejectRes.json()) as Record<string, unknown>;
+    assert.equal(rejectBody.error, 'Registration is restricted to authorized emails');
+
+    // Attempting to register the allowed email should pass authorization
+    const acceptRes = await postRegister(app, env, 'pjiaquan@gmail.com');
+    assert.equal(acceptRes.status, 201);
+  });
+});
+
+test('POST /api/auth/register never grants admin, even on an empty users table', async () => {
+  await withStubbedFetch(async () => {
+    const db = new SimpleMockD1();
+    const app = new Hono<AppBindings>();
+    registerAuthRoutes(app);
+    assert.equal(db.users.size, 0, 'precondition: no users exist yet');
+
+    const res = await postRegister(app, registrationEnv(db), 'pjiaquan@gmail.com');
+    assert.equal(res.status, 201);
+
+    assert.equal(db.insertedUsers.length, 1);
+    const inserted = db.insertedUsers[0];
+    // The first registrant used to be given 'admin', bypassing the
+    // ADMIN_SETUP_TOKEN gate on /api/auth/setup.
+    assert.equal(inserted.role, 'readonly');
+    // And used to be exempt from e-mail verification.
+    assert.equal(inserted.email_verified_at, null);
+    assert.ok(inserted.email_verify_token_hash, 'a verification token should be stored');
+
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body.role, 'readonly');
+    assert.equal(body.email_verified, false);
+  });
+});
+
+test('isUsableSetupToken rejects the shipped placeholder and short tokens', () => {
+  assert.equal(isUsableSetupToken('<INSERT_RANDOM_TOKEN>'), false);
+  assert.equal(isUsableSetupToken('short'), false);
+  assert.equal(isUsableSetupToken('changeme-please'), false);
+  assert.equal(isUsableSetupToken('f'.repeat(32)), true);
 });
 
 test('requireAuth rejects active sessions for non-authorized non-admin emails', async () => {

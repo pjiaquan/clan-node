@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isSafeStorageKey } from '../storage_keys';
 
 type StoredMetadata = {
   contentType?: string;
@@ -48,12 +49,31 @@ export class LocalR2Bucket implements R2Bucket {
     this.#rootDir = rootDir;
   }
 
+  /**
+   * Resolves a bucket key to a path inside the root directory.
+   *
+   * Keys are validated and the resolved path is asserted to stay under the
+   * root, so a key such as `../clan-node.sqlite` cannot reach the SQLite
+   * database or any other file outside the avatar directory.
+   */
+  #resolveWithinRoot(relativePath: string, key: string) {
+    if (!isSafeStorageKey(key)) {
+      throw new Error('invalid storage key');
+    }
+    const root = path.resolve(this.#rootDir);
+    const resolved = path.resolve(root, relativePath);
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw new Error('invalid storage key');
+    }
+    return resolved;
+  }
+
   #objectPath(key: string) {
-    return path.join(this.#rootDir, key);
+    return this.#resolveWithinRoot(key, key);
   }
 
   #metadataPath(key: string) {
-    return path.join(this.#rootDir, `${key}.meta.json`);
+    return this.#resolveWithinRoot(`${key}.meta.json`, key);
   }
 
   async head(key: string): Promise<R2Object | null> {
@@ -62,6 +82,7 @@ export class LocalR2Bucket implements R2Bucket {
   }
 
   async get(key: string): Promise<R2ObjectBody | null> {
+    if (!isSafeStorageKey(key)) return null;
     const objectPath = this.#objectPath(key);
     try {
       await stat(objectPath);
@@ -100,7 +121,10 @@ export class LocalR2Bucket implements R2Bucket {
 
   async delete(keys: string | string[]): Promise<void> {
     const list = Array.isArray(keys) ? keys : [keys];
-    await Promise.all(list.flatMap((key) => [
+    // Skip rather than throw: an unsafe key stored in D1 must not be able to
+    // delete a file outside the bucket, but it also must not make deleting the
+    // owning person or layer fail.
+    await Promise.all(list.filter(isSafeStorageKey).flatMap((key) => [
       rm(this.#objectPath(key), { force: true }),
       rm(this.#metadataPath(key), { force: true }),
     ]));

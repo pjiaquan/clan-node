@@ -1,3 +1,4 @@
+import { tryExecutionCtx } from './background';
 import type { Context } from 'hono';
 import { timingSafeEqual } from './auth';
 import type { AppBindings, Env } from './types';
@@ -246,7 +247,7 @@ const shouldMirror = (c: Context<AppBindings>) => {
 
 const waitUntilIfAvailable = (c: Context<AppBindings>, promise: Promise<unknown>) => {
   try {
-    c.executionCtx?.waitUntil(promise);
+    tryExecutionCtx(c)?.waitUntil(promise);
   } catch {
     void promise;
   }

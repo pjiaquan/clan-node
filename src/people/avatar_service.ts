@@ -6,6 +6,7 @@ import { recordAuditLog, recordRateLimitAudit } from '../audit';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from '../auth';
 import { validateAvatarUpload } from '../avatar_validation';
 import { PERSON_AVATAR_UPLOAD_RATE_LIMIT } from '../rate_limits';
+import { safeStorageKey } from '../storage_keys';
 
 export type UploadFile = Blob & {
   name?: string;
@@ -64,9 +65,7 @@ export const normalizeAvatar = (row: Record<string, unknown>): PersonAvatar => (
 export const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
   if (!avatarUrl) return null;
   if (!avatarUrl.startsWith('/api/avatars/')) return null;
-  const key = avatarUrl.replace('/api/avatars/', '');
-  if (key.includes('/') || key.includes('\\') || key.includes('..')) return null;
-  return key;
+  return safeStorageKey(avatarUrl.slice('/api/avatars/'.length));
 };
 
 export const loadAvatarMap = async (db: Env['DB']) => {
