@@ -17,16 +17,15 @@ compatibility_flags = ["nodejs_compat"]
 # hostname.
 workers_dev = false
 
-# D1 Database binding
+# D1 Database binding for the default (development) environment.
 #
-# NOTE: this is still the same database_id as [env.production] below. Until a
-# separate development database exists (`wrangler d1 create clan-db-dev`, then
-# replace the id here), `wrangler dev --remote` and any `wrangler d1 execute
-# --remote` without `--env production` read and write production data.
+# Deliberately a different database from [env.production]. They used to share
+# one, so `wrangler dev --remote` and any `wrangler d1 execute --remote`
+# without `--env production` read and wrote live family data.
 [[d1_databases]]
 binding = "DB"
-database_name = "clan-db"
-database_id = "85073827-66a2-4647-b7ff-9d0cbdcc3e60" # Replace with actual database_id after running `wrangler d1 create`
+database_name = "clan-db-dev"
+database_id = "977804d1-55e9-4757-9438-293aa45da716"
 
 # R2 Binding (for avatars)
 [[r2_buckets]]
