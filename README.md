@@ -60,6 +60,25 @@ http://localhost:8080
 
 or the overridden port.
 
+The container publishes to `127.0.0.1` only, runs as an unprivileged user and
+drops all Linux capabilities. To reach it from another machine, put a reverse
+proxy in front of it (and set `TRUSTED_PROXY=1` so rate limiting and audit
+entries use the forwarded client address). Publishing directly to the network
+is a deliberate choice:
+
+```bash
+CLAN_BIND_ADDRESS=0.0.0.0 docker compose up -d
+```
+
+### Upgrading an existing container
+
+The server no longer runs as root, so a data volume created by an earlier
+version is owned by the wrong user. Fix it once, before starting:
+
+```bash
+docker compose run --rm --user root clan-node chown -R node:node /var/lib/clan-node
+```
+
 ### 3. First-time setup
 
 On a fresh install the app will prompt for initial admin setup.
