@@ -8,6 +8,7 @@ import {
   type GraphSettings,
 } from './graphSettings';
 import { useI18n } from './i18n';
+import { debugTokenSuffix, keepDebugToken } from './utils/debugToken';
 import { getPasskeyAssertion, isPasskeySupported, passkeyErrorMessage } from './utils/webauthn';
 import './App.css';
 
@@ -386,7 +387,7 @@ function App() {
         setPendingMfa(data);
         setPendingMfaMethod(data.preferred_method);
         if (data.preferred_method === 'email') {
-          const debugSuffix = data.debug_mfa_code ? ` (${data.debug_mfa_code})` : '';
+          const debugSuffix = debugTokenSuffix(data.debug_mfa_code);
           setAuthNotice(`${t('login.mfaCodeSent', { email: data.masked_email })}${debugSuffix}`);
         } else {
           setAuthNotice(null);
@@ -430,8 +431,10 @@ function App() {
       if (result.email_verified) {
         setAuthNotice(t('login.registerSuccessNoVerify'));
       } else {
-        const debugVerifyToken = (result as any).debug_verify_token;
-        const debugSuffix = debugVerifyToken ? ` (Debug token: ?verify_email_token=${encodeURIComponent(debugVerifyToken)})` : '';
+        const debugSuffix = debugTokenSuffix(
+          (result as any).debug_verify_token,
+          (token) => ` (Debug token: ?verify_email_token=${encodeURIComponent(token)})`
+        );
         setAuthNotice(`${t('login.registerSuccessVerify', { email: result.email })}${debugSuffix}`);
       }
     } catch (err) {
@@ -500,10 +503,10 @@ function App() {
         email_challenge_id: result.challenge_id,
         delivered: result.delivered,
         preferred_method: 'email',
-        debug_mfa_code: result.debug_mfa_code
+        debug_mfa_code: keepDebugToken(result.debug_mfa_code)
       } : prev);
       setPendingMfaMethod('email');
-      const debugSuffix = result.debug_mfa_code ? ` (${result.debug_mfa_code})` : '';
+      const debugSuffix = debugTokenSuffix(result.debug_mfa_code);
       setAuthNotice(`${t('login.mfaCodeSent', { email: pendingMfa.masked_email })}${debugSuffix}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('login.mfaVerifyFailed');
@@ -553,11 +556,8 @@ function App() {
     setAuthError(null);
     try {
       const result = await api.resendVerification(email);
-      const debugSuffix = result.debug_invite_token
-        ? ` (${result.debug_invite_token})`
-        : result.debug_verify_token
-          ? ` (${result.debug_verify_token})`
-          : '';
+      const debugSuffix = debugTokenSuffix(result.debug_invite_token)
+        || debugTokenSuffix(result.debug_verify_token);
       setAuthNotice(`${t('login.verificationSent')}${debugSuffix}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : t('login.verificationFailed');

@@ -19,6 +19,8 @@ export type Env = {
   DUAL_WRITE_REMOTE_PASS?: string;
   DUAL_WRITE_SHARED_SECRET?: string;
   ALLOWED_EMAILS?: string;
+  /** Opt-in only: see `debugTokensEnabled` in src/auth.ts. */
+  EXPOSE_DEBUG_TOKENS?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';

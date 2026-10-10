@@ -1,3 +1,4 @@
+import { debugTokenSuffix } from '../utils/debugToken';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser, ManagedUser, UserRole } from '../types';
@@ -81,7 +82,7 @@ export const UserManagementPage: React.FC<UserManagementPageProps> = ({
     const created = await api.createUser(email, role);
     setShowCreateModal(false);
     await loadUsers(true);
-    const debugSuffix = created.debug_invite_token ? ` (${created.debug_invite_token})` : '';
+    const debugSuffix = debugTokenSuffix(created.debug_invite_token);
     setNotice(
       created.invitation_email_sent
         ? `${t('userMgmt.inviteSent', { email })}${debugSuffix}`

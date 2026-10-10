@@ -40,6 +40,7 @@ const buildEnv = (): Env => ({
   DUAL_WRITE_REMOTE_USER: process.env.DUAL_WRITE_REMOTE_USER,
   DUAL_WRITE_REMOTE_PASS: process.env.DUAL_WRITE_REMOTE_PASS,
   DUAL_WRITE_SHARED_SECRET: process.env.DUAL_WRITE_SHARED_SECRET,
+  EXPOSE_DEBUG_TOKENS: process.env.EXPOSE_DEBUG_TOKENS,
 });
 
 await mkdir(avatarsDir, { recursive: true });

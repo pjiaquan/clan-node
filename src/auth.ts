@@ -407,6 +407,22 @@ const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   return cachedEncryptionKey;
 };
 
+/**
+ * Whether responses may carry `debug_*` MFA codes and invite/verification
+ * tokens.
+ *
+ * This used to be `ENVIRONMENT !== 'production'`, which fails open: anything
+ * deployed without an explicit production environment -- `npm run deploy`
+ * publishes the default env, which shares the production D1 database --
+ * handed out single-use invite and verification tokens from an unauthenticated
+ * endpoint and the MFA code from the login response. Opting in explicitly
+ * means a missing or misspelled `ENVIRONMENT` is safe by default.
+ */
+const debugTokensEnabled = (env: Env) => (
+  env.ENVIRONMENT === 'development'
+  && ['1', 'true', 'yes'].includes((env.EXPOSE_DEBUG_TOKENS || '').trim().toLowerCase())
+);
+
 const requireProductionSecret = (
   c: Context<AppBindings>,
   key: keyof Pick<Env, 'AUTH_ENCRYPTION_KEY' | 'ADMIN_SETUP_TOKEN'>,
@@ -2075,7 +2091,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    const debugToken = (verifyToken && debugTokensEnabled(c.env)) ? verifyToken : null;
     return c.json({
       id,
       username: email,
@@ -2273,7 +2289,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
       emailChallengeId = emailFallback.challenge.challengeId;
       emailDelivered = emailFallback.challenge.delivered;
-      debugMfaCode = c.env.ENVIRONMENT === 'production' ? null : emailFallback.challenge.code;
+      debugMfaCode = debugTokensEnabled(c.env) ? emailFallback.challenge.code : null;
     }
 
     return c.json({
@@ -2346,7 +2362,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       ok: true,
       challenge_id: emailFallback.challenge.challengeId,
       delivered: emailFallback.challenge.delivered,
-      ...(c.env.ENVIRONMENT === 'production' ? {} : { debug_mfa_code: emailFallback.challenge.code })
+      ...(debugTokensEnabled(c.env) ? { debug_mfa_code: emailFallback.challenge.code } : {})
     });
   });
 
@@ -2797,7 +2813,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    const debugToken = c.env.ENVIRONMENT === 'production' ? null : token;
+    const debugToken = debugTokensEnabled(c.env) ? token : null;
     return c.json({
       ok: true,
       delivered,
@@ -3587,7 +3603,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         invitation_email_sent: delivered
       }
     });
-    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    const debugToken = (verifyToken && debugTokensEnabled(c.env)) ? verifyToken : null;
     return c.json({
       id,
       username: email,
