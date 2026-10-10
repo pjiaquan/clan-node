@@ -358,7 +358,7 @@ const buildTotpOtpAuthUrl = (email: string, secret: string) => {
   return `otpauth://totp/${encodeURIComponent(label)}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD_SECONDS}`;
 };
 
-const generateTotpCodeForCounter = async (secret: string, counter: number) => {
+export const generateTotpCodeForCounter = async (secret: string, counter: number) => {
   const secretBytes = fromBase32(secret);
   const message = new Uint8Array(8);
   let value = counter;
@@ -377,16 +377,49 @@ const generateTotpCodeForCounter = async (secret: string, counter: number) => {
   return String(binary % (10 ** TOTP_DIGITS)).padStart(TOTP_DIGITS, '0');
 };
 
-const verifyTotpCode = async (secret: string, code: string) => {
-  if (!/^\d{6}$/.test(code)) return false;
+/**
+ * Returns the time-step the code matched, or null.
+ *
+ * The matched counter is the caller's responsibility to burn via
+ * `consumeTotpCounter`: the +/-1 step tolerance means a code stays valid for
+ * about 90 seconds, so without recording the step a captured code could be
+ * replayed for the rest of that span.
+ */
+export const verifyTotpCode = async (secret: string, code: string): Promise<number | null> => {
+  if (!/^\d{6}$/.test(code)) return null;
   const currentCounter = Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS);
+  let matched: number | null = null;
   for (let offset = -TOTP_WINDOW_STEPS; offset <= TOTP_WINDOW_STEPS; offset += 1) {
-    const expected = await generateTotpCodeForCounter(secret, currentCounter + offset);
-    if (timingSafeEqual(expected, code)) {
-      return true;
+    const counter = currentCounter + offset;
+    const expected = await generateTotpCodeForCounter(secret, counter);
+    // Not short-circuiting keeps the work constant across the window.
+    if (timingSafeEqual(expected, code) && matched === null) {
+      matched = counter;
     }
   }
-  return false;
+  return matched;
+};
+
+/**
+ * Burns a TOTP time-step for a user, rejecting a step already used.
+ *
+ * The compare-and-set is done by the UPDATE itself, so two requests carrying
+ * the same code cannot both succeed.
+ */
+export const consumeTotpCounter = async (
+  db: D1Database,
+  userId: string,
+  counter: number,
+  userSchema: UserSchemaSupport
+) => {
+  if (!userSchema.hasMfaTotpLastCounter) return true;
+  const result = await db.prepare(
+    `UPDATE users
+     SET mfa_totp_last_counter = ?
+     WHERE id = ?
+       AND (mfa_totp_last_counter IS NULL OR mfa_totp_last_counter < ?)`
+  ).bind(counter, userId, counter).run();
+  return Number(result.meta?.changes ?? 0) > 0;
 };
 
 type SessionSchemaSupport = {
@@ -2566,8 +2599,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const nextAttempts = Number((claimed as any).attempt_count ?? 0);
     const maxAttempts = Number((claimed as any).max_attempts ?? MFA_MAX_ATTEMPTS);
 
-    const isValid = await verifyTotpCode(totpSecret, code);
-    if (!isValid) {
+    const matchedCounter = await verifyTotpCode(totpSecret, code);
+    // Burn the time-step, so the same code cannot be replayed inside the
+    // +/-1 step tolerance window.
+    const accepted = matchedCounter !== null
+      && await consumeTotpCounter(c.env.DB, (user as any).id as string, matchedCounter, userSchema);
+    if (!accepted) {
       if (nextAttempts >= maxAttempts) {
         await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
       }
@@ -3211,19 +3248,27 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'TOTP setup expired. Start setup again.' }, 400);
     }
 
-    const isValid = await verifyTotpCode(pendingSecret, code);
-    if (!isValid) {
+    const matchedCounter = await verifyTotpCode(pendingSecret, code);
+    if (matchedCounter === null) {
       return c.json({ error: 'Invalid authenticator code' }, 400);
     }
 
     const email = ((user as any).email as string | null) ?? ((user as any).username as string);
     const nowIso = new Date().toISOString();
     const encryptedSecret = await encryptSecret(c.env, pendingSecret);
+    const lastCounterColumn = userSchema.hasMfaTotpLastCounter ? ', mfa_totp_last_counter = ?' : '';
     await c.env.DB.prepare(
       `UPDATE users
-       SET mfa_totp_secret = ?, mfa_totp_enabled_at = ?, mfa_totp_pending_secret = NULL, mfa_totp_pending_expires_at = NULL, updated_at = ?
+       SET mfa_totp_secret = ?, mfa_totp_enabled_at = ?, mfa_totp_pending_secret = NULL, mfa_totp_pending_expires_at = NULL, updated_at = ?${lastCounterColumn}
        WHERE id = ?`
-    ).bind(encryptedSecret, nowIso, nowIso, sessionUser.userId).run();
+    ).bind(
+      encryptedSecret,
+      nowIso,
+      nowIso,
+      // The code just used for enrolment must not also work as a sign-in code.
+      ...(userSchema.hasMfaTotpLastCounter ? [matchedCounter] : []),
+      sessionUser.userId
+    ).run();
 
     await recordAuditLog(c, {
       action: 'mfa_totp_enabled',
