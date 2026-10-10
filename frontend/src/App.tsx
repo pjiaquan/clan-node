@@ -112,13 +112,17 @@ const hasStoredViewportState = () => {
 const loadStoredPendingMfaState = (): StoredPendingMfaState | null => {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(MFA_STORAGE_KEY);
+    // localStorage is still read once, to clear anything a previous version
+    // left behind.
+    const legacy = localStorage.getItem(MFA_STORAGE_KEY);
+    if (legacy !== null) localStorage.removeItem(MFA_STORAGE_KEY);
+    const raw = sessionStorage.getItem(MFA_STORAGE_KEY) ?? legacy;
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredPendingMfaState> | null;
     if (!parsed?.pendingMfa || !parsed.pendingMfa.session_id) return null;
     const pendingMfaMethod = parsed.pendingMfaMethod === 'totp' ? 'totp' : 'email';
     return {
-      pendingMfa: parsed.pendingMfa,
+      pendingMfa: forStorage(parsed.pendingMfa as PendingMfaChallenge),
       pendingMfaMethod,
       authNotice: typeof parsed.authNotice === 'string' ? parsed.authNotice : null,
     };
@@ -128,14 +132,42 @@ const loadStoredPendingMfaState = (): StoredPendingMfaState | null => {
   }
 };
 
+/**
+ * Rebuilds the parked challenge from an explicit list of fields.
+ *
+ * A half-finished sign-in is kept so a reload does not lose it, but the
+ * one-time code and the full address are not needed to resume it -- the server
+ * holds both against `session_id`. Persisting the code put a live second
+ * factor in clear text where any script on the origin could read it.
+ *
+ * This names what to keep rather than what to drop, so a field added to
+ * `PendingMfaChallenge` later is not persisted by accident.
+ */
+const forStorage = (pendingMfa: PendingMfaChallenge): PendingMfaChallenge => ({
+  session_id: pendingMfa.session_id,
+  email: '',
+  masked_email: pendingMfa.masked_email,
+  methods: pendingMfa.methods,
+  preferred_method: pendingMfa.preferred_method,
+  passkey_available: pendingMfa.passkey_available,
+  email_challenge_id: pendingMfa.email_challenge_id,
+  delivered: pendingMfa.delivered,
+});
+
 const persistPendingMfaState = (state: StoredPendingMfaState | null) => {
   if (typeof window === 'undefined') return;
   try {
     if (!state) {
+      sessionStorage.removeItem(MFA_STORAGE_KEY);
       localStorage.removeItem(MFA_STORAGE_KEY);
       return;
     }
-    localStorage.setItem(MFA_STORAGE_KEY, JSON.stringify(state));
+    // sessionStorage, not localStorage: a sign-in that was never finished
+    // should not outlive the tab.
+    sessionStorage.setItem(
+      MFA_STORAGE_KEY,
+      JSON.stringify({ ...state, pendingMfa: forStorage(state.pendingMfa) })
+    );
   } catch (error) {
     console.warn('Failed to persist pending MFA state:', error);
   }
