@@ -52,15 +52,20 @@ database_id = "85073827-66a2-4647-b7ff-9d0cbdcc3e60"
 binding = "AVATARS"
 bucket_name = "clan-avatars"
 
+# Observability was fully disabled, which left no forensic trail at all: the
+# CSRF rejections, audit-write failures and dual-write failures the code logs
+# were all discarded, so there was no way to tell afterwards whether anything
+# had been attempted. Workers Logs is billed per event -- the volume here is
+# small, but it is not free.
 [observability]
-enabled = false
+enabled = true
 head_sampling_rate = 1
 
 [observability.logs]
-enabled = false
+enabled = true
 head_sampling_rate = 1
-persist = false
-invocation_logs = false
+persist = true
+invocation_logs = true
 
 [observability.traces]
 enabled = false
