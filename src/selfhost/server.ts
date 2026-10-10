@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { app } from '../index';
 import { SqliteD1Database } from './sqlite_d1';
 import { LocalR2Bucket } from './local_r2';
-import type { Env } from '../types';
+import type { AppBindings, Env } from '../types';
 
 const dataDir = process.env.CLAN_DATA_DIR || path.resolve('.data');
 const avatarsDir = path.join(dataDir, 'avatars');
@@ -44,6 +44,7 @@ const buildEnv = (): Env => ({
   // turned on at all in a self-hosted deployment.
   ALLOWED_EMAILS: process.env.ALLOWED_EMAILS,
   PUBLIC_REGISTRATION_ENABLED: process.env.PUBLIC_REGISTRATION_ENABLED,
+  TRUSTED_PROXY: process.env.TRUSTED_PROXY,
   EXPOSE_DEBUG_TOKENS: process.env.EXPOSE_DEBUG_TOKENS,
 });
 
@@ -51,14 +52,25 @@ await mkdir(avatarsDir, { recursive: true });
 const env = buildEnv();
 await ensureSchema(env.DB as SqliteD1Database);
 
-const nodeApp = new Hono();
+const nodeApp = new Hono<AppBindings>();
 nodeApp.route('/', app);
 nodeApp.use('*', serveStatic({ root: distRoot }));
 nodeApp.get('*', serveStatic({ path: `${distRoot}/index.html` }));
 
+type NodeServerEnv = { incoming?: { socket?: { remoteAddress?: string } } };
+
 serve({
   port,
-  fetch: (request) => nodeApp.fetch(request, env),
+  fetch: (request, nodeEnv) => {
+    // Pass the real peer address through. Without it the app would have to
+    // take the client's word for X-Forwarded-For; see getRequestIpAddress in
+    // src/auth.ts.
+    const requestEnv: Env = {
+      ...env,
+      socketAddress: (nodeEnv as NodeServerEnv | undefined)?.incoming?.socket?.remoteAddress ?? null,
+    };
+    return nodeApp.fetch(request, requestEnv);
+  },
 });
 
 console.log(`Clan Node API listening on http://0.0.0.0:${port}`);

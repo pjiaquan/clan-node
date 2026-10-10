@@ -23,6 +23,15 @@ export type Env = {
   EXPOSE_DEBUG_TOKENS?: string;
   /** Opt-in only: see `publicRegistrationEnabled` in src/auth.ts. */
   PUBLIC_REGISTRATION_ENABLED?: string;
+  /** Set when a reverse proxy in front of the app sets X-Forwarded-For. */
+  TRUSTED_PROXY?: string;
+  /**
+   * Peer address of the TCP connection, supplied per request by the self-host
+   * entrypoint only. Its presence is how `getRequestIpAddress` tells a direct
+   * Node deployment -- where forwarded headers are whatever the client sent --
+   * from the Cloudflare edge, where CF-Connecting-IP is authoritative.
+   */
+  socketAddress?: string | null;
 };
 
 export type UserRole = 'admin' | 'readonly';
