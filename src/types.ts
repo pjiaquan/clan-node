@@ -21,6 +21,8 @@ export type Env = {
   ALLOWED_EMAILS?: string;
   /** Opt-in only: see `debugTokensEnabled` in src/auth.ts. */
   EXPOSE_DEBUG_TOKENS?: string;
+  /** Opt-in only: see `publicRegistrationEnabled` in src/auth.ts. */
+  PUBLIC_REGISTRATION_ENABLED?: string;
 };
 
 export type UserRole = 'admin' | 'readonly';

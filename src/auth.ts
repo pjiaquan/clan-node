@@ -424,6 +424,22 @@ const debugTokensEnabled = (env: Env) => (
   && ['1', 'true', 'yes'].includes((env.EXPOSE_DEBUG_TOKENS || '').trim().toLowerCase())
 );
 
+const SETUP_TOKEN_MIN_LENGTH = 16;
+
+/** Rejects the shipped `<INSERT_...>` placeholders and obviously weak tokens. */
+export const isUsableSetupToken = (token: string) => {
+  const trimmed = token.trim();
+  if (trimmed.length < SETUP_TOKEN_MIN_LENGTH) return false;
+  if (/^<.*>$/.test(trimmed)) return false;
+  if (/^(insert|replace|change)[_-]?me/i.test(trimmed)) return false;
+  return true;
+};
+
+/** Public self-service registration is opt-in; see POST /api/auth/register. */
+const publicRegistrationEnabled = (env: Env) => (
+  ['1', 'true', 'yes'].includes((env.PUBLIC_REGISTRATION_ENABLED || '').trim().toLowerCase())
+);
+
 const requireProductionSecret = (
   c: Context<AppBindings>,
   key: keyof Pick<Env, 'AUTH_ENCRYPTION_KEY' | 'ADMIN_SETUP_TOKEN'>,
@@ -1895,6 +1911,14 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const configuredToken = c.env.ADMIN_SETUP_TOKEN?.trim() || '';
+    // selfhost.env.example ships `<INSERT_RANDOM_TOKEN>`; it was compared
+    // literally, so an operator who copied the file without editing it had a
+    // publicly known bootstrap token.
+    if (configuredToken && !isUsableSetupToken(configuredToken)) {
+      return c.json({
+        error: 'Server misconfiguration: ADMIN_SETUP_TOKEN is a placeholder or too short'
+      }, 503);
+    }
     const requestToken = (c.req.header('x-setup-token') || '').trim();
     if (configuredToken && requestToken !== configuredToken) {
       return c.json({ error: 'Forbidden' }, 403);
@@ -1961,7 +1985,31 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/register', async (c) => {
+    // Public self-service registration is opt-in. It used to be always on,
+    // and because `isEmailAuthorized` treats an unset ALLOWED_EMAILS as "no
+    // restriction", a reachable instance let anyone create an account -- and
+    // on an empty users table the first one became an admin.
+    if (!publicRegistrationEnabled(c.env)) {
+      return c.json({ error: 'Registration is disabled' }, 403);
+    }
+    // Opt-in alone is not enough: without an allowlist this is open to the
+    // whole internet, and without working e-mail nothing can be verified.
+    if (!getAllowedEmails(c.env)) {
+      return c.json({
+        error: 'Server misconfiguration: ALLOWED_EMAILS is required when public registration is enabled'
+      }, 503);
+    }
+
     const userSchema = await getUserSchemaSupport(c.env.DB);
+    const canVerifyEmail = Boolean(c.env.BREVO_API_KEY && c.env.BREVO_FROM_EMAIL)
+      && userSchema.hasEmailVerifiedAt
+      && userSchema.hasEmailVerifyTokenHash
+      && userSchema.hasEmailVerifyExpiresAt;
+    if (!canVerifyEmail) {
+      return c.json({
+        error: 'Server misconfiguration: e-mail verification is required for public registration'
+      }, 503);
+    }
 
     const body = await c.req.json();
     const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
@@ -2014,15 +2062,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const passwordHash = await hashPassword(password, salt);
     const now = new Date().toISOString();
 
-    const usersCountRow = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM users'
-    ).first();
-    const isFirstUser = Number((usersCountRow as any)?.count ?? 0) === 0;
-
-    const finalRole: UserRole = isFirstUser ? 'admin' : 'readonly';
-
-    const isEmailConfigured = Boolean(c.env.BREVO_API_KEY && c.env.BREVO_FROM_EMAIL);
-    const requireVerification = !isFirstUser && isEmailConfigured && userSchema.hasEmailVerifiedAt && userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt;
+    // Self-registration never grants admin. The first administrator is
+    // created through POST /api/auth/setup, which is gated on
+    // ADMIN_SETUP_TOKEN; granting admin to whoever registered first on an
+    // empty users table bypassed that gate entirely. Verification is likewise
+    // unconditional -- the old first-user exemption also skipped it.
+    const finalRole: UserRole = 'readonly';
+    const requireVerification = true;
 
     let verifyToken: string | null = null;
     let verifyTokenHash: string | null = null;
@@ -2082,13 +2128,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       action: 'register',
       resourceType: 'users',
       resourceId: id,
-      summary: isFirstUser ? `公開註冊首位管理員帳號 ${email}` : `公開註冊帳號 ${email}`,
+      summary: `公開註冊帳號 ${email}`,
       details: {
         username: email,
         role: finalRole,
         verification_email_sent: delivered,
-        requires_verification: requireVerification,
-        is_first_user: isFirstUser
+        requires_verification: requireVerification
       }
     });
 

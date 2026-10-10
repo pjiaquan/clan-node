@@ -40,6 +40,10 @@ const buildEnv = (): Env => ({
   DUAL_WRITE_REMOTE_USER: process.env.DUAL_WRITE_REMOTE_USER,
   DUAL_WRITE_REMOTE_PASS: process.env.DUAL_WRITE_REMOTE_PASS,
   DUAL_WRITE_SHARED_SECRET: process.env.DUAL_WRITE_SHARED_SECRET,
+  // ALLOWED_EMAILS was never read here, so the account allowlist could not be
+  // turned on at all in a self-hosted deployment.
+  ALLOWED_EMAILS: process.env.ALLOWED_EMAILS,
+  PUBLIC_REGISTRATION_ENABLED: process.env.PUBLIC_REGISTRATION_ENABLED,
   EXPOSE_DEBUG_TOKENS: process.env.EXPOSE_DEBUG_TOKENS,
 });
 
