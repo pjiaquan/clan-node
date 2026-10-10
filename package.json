@@ -47,7 +47,7 @@
     "@hono/node-server": "^1.19.17",
     "better-sqlite3": "^12.8.0",
     "hono": "^4.13.13",
-    "tsx": "^4.20.6"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261010.1",
