@@ -52,8 +52,8 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261010.1",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.10.1",
-    "typescript": "^5.7.3",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
     "wrangler": "^4.149.0"
   }
 }
