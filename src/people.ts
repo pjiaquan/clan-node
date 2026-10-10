@@ -11,7 +11,8 @@ import {
   decryptPersonRow,
   migratePlaintextPersonRow,
   protectPersonWriteFields,
-  encryptProtectedValue
+  encryptProtectedValue,
+  customFieldContext
 } from './data_protection';
 import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 import { getPeopleSchemaSupport } from './schema';
@@ -212,7 +213,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const id = providedId || crypto.randomUUID();
     const now = new Date().toISOString();
     const normalizedEmail = normalizeEmail(email);
-    const protectedFields = await protectPersonWriteFields(c.env, {
+    const protectedFields = await protectPersonWriteFields(c.env, id, {
       blood_type: blood_type || null,
       dob: dob || null,
       dod: dod || null,
@@ -252,7 +253,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           .map(async (field) => repository.insertCustomField({
             personId: id,
             label: field.label || '',
-            value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+            value: (await encryptProtectedValue(c.env, field.value || '', customFieldContext(id, field.label || ''))) || '',
             createdAt: now,
             updatedAt: now,
           }))
@@ -427,7 +428,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     await ensureAvatarFromLegacy(c.env.DB, existingAny);
 
     const now = new Date().toISOString();
-    const protectedUpdates = await protectPersonWriteFields(c.env, {
+    const protectedUpdates = await protectPersonWriteFields(c.env, id, {
       blood_type: blood_type !== undefined ? (blood_type as string | null) : undefined,
       dob: dob !== undefined ? (dob as string | null) : undefined,
       dod: dod !== undefined ? (dod as string | null) : undefined,
@@ -476,7 +477,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           .map(async (field) => repository.insertCustomField({
             personId: id,
             label: field.label || '',
-            value: (await encryptProtectedValue(c.env, field.value || '')) || '',
+            value: (await encryptProtectedValue(c.env, field.value || '', customFieldContext(id, field.label || ''))) || '',
             createdAt: now,
             updatedAt: now,
           }))

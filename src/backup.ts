@@ -8,6 +8,7 @@ import { BACKUP_EXPORT_RATE_LIMIT, BACKUP_IMPORT_RATE_LIMIT } from './rate_limit
 import {
   decryptCustomFieldRows,
   decryptPersonRow,
+  customFieldContext,
   encryptProtectedValue,
   migratePlaintextCustomFieldRows,
   migratePlaintextPersonRow,
@@ -185,7 +186,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       const encryptedCustomFields = await Promise.all(
         customFields.map(async (field) => ({
           ...field,
-          encryptedValue: await encryptProtectedValue(c.env, field.value)
+          encryptedValue: await encryptProtectedValue(c.env, field.value, customFieldContext(field.person_id, field.label))
         }))
       );
 
@@ -218,7 +219,7 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       // Pre-protect people fields
       const protectedPeople = await Promise.all(
         people.map(async (person) => {
-          const protectedFields = await protectPersonWriteFields(c.env, {
+          const protectedFields = await protectPersonWriteFields(c.env, person.id, {
             blood_type: person.blood_type,
             dob: person.dob,
             dod: person.dod,

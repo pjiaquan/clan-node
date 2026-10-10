@@ -398,7 +398,7 @@ export class D1PeopleRepository implements PeopleRepository {
 
   async listCustomFieldRowsByPersonId(personId: string) {
     const { results } = await this.db.prepare(
-      'SELECT id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
+      'SELECT id, person_id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
     ).bind(personId).all();
     return results as Array<Record<string, unknown>>;
   }
