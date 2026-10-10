@@ -1,3 +1,4 @@
+import { backgroundScheduler, runInBackground } from './background';
 import type { Hono } from 'hono';
 import type { AppBindings } from './types';
 import { createPeopleRepository, normalizeEmailList, queryVerifiedEmails } from './d1_repositories';
@@ -70,16 +71,17 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
     const results = await repository.listPeople(layerId, peopleSchema.hasEmail);
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
-          .catch(err => console.error('Background people migration failed:', err))
-      );
-    } else {
-      Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
-        .catch(err => console.error('Background people migration failed:', err));
-    }
-    const customFieldsMap = await loadCustomFields(c.env, repository, layerId, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
+    runInBackground(
+      c,
+      Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row))),
+      'people migration'
+    );
+    const customFieldsMap = await loadCustomFields(
+      c.env,
+      repository,
+      layerId,
+      backgroundScheduler(c, 'custom field migration')
+    );
     const avatarMap = await loadAvatarMap(c.env.DB);
 
     const decryptedPeople = await Promise.all(results.map((person: any) => decryptPersonRow(c.env, person)));
@@ -116,17 +118,18 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
-          .catch(err => console.error('Background person migration failed:', err))
-      );
-    } else {
-      migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
-        .catch(err => console.error('Background person migration failed:', err));
-    }
+    runInBackground(
+      c,
+      migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>),
+      'person migration'
+    );
     const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
-    const customFields = await loadPersonCustomFields(c.env, repository, id, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
+    const customFields = await loadPersonCustomFields(
+      c.env,
+      repository,
+      id,
+      backgroundScheduler(c, 'custom field migration')
+    );
     const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
     const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
     return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, resolvePrimaryAvatar, emailVerifiedAt));

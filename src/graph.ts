@@ -1,3 +1,4 @@
+import { runInBackground } from './background';
 import type { Hono } from 'hono';
 import type { AppBindings, Gender, Person, Relationship, RelationshipType } from './types';
 import { safeParse, safeParseObject } from './utils';
@@ -47,15 +48,11 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         return c.json({ error: 'Center person not found' }, 404);
       }
       const decryptedCenter = await decryptPersonRow(c.env, center as Record<string, unknown>);
-      if (c.executionCtx) {
-        c.executionCtx.waitUntil(
-          migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>)
-            .catch(err => console.error('Background center person migration failed:', err))
-        );
-      } else {
-        migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>)
-          .catch(err => console.error('Background center person migration failed:', err));
-      }
+      runInBackground(
+        c,
+        migratePlaintextPersonRow(c.env.DB, c.env, center as Record<string, unknown>),
+        'center person migration'
+      );
 
       const [peopleRaw, avatarRows, customFieldRows, relationshipsRaw] = await Promise.all([
         graphRepository.listPeople(layerId, peopleSchema.hasEmail),
