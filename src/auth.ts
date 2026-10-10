@@ -795,64 +795,63 @@ type RateLimitInput = {
   blockMs: number;
 };
 
+/**
+ * Consumes one attempt against a rate-limit bucket.
+ *
+ * This is a single upsert rather than SELECT-then-UPDATE: the old version read
+ * `count`, decided, and wrote back, so concurrent requests all observed the
+ * same pre-increment value and the cap was never actually enforced under
+ * load -- which matters most for the limiters guarding MFA codes and login.
+ *
+ * Semantics kept from the previous implementation: `maxAttempts` consumes are
+ * allowed per `windowMs`; the one after that blocks the bucket for `blockMs`
+ * without extending the block on further attempts.
+ */
 export const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) => {
   await ensureAuthRateLimitTable(db);
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const existing = await db.prepare(
-    `SELECT window_start_ms, count, blocked_until_ms
-     FROM auth_rate_limits
-     WHERE action = ? AND limiter_key = ?`
-  ).bind(input.action, input.limiterKey).first();
 
-  if (!existing) {
-    await db.prepare(
-      `INSERT INTO auth_rate_limits (action, limiter_key, window_start_ms, count, blocked_until_ms, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?)`
-    ).bind(input.action, input.limiterKey, nowMs, 1, nowIso).run();
-    return { allowed: true as const };
-  }
+  const blocked = 'auth_rate_limits.blocked_until_ms > ?';
+  const windowExpired = '? - auth_rate_limits.window_start_ms > ?';
+  const row = await db.prepare(
+    `INSERT INTO auth_rate_limits (action, limiter_key, window_start_ms, count, blocked_until_ms, updated_at)
+     VALUES (?, ?, ?, 1, NULL, ?)
+     ON CONFLICT(action, limiter_key) DO UPDATE SET
+       window_start_ms = CASE
+         WHEN ${blocked} THEN auth_rate_limits.window_start_ms
+         WHEN ${windowExpired} THEN ?
+         ELSE auth_rate_limits.window_start_ms
+       END,
+       count = CASE
+         WHEN ${blocked} THEN auth_rate_limits.count
+         WHEN ${windowExpired} THEN 1
+         WHEN auth_rate_limits.count + 1 > ? THEN auth_rate_limits.count
+         ELSE auth_rate_limits.count + 1
+       END,
+       blocked_until_ms = CASE
+         WHEN ${blocked} THEN auth_rate_limits.blocked_until_ms
+         WHEN ${windowExpired} THEN NULL
+         WHEN auth_rate_limits.count + 1 > ? THEN ? + ?
+         ELSE NULL
+       END,
+       updated_at = ?
+     RETURNING count, blocked_until_ms`
+  ).bind(
+    input.action, input.limiterKey, nowMs, nowIso,
+    nowMs, nowMs, input.windowMs, nowMs,
+    nowMs, nowMs, input.windowMs, input.maxAttempts,
+    nowMs, nowMs, input.windowMs, input.maxAttempts, nowMs, input.blockMs,
+    nowIso
+  ).first();
 
-  const blockedUntilMs = Number((existing as any).blocked_until_ms ?? 0);
+  const blockedUntilMs = Number((row as any)?.blocked_until_ms ?? 0);
   if (blockedUntilMs > nowMs) {
     return {
       allowed: false as const,
       retryAfterSeconds: Math.max(1, Math.ceil((blockedUntilMs - nowMs) / 1000))
     };
   }
-
-  const windowStartMs = Number((existing as any).window_start_ms ?? 0);
-  const count = Number((existing as any).count ?? 0);
-  const inWindow = nowMs - windowStartMs <= input.windowMs;
-
-  if (!inWindow) {
-    await db.prepare(
-      `UPDATE auth_rate_limits
-       SET window_start_ms = ?, count = 1, blocked_until_ms = NULL, updated_at = ?
-       WHERE action = ? AND limiter_key = ?`
-    ).bind(nowMs, nowIso, input.action, input.limiterKey).run();
-    return { allowed: true as const };
-  }
-
-  if (count >= input.maxAttempts) {
-    const nextBlockedUntil = nowMs + input.blockMs;
-    await db.prepare(
-      `UPDATE auth_rate_limits
-       SET blocked_until_ms = ?, updated_at = ?
-       WHERE action = ? AND limiter_key = ?`
-    ).bind(nextBlockedUntil, nowIso, input.action, input.limiterKey).run();
-    return {
-      allowed: false as const,
-      retryAfterSeconds: Math.max(1, Math.ceil(input.blockMs / 1000))
-    };
-  }
-
-  await db.prepare(
-    `UPDATE auth_rate_limits
-     SET count = ?, updated_at = ?
-     WHERE action = ? AND limiter_key = ?`
-  ).bind(count + 1, nowIso, input.action, input.limiterKey).run();
-
   return { allowed: true as const };
 };
 
@@ -1106,6 +1105,34 @@ const getMfaSession = async (db: D1Database, sessionId: string) => {
      WHERE id = ?`
   ).bind(sessionId).first();
 };
+
+/**
+ * Atomically claims one verification attempt.
+ *
+ * The attempt counters used to be read, decided on, and written back, so a
+ * concurrent burst against one challenge all observed `attempt_count = 0` and
+ * the five-attempt cap was never enforced -- enough parallelism turns a
+ * six-digit code into a feasible guess. Claiming the attempt in the same
+ * statement that checks the cap removes the window; a null result means the
+ * row is gone, expired, or out of attempts.
+ */
+export const claimMfaChallengeAttempt = async (db: D1Database, challengeId: string, nowIso: string) => (
+  db.prepare(
+    `UPDATE auth_mfa_challenges
+     SET attempt_count = attempt_count + 1
+     WHERE id = ? AND expires_at > ? AND attempt_count < max_attempts
+     RETURNING user_id, email, code_hash, attempt_count, max_attempts`
+  ).bind(challengeId, nowIso).first()
+);
+
+export const claimMfaSessionAttempt = async (db: D1Database, sessionId: string, nowIso: string) => (
+  db.prepare(
+    `UPDATE auth_mfa_sessions
+     SET attempt_count = attempt_count + 1
+     WHERE id = ? AND expires_at > ? AND attempt_count < max_attempts
+     RETURNING user_id, email, attempt_count, max_attempts`
+  ).bind(sessionId, nowIso).first()
+);
 
 const issueEmailFallbackChallenge = async (
   c: Context<AppBindings>,
@@ -2457,13 +2484,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired MFA session' }, 400);
     }
 
-    const attemptCount = Number((mfaSession as any).attempt_count ?? 0);
-    const maxAttempts = Number((mfaSession as any).max_attempts ?? MFA_MAX_ATTEMPTS);
-    if (attemptCount >= maxAttempts) {
-      await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
-      return c.json({ error: 'Invalid or expired MFA session' }, 400);
-    }
-
     const totpField = userSchema.hasMfaTotpSecret ? ', mfa_totp_secret' : '';
     const user = await c.env.DB.prepare(
       `SELECT id, username, role${totpField} FROM users WHERE id = ?`
@@ -2477,15 +2497,20 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Authenticator app MFA is not enabled' }, 400);
     }
 
+    // Claim the attempt before comparing, so parallel guesses cannot all slip
+    // through on the same pre-increment count.
+    const claimed = await claimMfaSessionAttempt(c.env.DB, sessionId, nowIso);
+    if (!claimed) {
+      await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
+      return c.json({ error: 'Invalid or expired MFA session' }, 400);
+    }
+    const nextAttempts = Number((claimed as any).attempt_count ?? 0);
+    const maxAttempts = Number((claimed as any).max_attempts ?? MFA_MAX_ATTEMPTS);
+
     const isValid = await verifyTotpCode(totpSecret, code);
     if (!isValid) {
-      const nextAttempts = attemptCount + 1;
       if (nextAttempts >= maxAttempts) {
         await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
-      } else {
-        await c.env.DB.prepare(
-          'UPDATE auth_mfa_sessions SET attempt_count = ? WHERE id = ?'
-        ).bind(nextAttempts, sessionId).run();
       }
       await recordAuditLog(c, {
         action: 'mfa_failed',
@@ -2507,7 +2532,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       `DELETE FROM auth_mfa_sessions
        WHERE id = ?
          AND expires_at > ?
-         AND attempt_count < max_attempts
        RETURNING user_id, email`
     ).bind(sessionId, nowIso).first();
     if (!consumedSession) {
@@ -2587,30 +2611,28 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
 
-    const attemptCount = Number((challenge as any).attempt_count ?? 0);
-    const maxAttempts = Number((challenge as any).max_attempts ?? MFA_MAX_ATTEMPTS);
-    if (attemptCount >= maxAttempts) {
+    // Claim the attempt before comparing, so parallel guesses cannot all slip
+    // through on the same pre-increment count.
+    const claimed = await claimMfaChallengeAttempt(c.env.DB, challengeId, nowIso);
+    if (!claimed) {
       await c.env.DB.prepare('DELETE FROM auth_mfa_challenges WHERE id = ?').bind(challengeId).run();
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
+    const nextAttempts = Number((claimed as any).attempt_count ?? 0);
+    const maxAttempts = Number((claimed as any).max_attempts ?? MFA_MAX_ATTEMPTS);
 
     const codeHash = await sha256Base64(code);
-    if (!timingSafeEqual(codeHash, (challenge as any).code_hash as string)) {
-      const nextAttempts = attemptCount + 1;
+    if (!timingSafeEqual(codeHash, (claimed as any).code_hash as string)) {
       if (nextAttempts >= maxAttempts) {
         await c.env.DB.prepare('DELETE FROM auth_mfa_challenges WHERE id = ?').bind(challengeId).run();
-      } else {
-        await c.env.DB.prepare(
-          'UPDATE auth_mfa_challenges SET attempt_count = ? WHERE id = ?'
-        ).bind(nextAttempts, challengeId).run();
       }
       await recordAuditLog(c, {
         action: 'mfa_failed',
         resourceType: 'auth',
-        resourceId: (challenge as any).user_id as string,
-        summary: `MFA 驗證失敗 ${(challenge as any).email as string}`,
+        resourceId: (claimed as any).user_id as string,
+        summary: `MFA 驗證失敗 ${(claimed as any).email as string}`,
         details: {
-          email: (challenge as any).email as string,
+          email: (claimed as any).email as string,
           challenge_id: challengeId,
           attempt_count: nextAttempts,
           ip_address: getRequestIpAddress(c),
@@ -2625,7 +2647,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
        WHERE id = ?
          AND code_hash = ?
          AND expires_at > ?
-         AND attempt_count < max_attempts
        RETURNING user_id, email`
     ).bind(challengeId, codeHash, nowIso).first();
     if (!consumedChallenge) {
