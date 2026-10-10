@@ -51,7 +51,9 @@ export const authApi = {
     return res.json();
   },
 
-  updateAccount: async (updates: { email?: string; avatar_url?: string | null }): Promise<AccountProfile> => {
+  updateAccount: async (
+    updates: { email?: string; avatar_url?: string | null; current_password?: string }
+  ): Promise<AccountProfile & { pending_email?: string | null }> => {
     const res = await fetchWithAuth(`${API_BASE}/api/auth/account`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

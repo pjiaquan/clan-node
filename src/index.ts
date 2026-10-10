@@ -12,8 +12,30 @@ import { registerKinshipLabelRoutes } from './kinship_labels';
 import { registerBackupRoutes } from './backup';
 import { registerLayerRoutes } from './layers';
 import { verifyDualWriteRequest } from './dual_write';
+import { KNOWN_ENVIRONMENTS, isKnownEnvironment, isProductionEnv } from './environment';
+import { ValidationError } from './validation';
 
 export const app = new Hono<AppBindings>();
+
+/**
+ * Last-resort error handler.
+ *
+ * There was none, so anything that threw -- a D1 bind error from a value of
+ * the wrong type, a CHECK constraint violation, a malformed JSON body --
+ * surfaced as a 500 carrying the underlying message to the client.
+ * `ValidationError` is a client mistake and answers 400; everything else is
+ * logged and answered generically.
+ */
+app.onError((error, c) => {
+  if (error instanceof ValidationError) {
+    return c.json({ error: error.message }, 400);
+  }
+  if (error instanceof SyntaxError) {
+    return c.json({ error: 'Body must be valid JSON' }, 400);
+  }
+  console.error('Unhandled error:', c.req.method, c.req.path, error);
+  return c.json({ error: 'Internal server error' }, 500);
+});
 
 app.use('*', async (c, next) => {
   await next();
@@ -21,9 +43,25 @@ app.use('*', async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'no-referrer');
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  if (c.env.ENVIRONMENT === 'production') {
+  // frontend/public/_headers only covers Cloudflare Pages assets, so the API
+  // needs its own. This Worker serves JSON and images, never documents, so
+  // nothing legitimate may be loaded from one of its responses.
+  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  if (isProductionEnv(c.env)) {
     c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   }
+});
+
+// Fail closed on a misconfigured environment. Cookie flags, HSTS and the
+// encryption-key requirement all key off ENVIRONMENT, so an unset or
+// misspelled value must not quietly select the weaker development behaviour.
+app.use('*', async (c, next) => {
+  if (!isKnownEnvironment(c.env)) {
+    return c.json({
+      error: `Server misconfiguration: ENVIRONMENT must be one of ${KNOWN_ENVIRONMENTS.join(', ')}`
+    }, 503);
+  }
+  return next();
 });
 
 // Enable CORS for frontend

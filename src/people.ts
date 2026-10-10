@@ -1,9 +1,10 @@
+import { backgroundScheduler, runInBackground } from './background';
 import type { Hono } from 'hono';
 import type { AppBindings } from './types';
-import { createPeopleRepository } from './d1_repositories';
+import { createPeopleRepository, normalizeEmailList, queryVerifiedEmails } from './d1_repositories';
 import { notifyUpdate } from './notify';
 import { queueRemoteJson } from './dual_write';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { PEOPLE_CREATE_RATE_LIMIT } from './rate_limits';
 import {
@@ -14,6 +15,19 @@ import {
 } from './data_protection';
 import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 import { getPeopleSchemaSupport } from './schema';
+import { isServerMintedAvatarUrl, safeStorageKey } from './storage_keys';
+import {
+  boundedArray,
+  boundedJson,
+  FIELD_LIMITS,
+  optionalEnum,
+  optionalIdentifier,
+  optionalText,
+  requireObjectBody,
+  requiredText,
+} from './validation';
+
+const GENDERS = ['M', 'F', 'O'] as const;
 import {
   appendAvatar,
   deriveStorageKeyFromUrl,
@@ -57,22 +71,32 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
     const results = await repository.listPeople(layerId, peopleSchema.hasEmail);
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
-          .catch(err => console.error('Background people migration failed:', err))
-      );
-    } else {
-      Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row)))
-        .catch(err => console.error('Background people migration failed:', err));
-    }
-    const customFieldsMap = await loadCustomFields(c.env, repository, layerId, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
+    runInBackground(
+      c,
+      Promise.all(results.map((row) => migratePlaintextPersonRow(c.env.DB, c.env, row))),
+      'people migration'
+    );
+    const customFieldsMap = await loadCustomFields(
+      c.env,
+      repository,
+      layerId,
+      backgroundScheduler(c, 'custom field migration')
+    );
     const avatarMap = await loadAvatarMap(c.env.DB);
 
-    const parsedResults = await Promise.all(results.map(async (person: any) => {
-      const decryptedPerson = await decryptPersonRow(c.env, person);
+    const decryptedPeople = await Promise.all(results.map((person: any) => decryptPersonRow(c.env, person)));
+
+    // One batched lookup instead of a query per person: this route used to run
+    // an extra SELECT for every row that had an email.
+    const verifiedEmailMap = await queryVerifiedEmails(
+      c.env.DB,
+      normalizeEmailList(decryptedPeople.map((person: any) => person.email ?? null))
+    );
+
+    const parsedResults = await Promise.all(decryptedPeople.map(async (decryptedPerson: any) => {
       const avatars = avatarMap.get(decryptedPerson.id) || await ensureAvatarFromLegacy(c.env.DB, decryptedPerson);
-      const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+      const personEmail = decryptedPerson.email ? String(decryptedPerson.email).trim().toLowerCase() : '';
+      const emailVerifiedAt = personEmail ? (verifiedEmailMap.get(personEmail) ?? null) : null;
       return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars, resolvePrimaryAvatar, emailVerifiedAt);
     }));
 
@@ -94,17 +118,18 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     if (!person) {
       return c.json({ error: 'Person not found' }, 404);
     }
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
-          .catch(err => console.error('Background person migration failed:', err))
-      );
-    } else {
-      migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>)
-        .catch(err => console.error('Background person migration failed:', err));
-    }
+    runInBackground(
+      c,
+      migratePlaintextPersonRow(c.env.DB, c.env, person as Record<string, unknown>),
+      'person migration'
+    );
     const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
-    const customFields = await loadPersonCustomFields(c.env, repository, id, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
+    const customFields = await loadPersonCustomFields(
+      c.env,
+      repository,
+      id,
+      backgroundScheduler(c, 'custom field migration')
+    );
     const avatars = await ensureAvatarFromLegacy(c.env.DB, decryptedPerson as any);
     const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
     return c.json(buildPersonPayload(decryptedPerson, customFields, avatars, resolvePrimaryAvatar, emailVerifiedAt));
@@ -157,12 +182,27 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
-    const body = await c.req.json();
+    const body = requireObjectBody(await c.req.json());
     const layerId = resolveLayerId(c, body);
-    const { id: providedId, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+    // Validated rather than destructured straight into the insert: a value of
+    // the wrong type used to reach the D1 bind call, and a gender outside the
+    // CHECK constraint used to reach SQLite.
+    const providedId = optionalIdentifier(body.id, 'id');
+    const name = requiredText(body.name, 'name');
+    const english_name = optionalText(body.english_name, 'english_name');
+    const email = optionalText(body.email, 'email');
+    const gender = optionalEnum(body.gender, 'gender', GENDERS);
+    const blood_type = optionalText(body.blood_type, 'blood_type', 8);
+    const dob = optionalText(body.dob, 'dob', FIELD_LIMITS.dateText);
+    const dod = optionalText(body.dod, 'dod', FIELD_LIMITS.dateText);
+    const tob = optionalText(body.tob, 'tob', FIELD_LIMITS.dateText);
+    const tod = optionalText(body.tod, 'tod', FIELD_LIMITS.dateText);
+    const avatar_url = optionalText(body.avatar_url, 'avatar_url', 512);
+    const metadata = body.metadata ?? null;
+    const metadataJson = boundedJson(metadata, 'metadata');
 
-    if (!name) {
-      return c.json({ error: 'Name is required' }, 400);
+    if (avatar_url && !isServerMintedAvatarUrl(avatar_url)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
     }
     await ensureLayerSchemaSupport(c.env.DB);
     if (!await assertLayerExists(c.env.DB, layerId)) {
@@ -178,7 +218,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       dod: dod || null,
       tob: tob || null,
       tod: tod || null,
-      metadata: metadata ? JSON.stringify(metadata) : null
+      metadata: metadataJson
     });
 
     const insertColumns = ['id', 'layer_id', 'name', 'english_name'];
@@ -203,6 +243,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     await repository.insertPerson(Object.fromEntries(insertColumns.map((column, index) => [column, insertValues[index]])));
 
     const customFields = extractCustomFields(body, metadata);
+    // One INSERT per entry, so this needs an upper bound.
+    if (customFields) boundedArray(customFields, 'custom_fields');
     if (customFields) {
       await Promise.all(
         customFields
@@ -217,7 +259,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       );
     }
 
-    const inputAvatars = Array.isArray(body?.avatars) ? body.avatars : [];
+    const inputAvatars = boundedArray(body?.avatars, 'avatars');
     if (inputAvatars.length > 0) {
       const candidates = inputAvatars
         .map((entry: any, index: number) => ({
@@ -226,6 +268,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           sort_order: Number.isFinite(entry?.sort_order) ? Number(entry.sort_order) : index
         }))
         .filter((entry: any) => Boolean(entry.avatar_url));
+      const rejected = candidates.find((entry: any) => !isServerMintedAvatarUrl(entry.avatar_url));
+      if (rejected) {
+        return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
+      }
 
       let primaryPicked = false;
       for (const entry of candidates) {
@@ -335,7 +381,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Update a person
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json();
+    const body = requireObjectBody(await c.req.json());
     const layerId = resolveLayerId(c, body);
     await ensureLayerSchemaSupport(c.env.DB);
     if (!await assertLayerExists(c.env.DB, layerId)) {
@@ -343,7 +389,31 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
-    const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+
+    // Each field keeps its absent-vs-present distinction, since this route
+    // updates only the keys it was sent, but a value that is present is
+    // validated instead of going straight into the bind call.
+    const present = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+    const name = present('name') ? requiredText(body.name, 'name') : undefined;
+    const english_name = present('english_name') ? optionalText(body.english_name, 'english_name') : undefined;
+    const email = present('email') ? optionalText(body.email, 'email') : undefined;
+    // The column is NOT NULL with a CHECK; clearing it falls back to 'O', the
+    // same default the create path uses.
+    const gender = present('gender') ? (optionalEnum(body.gender, 'gender', GENDERS) ?? 'O') : undefined;
+    const blood_type = present('blood_type') ? optionalText(body.blood_type, 'blood_type', 8) : undefined;
+    const dob = present('dob') ? optionalText(body.dob, 'dob', FIELD_LIMITS.dateText) : undefined;
+    const dod = present('dod') ? optionalText(body.dod, 'dod', FIELD_LIMITS.dateText) : undefined;
+    const tob = present('tob') ? optionalText(body.tob, 'tob', FIELD_LIMITS.dateText) : undefined;
+    const tod = present('tod') ? optionalText(body.tod, 'tod', FIELD_LIMITS.dateText) : undefined;
+    const avatar_url = present('avatar_url') ? optionalText(body.avatar_url, 'avatar_url', 512) : undefined;
+    const metadata = present('metadata') ? (body.metadata ?? null) : undefined;
+    if (metadata !== undefined) boundedJson(metadata, 'metadata');
+
+    // An empty string clears the avatar; anything else has to be a path this
+    // server minted.
+    if (avatar_url && !isServerMintedAvatarUrl(avatar_url)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
+    }
 
     const existing = await repository.getPersonByIdInLayerDetailed(id, layerId, peopleSchema.hasEmail);
 
@@ -387,6 +457,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     });
 
     const customFields = extractCustomFields(body, metadata);
+    // One INSERT per entry, so this needs an upper bound.
+    if (customFields) boundedArray(customFields, 'custom_fields');
 
     if (Object.keys(updatePayload).length > 0) {
       await repository.updatePersonById(id, updatePayload);
@@ -417,7 +489,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           'SELECT id, avatar_url, storage_key FROM person_avatars WHERE person_id = ?'
         ).bind(id).all();
         for (const row of (avatarsToDelete.results || [])) {
-          const key = (row as any).storage_key || deriveStorageKeyFromUrl(String((row as any).avatar_url || ''));
+          const key = safeStorageKey((row as any).storage_key)
+            || deriveStorageKeyFromUrl(String((row as any).avatar_url || ''));
           if (key) {
             await c.env.AVATARS.delete(key);
           }
@@ -680,7 +753,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       'DELETE FROM person_avatars WHERE id = ? AND person_id = ?'
     ).bind(avatarId, id).run();
 
-    const key = normalized.storage_key || deriveStorageKeyFromUrl(normalized.avatar_url);
+    const key = safeStorageKey(normalized.storage_key)
+      || deriveStorageKeyFromUrl(normalized.avatar_url);
     if (key) {
       await c.env.AVATARS.delete(key);
     }
@@ -711,7 +785,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Serve avatar images from R2
   app.get('/api/avatars/:key', async (c) => {
-    const key = c.req.param('key');
+    // Hono percent-decodes route params, so `..%2Fclan-node.sqlite` arrives
+    // here as `../clan-node.sqlite`. Validate before touching the bucket.
+    const key = safeStorageKey(c.req.param('key'));
+    if (!key) {
+      return c.json({ error: 'Avatar not found' }, 404);
+    }
     const object = await c.env.AVATARS.get(key);
     if (!object) {
       return c.json({ error: 'Avatar not found' }, 404);
@@ -722,7 +801,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const headers = new Headers();
     headers.set('Content-Type', contentType);
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    // These bytes need a session to fetch, so they must not be stored in a
+    // shared cache and handed to someone without one. `private` is enough:
+    // the keys are unguessable, and the browser may still cache per viewer.
+    headers.set('Cache-Control', 'private, max-age=31536000, immutable');
     const origin = c.req.header('Origin') || '';
     const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')
       .split(',')
@@ -755,8 +837,27 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const avatarRows = await loadPersonAvatars(c.env.DB, id);
+
+    // Record the intent before destroying anything. The audit write used to
+    // happen afterwards and swallow its own failures, so a person could be
+    // deleted with no trace of who did it.
+    const auditFailure = await requireAuditLog(c, {
+      action: 'delete',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `刪除人物 ${(existing as any).name ?? id}`,
+      details: {
+        name: (existing as any).name ?? null,
+        english_name: (existing as any).english_name ?? null,
+        layer_id: layerId,
+        removed_avatar_count: avatarRows.length
+      }
+    });
+    if (auditFailure) return auditFailure;
+
     for (const avatar of avatarRows) {
-      const key = avatar.storage_key || deriveStorageKeyFromUrl(avatar.avatar_url);
+      const key = safeStorageKey(avatar.storage_key)
+        || deriveStorageKeyFromUrl(avatar.avatar_url);
       if (!key) continue;
       await c.env.AVATARS.delete(key);
     }
@@ -770,17 +871,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         id,
         name: (existing as any).name ?? null,
         english_name: (existing as any).english_name ?? null
-      });
-      await recordAuditLog(c, {
-        action: 'delete',
-        resourceType: 'people',
-        resourceId: id,
-        summary: `刪除人物 ${(existing as any).name ?? id}`,
-        details: {
-          name: (existing as any).name ?? null,
-          english_name: (existing as any).english_name ?? null,
-          removed_avatar_count: avatarRows.length
-        }
       });
       queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);
       return c.json({ success: true, id });

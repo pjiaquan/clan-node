@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_NAME="${DB_NAME:-clan-db}"
+# The two sides are different databases now. The remote one is production.
+REMOTE_DB_NAME="${REMOTE_DB_NAME:-clan-db}"
+LOCAL_DB_NAME="${LOCAL_DB_NAME:-clan-db-dev}"
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-EXPORT_PATH="${EXPORT_PATH:-$BACKUP_DIR/${DB_NAME}-remote-${TIMESTAMP}.sql}"
+EXPORT_PATH="${EXPORT_PATH:-$BACKUP_DIR/${REMOTE_DB_NAME}-remote-${TIMESTAMP}.sql}"
 SKIP_AUDIT_LOGS="${SKIP_AUDIT_LOGS:-1}"
 
 mkdir -p "$BACKUP_DIR"
@@ -12,7 +14,7 @@ mkdir -p "$BACKUP_DIR"
 WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.worker.toml}"
 
 echo "Exporting remote D1 to $EXPORT_PATH..."
-wrangler --config "$WRANGLER_CONFIG" d1 export "$DB_NAME" --remote --output="$EXPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 export "$REMOTE_DB_NAME" --remote --output="$EXPORT_PATH"
 
 IMPORT_PATH="$EXPORT_PATH"
 if [[ "$SKIP_AUDIT_LOGS" == "1" || "$SKIP_AUDIT_LOGS" == "true" || "$SKIP_AUDIT_LOGS" == "yes" ]]; then
@@ -46,15 +48,15 @@ if [[ "$SKIP_AUDIT_LOGS" == "1" || "$SKIP_AUDIT_LOGS" == "true" || "$SKIP_AUDIT_
 fi
 
 echo "Dropping local tables..."
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS relationships;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS person_custom_fields;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS notifications;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS audit_logs;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS sessions;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS users;"
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --command "DROP TABLE IF EXISTS people;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS relationships;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS person_custom_fields;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS notifications;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS audit_logs;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS sessions;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS users;"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --command "DROP TABLE IF EXISTS people;"
 
 echo "Importing into local D1 from $IMPORT_PATH..."
-wrangler --config "$WRANGLER_CONFIG" d1 execute "$DB_NAME" --local --file="$IMPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 execute "$LOCAL_DB_NAME" --local --file="$IMPORT_PATH"
 
 echo "Done. Local DB replaced using $IMPORT_PATH"
