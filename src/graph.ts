@@ -24,10 +24,12 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
     try {
       const centerId = c.req.query('center');
       const layerId = resolveLayerId(c);
-      console.log('GET /api/graph request for center:', centerId);
-      // Bound the max depth to 10 to prevent DoS via expensive queries
-      const depth = Math.min(parseInt(c.req.query('depth') || '3', 10), 10);
-
+      // There was a `depth` query parameter here, parsed and bounded to 10
+      // with a comment claiming it prevented expensive queries. It was never
+      // used -- the whole layer is always loaded -- so the bound did not
+      // exist. Removed rather than left as a false reassurance; bounding the
+      // size of a returned graph is a separate design decision, and the
+      // client renders the entire layer today.
       if (!centerId) {
         return c.json({ error: 'center query parameter is required' }, 400);
       }
@@ -39,11 +41,9 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       const graphRepository = createGraphRepository(c.env);
 
       // Verify center person exists
-      console.log('Verifying center person...');
       const center = await graphRepository.getCenterPerson(layerId, centerId, peopleSchema.hasEmail);
 
       if (!center) {
-        console.log('Center person not found');
         return c.json({ error: 'Center person not found' }, 404);
       }
       const decryptedCenter = await decryptPersonRow(c.env, center as Record<string, unknown>);
@@ -57,15 +57,12 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           .catch(err => console.error('Background center person migration failed:', err));
       }
 
-      // Get all people, avatars, custom fields, and relationships concurrently
-      console.log('Fetching people, avatars, custom fields, and relationships concurrently...');
       const [peopleRaw, avatarRows, customFieldRows, relationshipsRaw] = await Promise.all([
         graphRepository.listPeople(layerId, peopleSchema.hasEmail),
         graphRepository.listAvatarRows(layerId),
         graphRepository.listCustomFieldRows(layerId),
         graphRepository.listRelationships(layerId)
       ]);
-      console.log(`Fetched ${peopleRaw.length} people, ${avatarRows.length} avatars, ${customFieldRows.length} custom fields, ${relationshipsRaw.length} relationships`);
 
       const avatarMap = new Map<string, typeof avatarRows>();
       avatarRows.forEach((avatar) => {
@@ -139,7 +136,6 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
       });
 
       // Calculate kinship titles for each person relative to center
-      console.log('Calculating kinship titles...');
       const graphNodes = people.map((person: any) => {
         try {
           if (person.id === centerId) {
@@ -172,7 +168,6 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         }
       }
 
-      console.log('Graph data prepared successfully');
       return c.json({
         layer_id: layerId,
         center: centerId,

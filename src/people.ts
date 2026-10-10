@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import type { AppBindings } from './types';
-import { createPeopleRepository } from './d1_repositories';
+import { createPeopleRepository, normalizeEmailList, queryVerifiedEmails } from './d1_repositories';
 import { notifyUpdate } from './notify';
 import { queueRemoteJson } from './dual_write';
 import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
@@ -82,10 +82,19 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     const customFieldsMap = await loadCustomFields(c.env, repository, layerId, c.executionCtx ? (p) => c.executionCtx?.waitUntil(p) : undefined);
     const avatarMap = await loadAvatarMap(c.env.DB);
 
-    const parsedResults = await Promise.all(results.map(async (person: any) => {
-      const decryptedPerson = await decryptPersonRow(c.env, person);
+    const decryptedPeople = await Promise.all(results.map((person: any) => decryptPersonRow(c.env, person)));
+
+    // One batched lookup instead of a query per person: this route used to run
+    // an extra SELECT for every row that had an email.
+    const verifiedEmailMap = await queryVerifiedEmails(
+      c.env.DB,
+      normalizeEmailList(decryptedPeople.map((person: any) => person.email ?? null))
+    );
+
+    const parsedResults = await Promise.all(decryptedPeople.map(async (decryptedPerson: any) => {
       const avatars = avatarMap.get(decryptedPerson.id) || await ensureAvatarFromLegacy(c.env.DB, decryptedPerson);
-      const emailVerifiedAt = await lookupVerifiedEmailAtFromRepository(c.env.DB, repository, (decryptedPerson as any).email ?? null);
+      const personEmail = decryptedPerson.email ? String(decryptedPerson.email).trim().toLowerCase() : '';
+      const emailVerifiedAt = personEmail ? (verifiedEmailMap.get(personEmail) ?? null) : null;
       return buildPersonPayload(decryptedPerson, customFieldsMap.get(decryptedPerson.id) || [], avatars, resolvePrimaryAvatar, emailVerifiedAt);
     }));
 
