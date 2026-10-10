@@ -44,7 +44,7 @@
   "type": "module",
   "dependencies": {
     "@hono/node-server": "^1.19.17",
-    "better-sqlite3": "^12.8.0",
+    "better-sqlite3": "^13.0.3",
     "hono": "^4.13.13",
     "tsx": "^4.20.6"
   },
