@@ -6,6 +6,8 @@ import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { LAYER_WRITE_RATE_LIMIT } from './rate_limits';
 import { getPeopleSchemaSupport } from './schema';
+import { safeStorageKey } from './storage_keys';
+import { deriveStorageKeyFromUrl } from './people/avatar_service';
 
 export const DEFAULT_LAYER_ID = 'default';
 export const DEFAULT_LAYER_NAME = 'Default Layer';
@@ -39,12 +41,6 @@ let layerSchemaSupportPromise: Promise<void> | null = null;
 const isAdmin = (c: Context<AppBindings>) => {
   const sessionUser = c.get('sessionUser');
   return Boolean(sessionUser && sessionUser.role === 'admin');
-};
-
-const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
-  if (!avatarUrl) return null;
-  if (!avatarUrl.startsWith('/api/avatars/')) return null;
-  return avatarUrl.replace('/api/avatars/', '');
 };
 
 const hasColumn = async (db: D1Database, table: string, column: string) => {
@@ -356,7 +352,8 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
     ).bind(layerId).all();
 
     for (const row of avatarRows.results as Array<Record<string, unknown>>) {
-      const key = String(row.storage_key ?? '') || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
+      const key = safeStorageKey(row.storage_key)
+        || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
       if (!key) continue;
       await c.env.AVATARS.delete(key);
     }

@@ -14,6 +14,7 @@ import {
 } from './data_protection';
 import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './layers';
 import { getPeopleSchemaSupport } from './schema';
+import { safeStorageKey } from './storage_keys';
 import {
   appendAvatar,
   deriveStorageKeyFromUrl,
@@ -417,7 +418,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
           'SELECT id, avatar_url, storage_key FROM person_avatars WHERE person_id = ?'
         ).bind(id).all();
         for (const row of (avatarsToDelete.results || [])) {
-          const key = (row as any).storage_key || deriveStorageKeyFromUrl(String((row as any).avatar_url || ''));
+          const key = safeStorageKey((row as any).storage_key)
+            || deriveStorageKeyFromUrl(String((row as any).avatar_url || ''));
           if (key) {
             await c.env.AVATARS.delete(key);
           }
@@ -680,7 +682,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       'DELETE FROM person_avatars WHERE id = ? AND person_id = ?'
     ).bind(avatarId, id).run();
 
-    const key = normalized.storage_key || deriveStorageKeyFromUrl(normalized.avatar_url);
+    const key = safeStorageKey(normalized.storage_key)
+      || deriveStorageKeyFromUrl(normalized.avatar_url);
     if (key) {
       await c.env.AVATARS.delete(key);
     }
@@ -711,7 +714,12 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
   // Serve avatar images from R2
   app.get('/api/avatars/:key', async (c) => {
-    const key = c.req.param('key');
+    // Hono percent-decodes route params, so `..%2Fclan-node.sqlite` arrives
+    // here as `../clan-node.sqlite`. Validate before touching the bucket.
+    const key = safeStorageKey(c.req.param('key'));
+    if (!key) {
+      return c.json({ error: 'Avatar not found' }, 404);
+    }
     const object = await c.env.AVATARS.get(key);
     if (!object) {
       return c.json({ error: 'Avatar not found' }, 404);
@@ -756,7 +764,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
 
     const avatarRows = await loadPersonAvatars(c.env.DB, id);
     for (const avatar of avatarRows) {
-      const key = avatar.storage_key || deriveStorageKeyFromUrl(avatar.avatar_url);
+      const key = safeStorageKey(avatar.storage_key)
+        || deriveStorageKeyFromUrl(avatar.avatar_url);
       if (!key) continue;
       await c.env.AVATARS.delete(key);
     }
