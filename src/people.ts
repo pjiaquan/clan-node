@@ -730,7 +730,10 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const headers = new Headers();
     headers.set('Content-Type', contentType);
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    // These bytes need a session to fetch, so they must not be stored in a
+    // shared cache and handed to someone without one. `private` is enough:
+    // the keys are unguessable, and the browser may still cache per viewer.
+    headers.set('Cache-Control', 'private, max-age=31536000, immutable');
     const origin = c.req.header('Origin') || '';
     const allowedOrigins = (c.env.FRONTEND_ORIGIN || 'http://localhost:5173')
       .split(',')
