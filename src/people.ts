@@ -3,7 +3,7 @@ import type { AppBindings } from './types';
 import { createPeopleRepository } from './d1_repositories';
 import { notifyUpdate } from './notify';
 import { queueRemoteJson } from './dual_write';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { PEOPLE_CREATE_RATE_LIMIT } from './rate_limits';
 import {
@@ -779,6 +779,24 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
 
     const avatarRows = await loadPersonAvatars(c.env.DB, id);
+
+    // Record the intent before destroying anything. The audit write used to
+    // happen afterwards and swallow its own failures, so a person could be
+    // deleted with no trace of who did it.
+    const auditFailure = await requireAuditLog(c, {
+      action: 'delete',
+      resourceType: 'people',
+      resourceId: id,
+      summary: `刪除人物 ${(existing as any).name ?? id}`,
+      details: {
+        name: (existing as any).name ?? null,
+        english_name: (existing as any).english_name ?? null,
+        layer_id: layerId,
+        removed_avatar_count: avatarRows.length
+      }
+    });
+    if (auditFailure) return auditFailure;
+
     for (const avatar of avatarRows) {
       const key = safeStorageKey(avatar.storage_key)
         || deriveStorageKeyFromUrl(avatar.avatar_url);
@@ -795,17 +813,6 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
         id,
         name: (existing as any).name ?? null,
         english_name: (existing as any).english_name ?? null
-      });
-      await recordAuditLog(c, {
-        action: 'delete',
-        resourceType: 'people',
-        resourceId: id,
-        summary: `刪除人物 ${(existing as any).name ?? id}`,
-        details: {
-          name: (existing as any).name ?? null,
-          english_name: (existing as any).english_name ?? null,
-          removed_avatar_count: avatarRows.length
-        }
       });
       queueRemoteJson(c, 'DELETE', `/api/people/${id}`, undefined);
       return c.json({ success: true, id });

@@ -35,11 +35,31 @@ const hasAuditTable = async (db: D1Database) => {
   return tableStatus === 'present';
 };
 
-export const recordAuditLog = async (c: Context<AppBindings>, input: AuditLogInput) => {
+export class AuditLogWriteError extends Error {}
+
+/**
+ * Writes an audit entry.
+ *
+ * Failures are swallowed by default: a mutation should not fail because its
+ * log line could not be written. Destructive operations pass
+ * `{ required: true }` and call this *before* acting, so there is no way to
+ * delete data without a record of the attempt -- see `requireAuditLog`.
+ */
+export const recordAuditLog = async (
+  c: Context<AppBindings>,
+  input: AuditLogInput,
+  options: { required?: boolean } = {}
+) => {
   const action = input.action?.trim();
   const resourceType = input.resourceType?.trim();
-  if (!action || !resourceType) return;
-  if (!(await hasAuditTable(c.env.DB))) return;
+  if (!action || !resourceType) {
+    if (options.required) throw new AuditLogWriteError('audit entry is missing action or resourceType');
+    return;
+  }
+  if (!(await hasAuditTable(c.env.DB))) {
+    if (options.required) throw new AuditLogWriteError('audit_logs table is missing');
+    return;
+  }
 
   const sessionUser = c.get('sessionUser');
   const now = new Date().toISOString();
@@ -70,9 +90,29 @@ export const recordAuditLog = async (c: Context<AppBindings>, input: AuditLogInp
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes('no such table')) {
       tableStatus = 'missing';
+      if (options.required) throw new AuditLogWriteError('audit_logs table is missing');
       return;
     }
     console.warn('Failed to write audit log:', error);
+    if (options.required) throw new AuditLogWriteError(`audit log write failed: ${message}`);
+  }
+};
+
+/**
+ * Records an entry that must exist, before the operation it describes runs.
+ * Returns an error response when the entry could not be stored, which the
+ * caller returns instead of proceeding.
+ */
+export const requireAuditLog = async (
+  c: Context<AppBindings>,
+  input: AuditLogInput
+): Promise<Response | null> => {
+  try {
+    await recordAuditLog(c, input, { required: true });
+    return null;
+  } catch (error) {
+    console.warn('Refusing a destructive operation with no audit trail:', error);
+    return c.json({ error: 'Unable to record this action; it was not performed.' }, 503);
   }
 };
 
@@ -107,14 +147,30 @@ export function registerAuditRoutes(app: Hono<AppBindings>) {
       ? Math.max(1, Math.min(Math.trunc(rawLimit), 500))
       : 200;
 
-    const { results } = await c.env.DB.prepare(
-      `SELECT
-        id, actor_user_id, actor_username, actor_role,
-        action, resource_type, resource_id, summary, details, created_at
-       FROM audit_logs
-       ORDER BY created_at DESC
-       LIMIT ?`
-    ).bind(limit).all();
+    // Paginate on the monotonic id rather than created_at, which is not
+    // unique. Without a cursor, everything older than the newest `limit`
+    // entries was unreachable through the API.
+    const rawBefore = c.req.query('before');
+    const before = rawBefore !== undefined && /^\d+$/.test(rawBefore) ? Number(rawBefore) : null;
+
+    const { results } = before === null
+      ? await c.env.DB.prepare(
+        `SELECT
+          id, actor_user_id, actor_username, actor_role,
+          action, resource_type, resource_id, summary, details, created_at
+         FROM audit_logs
+         ORDER BY id DESC
+         LIMIT ?`
+      ).bind(limit).all()
+      : await c.env.DB.prepare(
+        `SELECT
+          id, actor_user_id, actor_username, actor_role,
+          action, resource_type, resource_id, summary, details, created_at
+         FROM audit_logs
+         WHERE id < ?
+         ORDER BY id DESC
+         LIMIT ?`
+      ).bind(before, limit).all();
 
     return c.json(results.map((row: any) => ({
       id: Number(row.id),

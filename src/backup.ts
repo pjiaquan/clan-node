@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import type { AppBindings } from './types';
 import { createBackupRepository } from './d1_repositories';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { BACKUP_EXPORT_RATE_LIMIT, BACKUP_IMPORT_RATE_LIMIT } from './rate_limits';
@@ -215,6 +215,24 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         })
       );
 
+      // The import batch replaces the whole graph, so the record of who ran it
+      // has to exist first.
+      const auditFailure = await requireAuditLog(c, {
+        action: 'import_backup',
+        resourceType: 'graph',
+        summary: `匯入節點備份（${people.length} 節點）`,
+        details: {
+          people: people.length,
+          layers: layers.length,
+          avatars: avatars.length,
+          relationships: relationships.length,
+          custom_fields: customFields.length,
+          relationship_type_labels: relationshipTypeLabels.length,
+          kinship_labels: kinshipLabels.length,
+        }
+      });
+      if (auditFailure) return auditFailure;
+
       await repository.runImportBatch({
         includeEmail: peopleSchema.hasEmail,
         layers,
@@ -232,21 +250,6 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
         hasKinshipLabels,
       });
 
-
-      await recordAuditLog(c, {
-        action: 'import_backup',
-        resourceType: 'graph',
-        summary: `匯入節點備份（${people.length} 節點）`,
-        details: {
-          people: people.length,
-          layers: layers.length,
-          avatars: avatars.length,
-          relationships: relationships.length,
-          custom_fields: customFields.length,
-          relationship_type_labels: relationshipTypeLabels.length,
-          kinship_labels: kinshipLabels.length,
-        }
-      });
 
       queueRemoteJson(c, 'POST', '/api/admin/backup/import', body);
 

@@ -2,7 +2,7 @@ import type { Context, Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { protectPersonWriteFields } from './data_protection';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { LAYER_WRITE_RATE_LIMIT } from './rate_limits';
 import { getPeopleSchemaSupport } from './schema';
@@ -351,19 +351,36 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
        WHERE p.layer_id = ?`
     ).bind(layerId).all();
 
-    for (const row of avatarRows.results as Array<Record<string, unknown>>) {
-      const key = safeStorageKey(row.storage_key)
-        || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
-      if (!key) continue;
-      await c.env.AVATARS.delete(key);
-    }
-
     const peopleCountRow = await c.env.DB.prepare(
       'SELECT COUNT(*) AS count FROM people WHERE layer_id = ?'
     ).bind(layerId).first();
     const relationshipCountRow = await c.env.DB.prepare(
       'SELECT COUNT(*) AS count FROM relationships WHERE layer_id = ?'
     ).bind(layerId).first();
+
+    // Deleting a layer removes every person, relationship and avatar in it, so
+    // the record of who asked for it has to exist before any of that happens.
+    const auditFailure = await requireAuditLog(c, {
+      action: 'delete',
+      resourceType: 'layers',
+      resourceId: layerId,
+      summary: `刪除圖層 ${String((existing as any).name ?? layerId)}`,
+      details: {
+        name: String((existing as any).name ?? layerId),
+        description: ((existing as any).description as string | null) ?? null,
+        removed_node_count: Number((peopleCountRow as any)?.count ?? 0),
+        removed_relationship_count: Number((relationshipCountRow as any)?.count ?? 0),
+        removed_avatar_count: avatarRows.results.length,
+      }
+    });
+    if (auditFailure) return auditFailure;
+
+    for (const row of avatarRows.results as Array<Record<string, unknown>>) {
+      const key = safeStorageKey(row.storage_key)
+        || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
+      if (!key) continue;
+      await c.env.AVATARS.delete(key);
+    }
 
     await c.env.DB.batch([
       c.env.DB.prepare(
@@ -382,20 +399,6 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
       c.env.DB.prepare('DELETE FROM people WHERE layer_id = ?').bind(layerId),
       c.env.DB.prepare('DELETE FROM graph_layers WHERE id = ?').bind(layerId),
     ]);
-
-    await recordAuditLog(c, {
-      action: 'delete',
-      resourceType: 'layers',
-      resourceId: layerId,
-      summary: `刪除圖層 ${String((existing as any).name ?? layerId)}`,
-      details: {
-        name: String((existing as any).name ?? layerId),
-        description: ((existing as any).description as string | null) ?? null,
-        removed_node_count: Number((peopleCountRow as any)?.count ?? 0),
-        removed_relationship_count: Number((relationshipCountRow as any)?.count ?? 0),
-        removed_avatar_count: avatarRows.results.length,
-      }
-    });
 
     queueRemoteJson(c, 'DELETE', `/api/layers/${layerId}`, undefined);
 

@@ -2,9 +2,11 @@ import type { AuditLogItem, NodeBackupPayload } from '../types';
 import { API_BASE, fetchWithAuth } from './base';
 
 export const adminApi = {
-  fetchAuditLogs: async (limit = 200): Promise<AuditLogItem[]> => {
+  /** `before` is the id of the oldest entry already held, for paging back. */
+  fetchAuditLogs: async (limit = 200, before?: number): Promise<AuditLogItem[]> => {
     const finalLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 200;
-    const res = await fetchWithAuth(`${API_BASE}/api/audit-logs?limit=${finalLimit}`);
+    const cursor = Number.isFinite(before) ? `&before=${Math.trunc(before as number)}` : '';
+    const res = await fetchWithAuth(`${API_BASE}/api/audit-logs?limit=${finalLimit}${cursor}`);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`HTTP ${res.status}: ${text}`);
