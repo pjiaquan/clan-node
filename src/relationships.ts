@@ -274,6 +274,29 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
       }
     }
 
+    // The create path checks that both endpoints exist, live in this layer and
+    // are not the same person. This one accepted whatever it was given, so an
+    // edge could be repointed at a non-existent id or at someone in another
+    // layer -- and the auto-link cascade and the kinship walk below then act
+    // on it.
+    const nextFromId = from_person_id ?? existingRel.from_person_id;
+    const nextToId = to_person_id ?? existingRel.to_person_id;
+    if (nextFromId === nextToId) {
+      return c.json({ error: 'Cannot link a person to themselves' }, 400);
+    }
+    const endpointsToCheck = [
+      ...(from_person_id !== undefined ? [from_person_id] : []),
+      ...(to_person_id !== undefined ? [to_person_id] : []),
+    ];
+    if (endpointsToCheck.length > 0) {
+      const found = await Promise.all(
+        endpointsToCheck.map((personId) => repository.personExists(layerId, personId))
+      );
+      if (found.some((exists) => !exists)) {
+        return c.json({ error: 'One or both people not found' }, 404);
+      }
+    }
+
     const updates: string[] = [];
     const values: unknown[] = [];
     const changedFields: string[] = [];
@@ -306,8 +329,8 @@ export function registerRelationshipRoutes(app: Hono<AppBindings>) {
     const updatePayload = Object.fromEntries(updates.map((entry, index) => [entry.split(' = ')[0], values[index]]));
     await repository.updateRelationshipById(id, updatePayload);
 
-    const nextFrom = from_person_id ?? existingRel.from_person_id;
-    const nextTo = to_person_id ?? existingRel.to_person_id;
+    const nextFrom = nextFromId;
+    const nextTo = nextToId;
     const nextType = type ?? existingRel.type;
     const now = new Date().toISOString();
 

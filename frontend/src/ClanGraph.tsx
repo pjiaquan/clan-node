@@ -1,3 +1,4 @@
+import { debugTokenSuffix } from './utils/debugToken';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
@@ -1179,7 +1180,7 @@ export function ClanGraph({
   const handleCreateUser = useCallback(async (email: string, role: 'admin' | 'readonly') => {
     try {
       const created = await api.createUser(email, role);
-      const debugSuffix = created.debug_invite_token ? ` (${created.debug_invite_token})` : '';
+      const debugSuffix = debugTokenSuffix(created.debug_invite_token);
       showToast(
         created.invitation_email_sent
           ? `${t('userMgmt.inviteSent', { email })}${debugSuffix}`

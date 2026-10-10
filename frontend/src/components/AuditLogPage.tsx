@@ -64,6 +64,8 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
   const [actionFilter, setActionFilter] = useState('all');
   const [resourceFilter, setResourceFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [reachedEnd, setReachedEnd] = useState(false);
 
   const loadLogs = useCallback(async (silent = false) => {
     try {
@@ -75,6 +77,7 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
       setError(null);
       const data = await api.fetchAuditLogs(limit);
       setLogs(data);
+      setReachedEnd(data.length < limit);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('audit.loadFailed'));
     } finally {
@@ -82,6 +85,24 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
       setRefreshing(false);
     }
   }, [limit, t]);
+
+  // Entries beyond the newest page used to be unreachable; walk back from the
+  // oldest id currently held.
+  const loadOlder = useCallback(async () => {
+    const oldest = logs[logs.length - 1];
+    if (!oldest) return;
+    try {
+      setLoadingOlder(true);
+      setError(null);
+      const older = await api.fetchAuditLogs(limit, oldest.id);
+      setLogs((previous) => [...previous, ...older]);
+      setReachedEnd(older.length < limit);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('audit.loadFailed'));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [limit, logs, t]);
 
   const prettyAction = useCallback((value: string) => {
     const mapped = t(`audit.action.${value}`);
@@ -255,6 +276,16 @@ export const AuditLogPage: React.FC<AuditLogPageProps> = ({
                   )}
                 </tbody>
               </table>
+              {logs.length > 0 && !reachedEnd && (
+                <button
+                  type="button"
+                  className="audit-load-older"
+                  onClick={loadOlder}
+                  disabled={loadingOlder}
+                >
+                  {loadingOlder ? t('audit.loadingOlder') : t('audit.loadOlder')}
+                </button>
+              )}
             </div>
           )}
         </section>

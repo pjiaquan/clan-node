@@ -12,6 +12,8 @@ export type UserSchemaSupport = {
   hasMfaTotpEnabledAt: boolean;
   hasMfaTotpPendingSecret: boolean;
   hasMfaTotpPendingExpiresAt: boolean;
+  hasMfaTotpLastCounter: boolean;
+  hasPendingEmail: boolean;
 };
 
 let peopleSchemaSupportPromise: Promise<PeopleSchemaSupport> | null = null;
@@ -74,6 +76,8 @@ export const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSu
       await addColumnIfMissing(db, names, 'users', 'mfa_totp_enabled_at', 'mfa_totp_enabled_at TEXT');
       await addColumnIfMissing(db, names, 'users', 'mfa_totp_pending_secret', 'mfa_totp_pending_secret TEXT');
       await addColumnIfMissing(db, names, 'users', 'mfa_totp_pending_expires_at', 'mfa_totp_pending_expires_at TEXT');
+      await addColumnIfMissing(db, names, 'users', 'mfa_totp_last_counter', 'mfa_totp_last_counter INTEGER');
+      await addColumnIfMissing(db, names, 'users', 'pending_email', 'pending_email TEXT');
       if (names.has('email')) {
         await db.prepare("UPDATE users SET email = LOWER(TRIM(username)) WHERE email IS NULL OR TRIM(email) = ''").run();
         await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email)').run();
@@ -88,6 +92,8 @@ export const getUserSchemaSupport = async (db: D1Database): Promise<UserSchemaSu
         hasMfaTotpEnabledAt: names.has('mfa_totp_enabled_at'),
         hasMfaTotpPendingSecret: names.has('mfa_totp_pending_secret'),
         hasMfaTotpPendingExpiresAt: names.has('mfa_totp_pending_expires_at'),
+        hasMfaTotpLastCounter: names.has('mfa_totp_last_counter'),
+        hasPendingEmail: names.has('pending_email'),
       };
     })().catch((error) => {
       userSchemaSupportPromise = null;

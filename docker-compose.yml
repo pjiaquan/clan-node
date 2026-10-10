@@ -14,8 +14,17 @@ services:
       CLAN_DATA_DIR: /var/lib/clan-node
     volumes:
       - clan_node_state:/var/lib/clan-node
+    # Loopback by default. Publishing to 0.0.0.0 bypasses host firewall rules,
+    # because Docker inserts its own DNAT rules ahead of them. Put a reverse
+    # proxy in front, or set CLAN_BIND_ADDRESS=0.0.0.0 deliberately.
     ports:
-      - "${CLAN_HTTP_PORT:-8080}:8080"
+      - "${CLAN_BIND_ADDRESS:-127.0.0.1}:${CLAN_HTTP_PORT:-8080}:8080"
+    # The server listens on 8080 as an unprivileged user, so it needs no
+    # capabilities at all.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"]
       interval: 30s

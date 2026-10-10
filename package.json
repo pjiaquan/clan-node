@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler --config wrangler.worker.toml dev --ip 0.0.0.0",
     "dev:selfhost": "PORT=8787 tsx src/selfhost/server.ts",
-    "deploy": "wrangler --config wrangler.worker.toml deploy",
+    "deploy": "wrangler --config wrangler.worker.toml deploy --env production",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
@@ -43,16 +43,16 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "@hono/node-server": "^1.19.11",
+    "@hono/node-server": "^1.19.17",
     "better-sqlite3": "^12.8.0",
-    "hono": "^4.12.32",
+    "hono": "^4.13.13",
     "tsx": "^4.20.6"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241227.0",
+    "@cloudflare/workers-types": "^5.20261010.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
     "typescript": "^5.7.3",
-    "wrangler": "^4.103.0"
+    "wrangler": "^4.149.0"
   }
 }
