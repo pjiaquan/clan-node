@@ -706,6 +706,18 @@ const sendInvitationEmail = async (env: Env, to: string, inviteUrl: string) => s
   htmlContent: `<p>You have been invited to Clan Node.</p><p><a href="${inviteUrl}">Accept your invitation and set your password</a></p>`
 });
 
+/** Warns the address being moved away from, so an unrequested change is seen. */
+const sendEmailChangeNoticeEmail = async (env: Env, to: string, requestedEmail: string) => sendTransactionalEmail(env, {
+  to,
+  subject: 'Your Clan Node email address was asked to change',
+  textContent: `Someone asked to change the email address on your Clan Node account to ${requestedEmail}.`
+    + ' The change only takes effect once that address is confirmed.'
+    + ' If this was not you, sign in and change your password now.',
+  htmlContent: `<p>Someone asked to change the email address on your Clan Node account to <strong>${requestedEmail}</strong>.</p>`
+    + '<p>The change only takes effect once that address is confirmed.</p>'
+    + '<p>If this was not you, sign in and change your password now.</p>'
+});
+
 const sendMfaCodeEmail = async (env: Env, to: string, code: string) => sendTransactionalEmail(env, {
   to,
   subject: 'Your sign-in code',
@@ -2885,8 +2897,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     const tokenHash = await sha256Base64(token);
     const now = new Date().toISOString();
+    const pendingField = userSchema.hasPendingEmail ? ', pending_email' : '';
     const user = await c.env.DB.prepare(
-      `SELECT id, email
+      `SELECT id, email${pendingField}
        FROM users
        WHERE email_verify_token_hash = ?
          AND email_verify_expires_at IS NOT NULL
@@ -2896,23 +2909,64 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired token' }, 400);
     }
 
-    await c.env.DB.prepare(
-      `UPDATE users
-       SET email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
-       WHERE id = ?`
-    ).bind(now, now, (user as any).id as string).run();
+    // A parked address change is applied here, once -- and only once -- its
+    // owner has proved control of it by following this link.
+    const pendingEmail = userSchema.hasPendingEmail
+      ? ((user as any).pending_email as string | null) ?? null
+      : null;
+    const previousEmail = (user as any).email as string;
 
+    if (pendingEmail) {
+      // Re-check for a collision: another account may have taken the address
+      // between the request and the confirmation.
+      const duplicateField = userSchema.hasEmail ? 'email' : 'username';
+      const duplicate = await c.env.DB.prepare(
+        `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
+      ).bind(pendingEmail, (user as any).id as string).first();
+      if (duplicate) {
+        await c.env.DB.prepare(
+          `UPDATE users
+           SET pending_email = NULL, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+           WHERE id = ?`
+        ).bind(now, (user as any).id as string).run();
+        return c.json({ error: 'User already exists' }, 409);
+      }
+      await c.env.DB.prepare(
+        `UPDATE users
+         SET username = ?, ${userSchema.hasEmail ? 'email = ?, ' : ''}pending_email = NULL,
+             email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).bind(
+        pendingEmail,
+        ...(userSchema.hasEmail ? [pendingEmail] : []),
+        now,
+        now,
+        (user as any).id as string
+      ).run();
+      // The sign-in identity just moved, so existing sessions should not ride
+      // along on the old one.
+      await revokeUserSessions(c.env.DB, (user as any).id as string);
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE users
+         SET email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).bind(now, now, (user as any).id as string).run();
+    }
+
+    const verifiedEmail = pendingEmail ?? previousEmail;
     await recordAuditLog(c, {
       action: 'verify_email',
       resourceType: 'users',
       resourceId: (user as any).id as string,
-      summary: `驗證 Email ${(user as any).email as string}`,
+      summary: `驗證 Email ${verifiedEmail}`,
       details: {
-        email: (user as any).email as string
+        email: verifiedEmail,
+        ...(pendingEmail ? { previous_email: previousEmail, email_changed: true } : {})
       }
     });
 
-    return c.json({ ok: true, email: (user as any).email as string });
+    return c.json({ ok: true, email: verifiedEmail, email_changed: Boolean(pendingEmail) });
   });
 
   app.post('/api/auth/accept-invite', async (c) => {
@@ -3406,6 +3460,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const body = await c.req.json();
     const hasEmailUpdate = typeof (body as any)?.email === 'string';
     const nextEmail = hasEmailUpdate ? normalizeEmail((body as any).email) : '';
+    const currentPassword = typeof (body as any)?.current_password === 'string'
+      ? (body as any).current_password
+      : '';
     const hasAvatarUpdate = Object.prototype.hasOwnProperty.call(body as object, 'avatar_url');
     const avatarUrlRaw = hasAvatarUpdate ? (body as any).avatar_url : undefined;
     const nextAvatarUrl = typeof avatarUrlRaw === 'string' ? avatarUrlRaw.trim() : null;
@@ -3430,36 +3487,67 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     let delivered = false;
     const changedFields: string[] = [];
 
+    let pendingEmail: string | null = null;
     if (hasEmailUpdate) {
       const currentEmail = ((existing as any).email as string | null) ?? ((existing as any).username as string);
       if (currentEmail !== nextEmail) {
+        // Changing the address used to need nothing but the session, and it
+        // swapped the sign-in identity immediately. A hijacked session could
+        // therefore point the account at an attacker's address, collect the
+        // verification mail, then use password reset to keep it for good.
+        if (!currentPassword) {
+          return c.json({ error: 'current_password is required to change the email address' }, 400);
+        }
+        const reauth = await verifyPassword(
+          currentPassword,
+          (existing as any).password_salt as string,
+          (existing as any).password_hash
+        );
+        if (!reauth.ok) {
+          await recordAuditLog(c, {
+            action: 'account_email_change_denied',
+            resourceType: 'account',
+            resourceId: sessionUser.userId,
+            summary: `變更 Email 失敗：密碼錯誤 ${currentEmail}`,
+            details: {
+              ip_address: getRequestIpAddress(c),
+              user_agent: getRequestUserAgent(c)
+            }
+          });
+          return c.json({ error: 'Current password is incorrect' }, 400);
+        }
+        // The allowlist is applied without the admin exemption: that exemption
+        // exists so an admin is not locked out of an address they already
+        // hold, not so they can move to one outside the list.
+        if (!isEmailAuthorized(nextEmail, c.env)) {
+          return c.json({ error: 'That email address is not authorized for this database' }, 403);
+        }
+        if (!userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt || !userSchema.hasPendingEmail) {
+          return c.json({ error: 'Email changes are not available' }, 503);
+        }
+
         const duplicateField = userSchema.hasEmail ? 'email' : 'username';
         const duplicate = await c.env.DB.prepare(
-          `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
-        ).bind(nextEmail, sessionUser.userId).first();
+          `SELECT id FROM users WHERE (${duplicateField} = ? OR pending_email = ?) AND id != ?`
+        ).bind(nextEmail, nextEmail, sessionUser.userId).first();
         if (duplicate) {
           return c.json({ error: 'User already exists' }, 409);
         }
-        updates.push('username = ?');
-        values.push(nextEmail);
-        if (userSchema.hasEmail) {
-          updates.push('email = ?');
-          values.push(nextEmail);
-        }
-        if (userSchema.hasEmailVerifiedAt) {
-          updates.push('email_verified_at = ?');
-          values.push(null);
-        }
-        if (userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt) {
-          const token = await createVerificationToken();
-          updates.push('email_verify_token_hash = ?', 'email_verify_expires_at = ?');
-          values.push(token.tokenHash, token.expiresAt);
-          const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
-          delivered = invitePending
-            ? await sendInvitationEmail(c.env, nextEmail, buildInvitationUrl(c.env, token.token))
-            : await sendVerificationEmail(c.env, nextEmail, buildVerificationUrl(c.env, token.token));
-        }
-        changedFields.push('email');
+
+        // Park the address until its owner proves control of it. username,
+        // email and email_verified_at deliberately stay as they are, so the
+        // account keeps working at its current address in the meantime.
+        const token = await createVerificationToken();
+        updates.push('pending_email = ?', 'email_verify_token_hash = ?', 'email_verify_expires_at = ?');
+        values.push(nextEmail, token.tokenHash, token.expiresAt);
+        pendingEmail = nextEmail;
+
+        const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
+        delivered = invitePending
+          ? await sendInvitationEmail(c.env, nextEmail, buildInvitationUrl(c.env, token.token))
+          : await sendVerificationEmail(c.env, nextEmail, buildVerificationUrl(c.env, token.token));
+        await sendEmailChangeNoticeEmail(c.env, currentEmail, nextEmail);
+        changedFields.push('pending_email');
       }
     }
 
@@ -3495,7 +3583,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    return c.json(accountData.account);
+    return c.json({ ...accountData.account, pending_email: pendingEmail });
   });
 
   app.post('/api/auth/account/avatar', async (c) => {
