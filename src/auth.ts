@@ -2106,7 +2106,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }, 503);
     }
     const requestToken = (c.req.header('x-setup-token') || '').trim();
-    if (configuredToken && requestToken !== configuredToken) {
+    // Compared in constant time: `!==` on a shared secret leaks it a character
+    // at a time to anyone who can measure the response.
+    if (configuredToken && !timingSafeEqual(requestToken, configuredToken)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
