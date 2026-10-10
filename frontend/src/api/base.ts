@@ -10,10 +10,17 @@ export const normalizeApiBase = (value: string) => {
   return next;
 };
 
+// Production Worker, matching functions/api/[[path]].ts and the operational
+// scripts. This fallback used to name the default-environment Worker
+// (clan-node.pjiaquan.workers.dev), which runs with ENVIRONMENT=development
+// against the production database, so any build that forgot to set
+// VITE_API_BASE talked to it.
+const DEFAULT_API_BASE = 'https://clan-node-production.pjiaquan.workers.dev';
+
 const hasExplicitApiBase = Object.prototype.hasOwnProperty.call(import.meta.env, 'VITE_API_BASE');
 const configuredApiBase = hasExplicitApiBase
   ? String(import.meta.env.VITE_API_BASE ?? '')
-  : (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : 'https://clan-node.pjiaquan.workers.dev');
+  : (isLocalhost ? `${window.location.protocol}//${window.location.hostname}:8787` : DEFAULT_API_BASE);
 
 export const API_BASE = normalizeApiBase(configuredApiBase);
 
