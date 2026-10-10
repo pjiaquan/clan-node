@@ -13,8 +13,29 @@ import { registerBackupRoutes } from './backup';
 import { registerLayerRoutes } from './layers';
 import { verifyDualWriteRequest } from './dual_write';
 import { KNOWN_ENVIRONMENTS, isKnownEnvironment, isProductionEnv } from './environment';
+import { ValidationError } from './validation';
 
 export const app = new Hono<AppBindings>();
+
+/**
+ * Last-resort error handler.
+ *
+ * There was none, so anything that threw -- a D1 bind error from a value of
+ * the wrong type, a CHECK constraint violation, a malformed JSON body --
+ * surfaced as a 500 carrying the underlying message to the client.
+ * `ValidationError` is a client mistake and answers 400; everything else is
+ * logged and answered generically.
+ */
+app.onError((error, c) => {
+  if (error instanceof ValidationError) {
+    return c.json({ error: error.message }, 400);
+  }
+  if (error instanceof SyntaxError) {
+    return c.json({ error: 'Body must be valid JSON' }, 400);
+  }
+  console.error('Unhandled error:', c.req.method, c.req.path, error);
+  return c.json({ error: 'Internal server error' }, 500);
+});
 
 app.use('*', async (c, next) => {
   await next();

@@ -16,6 +16,18 @@ import { assertLayerExists, ensureLayerSchemaSupport, resolveLayerId } from './l
 import { getPeopleSchemaSupport } from './schema';
 import { isServerMintedAvatarUrl, safeStorageKey } from './storage_keys';
 import {
+  boundedArray,
+  boundedJson,
+  FIELD_LIMITS,
+  optionalEnum,
+  optionalIdentifier,
+  optionalText,
+  requireObjectBody,
+  requiredText,
+} from './validation';
+
+const GENDERS = ['M', 'F', 'O'] as const;
+import {
   appendAvatar,
   deriveStorageKeyFromUrl,
   ensureAvatarFromLegacy,
@@ -158,13 +170,25 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
-    const body = await c.req.json();
+    const body = requireObjectBody(await c.req.json());
     const layerId = resolveLayerId(c, body);
-    const { id: providedId, name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+    // Validated rather than destructured straight into the insert: a value of
+    // the wrong type used to reach the D1 bind call, and a gender outside the
+    // CHECK constraint used to reach SQLite.
+    const providedId = optionalIdentifier(body.id, 'id');
+    const name = requiredText(body.name, 'name');
+    const english_name = optionalText(body.english_name, 'english_name');
+    const email = optionalText(body.email, 'email');
+    const gender = optionalEnum(body.gender, 'gender', GENDERS);
+    const blood_type = optionalText(body.blood_type, 'blood_type', 8);
+    const dob = optionalText(body.dob, 'dob', FIELD_LIMITS.dateText);
+    const dod = optionalText(body.dod, 'dod', FIELD_LIMITS.dateText);
+    const tob = optionalText(body.tob, 'tob', FIELD_LIMITS.dateText);
+    const tod = optionalText(body.tod, 'tod', FIELD_LIMITS.dateText);
+    const avatar_url = optionalText(body.avatar_url, 'avatar_url', 512);
+    const metadata = body.metadata ?? null;
+    const metadataJson = boundedJson(metadata, 'metadata');
 
-    if (!name) {
-      return c.json({ error: 'Name is required' }, 400);
-    }
     if (avatar_url && !isServerMintedAvatarUrl(avatar_url)) {
       return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
     }
@@ -182,7 +206,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       dod: dod || null,
       tob: tob || null,
       tod: tod || null,
-      metadata: metadata ? JSON.stringify(metadata) : null
+      metadata: metadataJson
     });
 
     const insertColumns = ['id', 'layer_id', 'name', 'english_name'];
@@ -207,6 +231,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     await repository.insertPerson(Object.fromEntries(insertColumns.map((column, index) => [column, insertValues[index]])));
 
     const customFields = extractCustomFields(body, metadata);
+    // One INSERT per entry, so this needs an upper bound.
+    if (customFields) boundedArray(customFields, 'custom_fields');
     if (customFields) {
       await Promise.all(
         customFields
@@ -221,7 +247,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
       );
     }
 
-    const inputAvatars = Array.isArray(body?.avatars) ? body.avatars : [];
+    const inputAvatars = boundedArray(body?.avatars, 'avatars');
     if (inputAvatars.length > 0) {
       const candidates = inputAvatars
         .map((entry: any, index: number) => ({
@@ -343,7 +369,7 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
   // Update a person
   app.put('/api/people/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json();
+    const body = requireObjectBody(await c.req.json());
     const layerId = resolveLayerId(c, body);
     await ensureLayerSchemaSupport(c.env.DB);
     if (!await assertLayerExists(c.env.DB, layerId)) {
@@ -351,7 +377,25 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     }
     const peopleSchema = await getPeopleSchemaSupport(c.env.DB);
     const repository = createPeopleRepository(c.env.DB);
-    const { name, english_name, email, gender, blood_type, dob, dod, tob, tod, avatar_url, metadata } = body;
+
+    // Each field keeps its absent-vs-present distinction, since this route
+    // updates only the keys it was sent, but a value that is present is
+    // validated instead of going straight into the bind call.
+    const present = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+    const name = present('name') ? requiredText(body.name, 'name') : undefined;
+    const english_name = present('english_name') ? optionalText(body.english_name, 'english_name') : undefined;
+    const email = present('email') ? optionalText(body.email, 'email') : undefined;
+    // The column is NOT NULL with a CHECK; clearing it falls back to 'O', the
+    // same default the create path uses.
+    const gender = present('gender') ? (optionalEnum(body.gender, 'gender', GENDERS) ?? 'O') : undefined;
+    const blood_type = present('blood_type') ? optionalText(body.blood_type, 'blood_type', 8) : undefined;
+    const dob = present('dob') ? optionalText(body.dob, 'dob', FIELD_LIMITS.dateText) : undefined;
+    const dod = present('dod') ? optionalText(body.dod, 'dod', FIELD_LIMITS.dateText) : undefined;
+    const tob = present('tob') ? optionalText(body.tob, 'tob', FIELD_LIMITS.dateText) : undefined;
+    const tod = present('tod') ? optionalText(body.tod, 'tod', FIELD_LIMITS.dateText) : undefined;
+    const avatar_url = present('avatar_url') ? optionalText(body.avatar_url, 'avatar_url', 512) : undefined;
+    const metadata = present('metadata') ? (body.metadata ?? null) : undefined;
+    if (metadata !== undefined) boundedJson(metadata, 'metadata');
 
     // An empty string clears the avatar; anything else has to be a path this
     // server minted.
@@ -401,6 +445,8 @@ export function registerPeopleRoutes(app: Hono<AppBindings>) {
     });
 
     const customFields = extractCustomFields(body, metadata);
+    // One INSERT per entry, so this needs an upper bound.
+    if (customFields) boundedArray(customFields, 'custom_fields');
 
     if (Object.keys(updatePayload).length > 0) {
       await repository.updatePersonById(id, updatePayload);
