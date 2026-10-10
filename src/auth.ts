@@ -1562,6 +1562,66 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     return new Uint8Array(digest);
   };
 
+  let passkeyChallengeTableReady = false;
+
+  /**
+   * Issued passkey challenges.
+   *
+   * The challenge also travels in an HMAC-signed cookie, which binds it to the
+   * browser but cannot make it single-use: expiring it relied on the client
+   * honouring the Set-Cookie that clears it, so a captured assertion could be
+   * replayed for the rest of the 5-minute TTL. This table is the authoritative
+   * record, and consuming a challenge deletes it.
+   */
+  const ensurePasskeyChallengeTable = async (db: D1Database) => {
+    if (passkeyChallengeTableReady) return;
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS auth_passkey_challenges (
+        challenge_hash TEXT PRIMARY KEY,
+        flow TEXT NOT NULL,
+        user_id TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`
+    ).run();
+    await db.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_passkey_challenges_expires_at ON auth_passkey_challenges(expires_at)'
+    ).run();
+    passkeyChallengeTableReady = true;
+  };
+
+  const recordPasskeyChallenge = async (
+    db: D1Database,
+    input: { challenge: string; flow: PasskeyChallengeState['flow']; userId?: string | null; expiresAt: string }
+  ) => {
+    await ensurePasskeyChallengeTable(db);
+    const nowIso = new Date().toISOString();
+    await db.prepare('DELETE FROM auth_passkey_challenges WHERE expires_at <= ?').bind(nowIso).run();
+    await db.prepare(
+      `INSERT INTO auth_passkey_challenges (challenge_hash, flow, user_id, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(challenge_hash) DO UPDATE SET
+         flow = excluded.flow, user_id = excluded.user_id, expires_at = excluded.expires_at`
+    ).bind(await sha256Base64(input.challenge), input.flow, input.userId ?? null, input.expiresAt, nowIso).run();
+  };
+
+  /**
+   * Claims a challenge. Returns null when it was never issued, has expired, or
+   * has already been used -- the delete is the single-use guarantee.
+   */
+  const consumePasskeyChallenge = async (
+    db: D1Database,
+    challenge: string,
+    flow: PasskeyChallengeState['flow']
+  ) => {
+    await ensurePasskeyChallengeTable(db);
+    return db.prepare(
+      `DELETE FROM auth_passkey_challenges
+       WHERE challenge_hash = ? AND flow = ? AND expires_at > ?
+       RETURNING user_id`
+    ).bind(await sha256Base64(challenge), flow, new Date().toISOString()).first();
+  };
+
   const getPasskeyChallengeSecret = (env: Env): string | null => {
     const candidates = [
       env.AUTH_ENCRYPTION_KEY,
@@ -1592,6 +1652,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       userId: input.userId ?? null,
       expiresAt: new Date(Date.now() + PASSKEY_CHALLENGE_TTL_MS).toISOString()
     };
+    await recordPasskeyChallenge(c.env.DB, {
+      challenge: state.challenge,
+      flow: state.flow,
+      userId: state.userId,
+      expiresAt: state.expiresAt
+    });
     const payload = toBase64Url(textEncoder.encode(JSON.stringify(state)));
     const signature = toBase64Url(await hmacSha256(textEncoder.encode(secret), textEncoder.encode(payload)));
     const isSecure = isSecureRequest(c.env);
@@ -4169,6 +4235,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid challenge' }, 400);
     }
+    // Claim the challenge so a captured ceremony cannot be replayed, even with
+    // the cookie, and so one challenge cannot be retried.
+    const claimedChallenge = await consumePasskeyChallenge(c.env.DB, clientData.challenge, 'register');
+    if (!claimedChallenge || String((claimedChallenge as any).user_id ?? '') !== sessionUser.userId) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey registration challenge is missing or expired' }, 400);
+    }
 
     let credentialPublicKey: Uint8Array;
     let credentialAlgorithm = alg;
@@ -4190,6 +4263,15 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       if (!bytesEqual(rpIdHash, attestation.authData.rpIdHash)) {
         clearPasskeyChallengeCookie(c);
         return c.json({ error: 'Invalid RP ID' }, 400);
+      }
+
+      // The body's `id` is what gets stored and later looked up at sign-in, so
+      // it has to be the credential the authenticator actually attested to --
+      // it was previously trusted without being compared.
+      if (attestation.authData.credentialId.length > 0
+        && !timingSafeEqual(toBase64Url(attestation.authData.credentialId), credentialId)) {
+        clearPasskeyChallengeCookie(c);
+        return c.json({ error: 'Credential id does not match the attested credential' }, 400);
       }
 
       credentialPublicKey = attestation.authData.credentialPublicKey;
@@ -4329,6 +4411,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid challenge' }, 400);
     }
+    // Claim the challenge so a captured assertion cannot be replayed within
+    // its TTL, and so one challenge cannot be retried.
+    if (!await consumePasskeyChallenge(c.env.DB, clientData.challenge, 'login')) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey login challenge is missing or expired' }, 400);
+    }
     if (!bytesEqual(expectedRpIdHash, parseAuthDataRpIdHash(authenticatorData))) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid RP ID' }, 400);
@@ -4422,12 +4510,37 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid passkey signature' }, 401);
     }
 
-    // Verify counter (prevent cloned authenticators)
+    // A signature counter that has not advanced is the spec's signal of a
+    // cloned authenticator. This used to log a warning and continue, which
+    // meant clone detection was effectively off.
+    //
+    // Authenticators that do not implement a counter report 0 forever; for
+    // those `storedCounter` stays 0 and the check is skipped, as the spec
+    // requires.
     const storedCounter = Number((passkey as any).counter) || 0;
     const authDataCounter = parseAuthDataCounter(authenticatorData);
     if (storedCounter > 0 && authDataCounter <= storedCounter) {
-      // Counter didn't increase - possible clone. Allow but warn.
-      console.warn('Passkey counter did not increase:', { credentialId, storedCounter, authDataCounter });
+      clearPasskeyChallengeCookie(c);
+      await recordAuditLog(c, {
+        action: 'passkey_counter_regression',
+        resourceType: 'auth',
+        resourceId: (passkey as any).user_id as string,
+        summary: `Passkey 簽章計數未遞增，拒絕登入 ${credentialId}`,
+        details: {
+          passkey_id: (passkey as any).id as string,
+          stored_counter: storedCounter,
+          presented_counter: authDataCounter,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
+      await recordLoginAttempt(c, {
+        email: 'passkey-user',
+        success: false,
+        reason: 'passkey_counter_regression',
+        userId: (passkey as any).user_id as string
+      });
+      return c.json({ error: 'Invalid passkey' }, 401);
     }
 
     const nowIso = new Date().toISOString();
@@ -4446,6 +4559,37 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+
+    // A passkey is a single factor, and for an admin it is the whole sign-in --
+    // it bypasses the mandatory-TOTP policy that the password path enforces.
+    // Only user presence was checked, so a roaming key with no PIN or
+    // biometric was enough for an admin session. The role is not known at
+    // /login/begin (the credential is discoverable), so this is enforced here.
+    const PASSKEY_FLAG_USER_VERIFIED = 0x04;
+    if (userRole === 'admin' && !(authDataFlags & PASSKEY_FLAG_USER_VERIFIED)) {
+      await recordAuditLog(c, {
+        action: 'passkey_user_verification_required',
+        resourceType: 'auth',
+        resourceId: (user as any).id as string,
+        summary: `Passkey 未經使用者驗證，拒絕管理員登入 ${(user as any).username as string}`,
+        details: {
+          passkey_id: (passkey as any).id as string,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
+      await recordLoginAttempt(c, {
+        email: (user as any).username as string,
+        success: false,
+        reason: 'passkey_user_verification_required',
+        userId: (user as any).id as string,
+        role: userRole
+      });
+      return c.json({
+        error: 'Administrator sign-in requires a passkey that verifies you (biometric or PIN).'
+      }, 401);
+    }
+
     const userEmail = normalizeEmail((user as any).email ?? (user as any).username);
     if (!isEmailAuthorized(userEmail, c.env, userRole)) {
       await recordLoginAttempt(c, {
