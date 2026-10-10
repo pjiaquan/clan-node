@@ -72,8 +72,20 @@ CLAN_BIND_ADDRESS=0.0.0.0 docker compose up -d
 
 ### Upgrading an existing container
 
-The server no longer runs as root, so a data volume created by an earlier
-version is owned by the wrong user. Fix it once, before starting:
+Only needed if you already ran an earlier version of the stack on this
+machine. Check:
+
+```bash
+docker volume ls | grep clan_node_state
+```
+
+If that prints nothing there is no volume yet, and a fresh one will be created
+with the right ownership -- skip this section.
+
+If it does exist, the volume was created while the server still ran as root
+and is owned by the wrong user. Fix it once, before starting, from the
+directory that holds your `selfhost.env` (compose requires that file, so this
+fails with `env file ... not found` anywhere else):
 
 ```bash
 docker compose run --rm --user root clan-node chown -R node:node /var/lib/clan-node
