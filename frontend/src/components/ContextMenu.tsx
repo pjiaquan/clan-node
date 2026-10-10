@@ -226,6 +226,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       )}
       <button
         onClick={() => setCopyOpen((prev) => !prev)}
+        aria-haspopup="menu"
+        aria-expanded={copyOpen}
         style={menuItemStyle}
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -277,6 +279,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       </button>
       <button
         onClick={() => setCollapseOpen((prev) => !prev)}
+        aria-haspopup="menu"
+        aria-expanded={collapseOpen}
         style={menuItemStyle}
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -333,6 +337,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       )}
       <button 
         onClick={() => setDimOpen((prev) => !prev)}
+        aria-haspopup="menu"
+        aria-expanded={dimOpen}
         style={menuItemStyle}
         onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
         onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -380,6 +386,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         <>
           <button
             onClick={() => setDeleteOpen((prev) => !prev)}
+        aria-haspopup="menu"
+        aria-expanded={deleteOpen}
             style={{ ...menuItemStyle, color: '#b91c1c' }}
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
