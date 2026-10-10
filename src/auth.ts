@@ -127,7 +127,13 @@ const fromBase32 = (value: string) => {
   return new Uint8Array(bytes);
 };
 
-async function hashPassword(password: string, salt: string) {
+/** OWASP's current floor for PBKDF2-HMAC-SHA256. */
+const PASSWORD_HASH_ITERATIONS = 600000;
+/** What hashes written before the cost was recorded alongside them used. */
+const LEGACY_PASSWORD_HASH_ITERATIONS = 100000;
+const PASSWORD_HASH_PREFIX = 'pbkdf2-sha256';
+
+async function derivePasswordBits(password: string, salt: string, iterations: number) {
   const key = await crypto.subtle.importKey(
     'raw',
     textEncoder.encode(password),
@@ -136,12 +142,54 @@ async function hashPassword(password: string, salt: string) {
     ['deriveBits']
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', iterations: 100000, salt: textEncoder.encode(salt) },
+    { name: 'PBKDF2', hash: 'SHA-256', iterations, salt: textEncoder.encode(salt) },
     key,
     256
   );
   return toBase64(bits);
 }
+
+/**
+ * Produces a stored password hash of the form
+ * `pbkdf2-sha256$<iterations>$<base64>`.
+ *
+ * The iteration count used to be a bare constant with nothing recorded in the
+ * database, so raising it would have locked out every existing account. The
+ * cost now travels with the hash: a stored value without the prefix is a
+ * legacy 100k hash, verified at that cost and upgraded on the owner's next
+ * successful sign-in.
+ */
+export async function hashPassword(password: string, salt: string, iterations = PASSWORD_HASH_ITERATIONS) {
+  return `${PASSWORD_HASH_PREFIX}$${iterations}$${await derivePasswordBits(password, salt, iterations)}`;
+}
+
+const parseStoredPasswordHash = (stored: unknown) => {
+  if (typeof stored !== 'string' || stored.length === 0) return null;
+  if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
+    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored };
+  }
+  const parts = stored.split('$');
+  const iterations = Number(parts[1]);
+  const digest = parts[2];
+  if (parts.length !== 3 || !digest || !Number.isInteger(iterations) || iterations <= 0) return null;
+  return { iterations, digest };
+};
+
+/**
+ * Verifies a password against a stored hash, reporting whether that hash is
+ * below the current cost and should be rewritten.
+ */
+export const verifyPassword = async (password: string, salt: string, storedHash: unknown) => {
+  const parsed = parseStoredPasswordHash(storedHash);
+  if (!parsed) {
+    // Still spend the time, so an unparseable hash is not a timing oracle.
+    await derivePasswordBits(password, salt, PASSWORD_HASH_ITERATIONS);
+    return { ok: false as const, needsRehash: false as const };
+  }
+  const digest = await derivePasswordBits(password, salt, parsed.iterations);
+  const ok = timingSafeEqual(digest, parsed.digest);
+  return { ok, needsRehash: ok && parsed.iterations < PASSWORD_HASH_ITERATIONS };
+};
 
 async function sha256Base64(input: string) {
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
@@ -2274,9 +2322,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const salt = (user as any).password_salt as string;
-    const expectedHash = (user as any).password_hash as string;
-    const actualHash = await hashPassword(password, salt);
-    if (!timingSafeEqual(actualHash, expectedHash)) {
+    const passwordCheck = await verifyPassword(password, salt, (user as any).password_hash);
+    if (!passwordCheck.ok) {
       await recordLoginAttempt(c, {
         email,
         success: false,
@@ -2285,6 +2332,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         role: normalizeRole((user as any).role)
       });
       return c.json({ error: 'Invalid email or password' }, 401);
+    }
+
+    // Upgrade a hash written at the old cost now that the password is known
+    // to be correct. The salt is kept so the row stays a straight replacement.
+    if (passwordCheck.needsRehash) {
+      await c.env.DB.prepare(
+        'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
+      ).bind(
+        await hashPassword(password, salt),
+        new Date().toISOString(),
+        (user as any).id as string
+      ).run();
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -3420,8 +3479,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'User not found' }, 404);
     }
-    const actualHash = await hashPassword(currentPassword, (user as any).password_salt as string);
-    if (!timingSafeEqual(actualHash, (user as any).password_hash as string)) {
+    const currentPasswordCheck = await verifyPassword(
+      currentPassword,
+      (user as any).password_salt as string,
+      (user as any).password_hash
+    );
+    if (!currentPasswordCheck.ok) {
       return c.json({ error: 'Current password is incorrect' }, 400);
     }
 
