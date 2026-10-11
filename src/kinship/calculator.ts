@@ -107,12 +107,18 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
 
   private buildParentMap(relationships: Relationship[]) {
     const parentMap = new Map<string, string[]>();
-    relationships.forEach((relationship) => {
+    // Bolt Optimization: Replace forEach with index-based loop and consolidate map lookups
+    for (let i = 0; i < relationships.length; i++) {
+      const relationship = relationships[i];
       if (relationship.type === 'parent_child') {
-        if (!parentMap.has(relationship.to_person_id)) parentMap.set(relationship.to_person_id, []);
-        parentMap.get(relationship.to_person_id)?.push(relationship.from_person_id);
+        let parents = parentMap.get(relationship.to_person_id);
+        if (parents === undefined) {
+          parents = [];
+          parentMap.set(relationship.to_person_id, parents);
+        }
+        parents.push(relationship.from_person_id);
       }
-    });
+    }
     return parentMap;
   }
 
@@ -146,30 +152,40 @@ export class BreadthFirstKinshipCalculator implements KinshipCalculator {
   private buildAdjacency(relationships: Relationship[]) {
     const adjacency = new Map<string, AdjacencyEdge[]>();
 
-    for (const relationship of relationships) {
-      if (!relationship.from_person_id || !relationship.to_person_id) continue;
-      if (!adjacency.has(relationship.from_person_id)) adjacency.set(relationship.from_person_id, []);
-      if (!adjacency.has(relationship.to_person_id)) adjacency.set(relationship.to_person_id, []);
+    // Bolt Optimization: Replace for...of with index-based loop and consolidate map lookups
+    for (let i = 0; i < relationships.length; i++) {
+      const relationship = relationships[i];
+      const fromId = relationship.from_person_id;
+      const toId = relationship.to_person_id;
+      if (!fromId || !toId) continue;
 
-      const fromNode = adjacency.get(relationship.from_person_id);
-      const toNode = adjacency.get(relationship.to_person_id);
-      if (!fromNode || !toNode) continue;
+      let fromNode = adjacency.get(fromId);
+      if (fromNode === undefined) {
+        fromNode = [];
+        adjacency.set(fromId, fromNode);
+      }
+
+      let toNode = adjacency.get(toId);
+      if (toNode === undefined) {
+        toNode = [];
+        adjacency.set(toId, toNode);
+      }
 
       if (relationship.type === 'parent_child') {
-        fromNode.push({ id: relationship.to_person_id, direction: 'down' });
-        toNode.push({ id: relationship.from_person_id, direction: 'up' });
+        fromNode.push({ id: toId, direction: 'down' });
+        toNode.push({ id: fromId, direction: 'up' });
       } else if (relationship.type === 'spouse') {
-        fromNode.push({ id: relationship.to_person_id, direction: 'spouse' });
-        toNode.push({ id: relationship.from_person_id, direction: 'spouse' });
+        fromNode.push({ id: toId, direction: 'spouse' });
+        toNode.push({ id: fromId, direction: 'spouse' });
       } else if (relationship.type === 'ex_spouse') {
-        fromNode.push({ id: relationship.to_person_id, direction: 'ex_spouse' });
-        toNode.push({ id: relationship.from_person_id, direction: 'ex_spouse' });
+        fromNode.push({ id: toId, direction: 'ex_spouse' });
+        toNode.push({ id: fromId, direction: 'ex_spouse' });
       } else if (relationship.type === 'sibling') {
-        fromNode.push({ id: relationship.to_person_id, direction: 'sibling' });
-        toNode.push({ id: relationship.from_person_id, direction: 'sibling' });
+        fromNode.push({ id: toId, direction: 'sibling' });
+        toNode.push({ id: fromId, direction: 'sibling' });
       } else if (relationship.type === 'in_law') {
-        fromNode.push({ id: relationship.to_person_id, direction: 'inlaw' });
-        toNode.push({ id: relationship.from_person_id, direction: 'inlaw' });
+        fromNode.push({ id: toId, direction: 'inlaw' });
+        toNode.push({ id: fromId, direction: 'inlaw' });
       }
     }
 
