@@ -1,12 +1,10 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { serve } from '@hono/node-server';
-import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
-import { app } from '../index';
+import { createSelfhostApp } from './app';
 import { SqliteD1Database } from './sqlite_d1';
 import { LocalR2Bucket } from './local_r2';
-import type { AppBindings, Env } from '../types';
+import type { Env } from '../types';
 
 const dataDir = process.env.CLAN_DATA_DIR || path.resolve('.data');
 const avatarsDir = path.join(dataDir, 'avatars');
@@ -53,10 +51,7 @@ await mkdir(avatarsDir, { recursive: true });
 const env = buildEnv();
 await ensureSchema(env.DB as SqliteD1Database);
 
-const nodeApp = new Hono<AppBindings>();
-nodeApp.route('/', app);
-nodeApp.use('*', serveStatic({ root: distRoot }));
-nodeApp.get('*', serveStatic({ path: `${distRoot}/index.html` }));
+const nodeApp = createSelfhostApp(distRoot);
 
 type NodeServerEnv = { incoming?: { socket?: { remoteAddress?: string } } };
 
