@@ -1,4 +1,5 @@
 import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME } from '../layers';
+import { isServerMintedAvatarUrl, safeStorageKey } from '../storage_keys';
 import type { Gender, RelationshipType } from '../types';
 
 export const BACKUP_VERSION = 2;
@@ -209,6 +210,18 @@ export const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
   });
 };
 
+const asStorageKey = (value: string | null, field: string) => {
+  if (value === null || value === '') return null;
+  const safe = safeStorageKey(value);
+  if (!safe) throw new Error(`Invalid ${field}`);
+  return safe;
+};
+
+const asAvatarUrl = (value: string, field: string) => {
+  if (!isServerMintedAvatarUrl(value)) throw new Error(`Invalid ${field}`);
+  return value;
+};
+
 export const parseAvatars = (input: unknown[], now: string): BackupAvatar[] => (
   input.map((row, index) => {
     if (!isRecord(row)) throw new Error(`Invalid person_avatars[${index}]`);
@@ -216,8 +229,14 @@ export const parseAvatars = (input: unknown[], now: string): BackupAvatar[] => (
     return {
       id: asString(row.id, `person_avatars[${index}].id`),
       person_id: asString(row.person_id, `person_avatars[${index}].person_id`),
-      avatar_url: asString(row.avatar_url, `person_avatars[${index}].avatar_url`),
-      storage_key: asNullableString(row.storage_key),
+      // Both reach the object store on delete, and avatar_url is rendered by
+      // every client, so a crafted backup must not be able to plant an
+      // arbitrary path or host here.
+      avatar_url: asAvatarUrl(
+        asString(row.avatar_url, `person_avatars[${index}].avatar_url`),
+        `person_avatars[${index}].avatar_url`
+      ),
+      storage_key: asStorageKey(asNullableString(row.storage_key), `person_avatars[${index}].storage_key`),
       is_primary: row.is_primary === undefined ? false : asBoolean(row.is_primary),
       sort_order: sortOrder === null ? index : sortOrder,
       created_at: asOptionalTimestamp(row.created_at, now),

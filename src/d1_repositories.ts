@@ -94,15 +94,32 @@ export class D1GraphRepository implements GraphRepository {
     if (!normalizedEmails.length) {
       return new Map<string, string>();
     }
-    const placeholders = normalizedEmails.map(() => '?').join(', ');
-    const { results } = await this.env.DB.prepare(
+    return queryVerifiedEmails(this.env.DB, normalizedEmails);
+  }
+}
+
+/** Bound parameters per statement, kept well under D1's own limit. */
+const VERIFIED_EMAIL_CHUNK = 50;
+
+/**
+ * Looks up which of `normalizedEmails` belong to a verified account.
+ *
+ * Every distinct address used to be bound into one `IN (...)`, so this query
+ * grew with the data and would eventually exceed D1's per-statement parameter
+ * limit and fail the whole graph load. It is chunked instead.
+ */
+export const queryVerifiedEmails = async (db: D1Database, normalizedEmails: string[]) => {
+  const map = new Map<string, string>();
+  for (let offset = 0; offset < normalizedEmails.length; offset += VERIFIED_EMAIL_CHUNK) {
+    const chunk = normalizedEmails.slice(offset, offset + VERIFIED_EMAIL_CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const { results } = await db.prepare(
       `SELECT email, email_verified_at
        FROM users
        WHERE LOWER(TRIM(COALESCE(email, username))) IN (${placeholders})
          AND email_verified_at IS NOT NULL
          AND TRIM(email_verified_at) != ''`
-    ).bind(...normalizedEmails).all();
-    const map = new Map<string, string>();
+    ).bind(...chunk).all();
     for (const row of results as Array<Record<string, unknown>>) {
       const email = String(row.email ?? '').trim().toLowerCase();
       const verifiedAt = String(row.email_verified_at ?? '').trim();
@@ -110,9 +127,15 @@ export class D1GraphRepository implements GraphRepository {
         map.set(email, verifiedAt);
       }
     }
-    return map;
   }
-}
+  return map;
+};
+
+export const normalizeEmailList = (emails: Array<string | null | undefined>) => Array.from(new Set(
+  emails
+    .map((email) => typeof email === 'string' ? email.trim().toLowerCase() : '')
+    .filter(Boolean),
+));
 
 const isValidColumnName = (name: string) => /^[a-zA-Z0-9_]+$/.test(name);
 
@@ -375,7 +398,7 @@ export class D1PeopleRepository implements PeopleRepository {
 
   async listCustomFieldRowsByPersonId(personId: string) {
     const { results } = await this.db.prepare(
-      'SELECT id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
+      'SELECT id, person_id, label, value FROM person_custom_fields WHERE person_id = ? ORDER BY id'
     ).bind(personId).all();
     return results as Array<Record<string, unknown>>;
   }

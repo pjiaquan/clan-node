@@ -4,6 +4,7 @@ import {
   BACKUP_VERSION,
   buildExportPayload,
   buildLegacyDefaultLayer,
+  parseAvatars,
   parsePeople,
   validateRelations,
 } from './service';
@@ -110,4 +111,49 @@ test('buildExportPayload preserves key backup collections', () => {
   assert.equal(payload.person_custom_fields[0].label, 'Nickname');
   assert.equal(payload.relationship_type_labels[0].label, 'Spouse');
   assert.equal(payload.kinship_labels[0].custom_title, '爸爸');
+});
+
+test('parseAvatars rejects storage keys and URLs a backup must not be able to plant', () => {
+  const VALID_KEY = 'person-11111111-1111-4111-8111-111111111111-1700000000000-22222222-2222-4222-8222-222222222222.jpg';
+  const row = (overrides: Record<string, unknown>) => ([{
+    id: 'avatar-1',
+    person_id: 'person-1',
+    avatar_url: `/api/avatars/${VALID_KEY}`,
+    storage_key: VALID_KEY,
+    is_primary: true,
+    sort_order: 0,
+    ...overrides,
+  }]);
+
+  // A good row still parses.
+  const parsed = parseAvatars(row({}), '2026-01-01T00:00:00.000Z');
+  assert.equal(parsed[0].storage_key, VALID_KEY);
+  assert.equal(parsed[0].avatar_url, `/api/avatars/${VALID_KEY}`);
+
+  // storage_key reaches the object store on delete; on self-host that is a
+  // filesystem path.
+  for (const storage_key of ['../clan-node.sqlite', '/etc/passwd', 'sub/dir.png', '..']) {
+    assert.throws(
+      () => parseAvatars(row({ storage_key }), '2026-01-01T00:00:00.000Z'),
+      /Invalid person_avatars\[0\].storage_key/,
+      `storage_key ${JSON.stringify(storage_key)} should be refused`
+    );
+  }
+
+  // avatar_url is rendered by every client.
+  for (const avatar_url of [
+    'https://attacker.test/p.png',
+    '/api/avatars/../clan-node.sqlite',
+    'javascript:alert(1)',
+    '/api/people/1',
+  ]) {
+    assert.throws(
+      () => parseAvatars(row({ avatar_url }), '2026-01-01T00:00:00.000Z'),
+      /Invalid person_avatars\[0\].avatar_url/,
+      `avatar_url ${JSON.stringify(avatar_url)} should be refused`
+    );
+  }
+
+  // An absent storage_key stays absent rather than failing.
+  assert.equal(parseAvatars(row({ storage_key: null }), '2026-01-01T00:00:00.000Z')[0].storage_key, null);
 });

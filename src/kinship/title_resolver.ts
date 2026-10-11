@@ -25,31 +25,44 @@ export class KinshipTitleResolver {
     private readonly relationships: Relationship[],
   ) {
     this.rankComputer = new SiblingRankComputer(people, relationships);
-    people.forEach((p) => this.peopleMap.set(p.id, p));
+    for (let i = 0; i < people.length; i++) {
+      const p = people[i];
+      this.peopleMap.set(p.id, p);
+    }
 
-    relationships.forEach((rel) => {
+    // Bolt Optimization: Replace forEach with index-based loop and consolidate map lookups
+    for (let i = 0; i < relationships.length; i++) {
+      const rel = relationships[i];
       if (rel.type === 'parent_child') {
-        if (!this.childrenOfParentMap.has(rel.from_person_id)) {
-          this.childrenOfParentMap.set(rel.from_person_id, new Set());
+        let children = this.childrenOfParentMap.get(rel.from_person_id);
+        if (children === undefined) {
+          children = new Set();
+          this.childrenOfParentMap.set(rel.from_person_id, children);
         }
-        this.childrenOfParentMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        children.add(rel.to_person_id);
 
-        if (!this.parentsOfChildMap.has(rel.to_person_id)) {
-          this.parentsOfChildMap.set(rel.to_person_id, new Set());
+        let parents = this.parentsOfChildMap.get(rel.to_person_id);
+        if (parents === undefined) {
+          parents = new Set();
+          this.parentsOfChildMap.set(rel.to_person_id, parents);
         }
-        this.parentsOfChildMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        parents.add(rel.from_person_id);
       } else if (rel.type === 'spouse') {
-        if (!this.spouseOfPersonMap.has(rel.from_person_id)) {
-          this.spouseOfPersonMap.set(rel.from_person_id, new Set());
+        let spousesFrom = this.spouseOfPersonMap.get(rel.from_person_id);
+        if (spousesFrom === undefined) {
+          spousesFrom = new Set();
+          this.spouseOfPersonMap.set(rel.from_person_id, spousesFrom);
         }
-        this.spouseOfPersonMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        spousesFrom.add(rel.to_person_id);
 
-        if (!this.spouseOfPersonMap.has(rel.to_person_id)) {
-          this.spouseOfPersonMap.set(rel.to_person_id, new Set());
+        let spousesTo = this.spouseOfPersonMap.get(rel.to_person_id);
+        if (spousesTo === undefined) {
+          spousesTo = new Set();
+          this.spouseOfPersonMap.set(rel.to_person_id, spousesTo);
         }
-        this.spouseOfPersonMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        spousesTo.add(rel.from_person_id);
       }
-    });
+    }
   }
 
   resolve({ path, nodePath, targetId }: ResolveInput): string {
@@ -271,7 +284,20 @@ export class KinshipTitleResolver {
       return `${prefix}${base}${target.gender === 'M' ? '父' : '母'}`;
     }
 
-    if (path.length >= 4 && path.slice(0, -1).every((segment) => segment === 'up') && path[path.length - 1] === 'spouse') {
+    // Bolt Optimization: Replace O(N) array allocation path.slice(0, -1).every(...)
+    // with a standard zero-allocation loop to improve traversal performance.
+    let isAllUpBeforeSpouse = false;
+    if (path.length >= 4 && path[path.length - 1] === 'spouse') {
+      isAllUpBeforeSpouse = true;
+      for (let i = 0; i < path.length - 1; i++) {
+        if (path[i] !== 'up') {
+          isAllUpBeforeSpouse = false;
+          break;
+        }
+      }
+    }
+
+    if (isAllUpBeforeSpouse) {
       const ancestorDepth = path.length - 1;
       const parent = this.getPerson(nodePath[1]);
       const isMaternal = parent?.gender === 'F';
@@ -616,7 +642,17 @@ export class KinshipTitleResolver {
       if (parent && possibleSibling && possibleSpouse) {
         const parentIds = this.parentsOfChildMap.get(parent.id) || new Set();
         const siblingParentIds = this.parentsOfChildMap.get(possibleSibling.id) || new Set();
-        const sharesParent = [...parentIds].some((id) => siblingParentIds.has(id));
+
+        // Bolt Optimization: Replace O(N) array allocation [...parentIds].some(...)
+        // with a zero-allocation for...of loop over the Set.
+        let sharesParent = false;
+        for (const id of parentIds) {
+          if (siblingParentIds.has(id)) {
+            sharesParent = true;
+            break;
+          }
+        }
+
         const spouses = this.spouseOfPersonMap.get(possibleSibling.id);
         const isSpouse = spouses ? spouses.has(possibleSpouse.id) : false;
 

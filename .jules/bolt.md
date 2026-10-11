@@ -17,3 +17,6 @@
 ## 2025-02-12 - Avoid array map allocation overhead when parsing large payloads
 **Learning:** Using `Array.prototype.map` on extremely large datasets (like parsing tens of thousands of relationships during a backup export) incurs high memory and CPU overhead because it triggers the allocation of many temporary closure scopes and inner array allocations for the return values.
 **Action:** When validating or parsing exceptionally large incoming datasets (e.g., thousands of JSON backup rows), instantiate a single pre-allocated array (`new Array(len)`) and process elements using a traditional index-based `for` loop to eliminate iterator closure allocation overhead and achieve maximum throughput.
+## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
+**Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
+**Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.

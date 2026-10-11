@@ -51,6 +51,10 @@ npx wrangler d1 execute <DATABASE_NAME> --file=./migrations/schema.sql
 
 # Query D1 locally
 npx wrangler d1 execute <DATABASE_NAME> --local --command="SELECT * FROM people"
+
+# Production D1 (clan-db) is declared only under [env.production] in
+# wrangler.worker.toml, so remote commands against it need --env production
+npx wrangler --config wrangler.worker.toml d1 execute clan-db --env production --remote --command="SELECT 1"
 ```
 
 ## API Endpoints
