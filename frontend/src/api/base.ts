@@ -10,12 +10,12 @@ export const normalizeApiBase = (value: string) => {
   return next;
 };
 
-// Production Worker, matching functions/api/[[path]].ts and the operational
-// scripts. This fallback used to name the default-environment Worker
-// (clan-node.pjiaquan.workers.dev), which runs with ENVIRONMENT=development
-// against the production database, so any build that forgot to set
-// VITE_API_BASE talked to it.
-const DEFAULT_API_BASE = 'https://clan-node-production.pjiaquan.workers.dev';
+// Same origin: on Cloudflare Pages, /api/* is served by the Pages Function in
+// functions/api/[[path]].ts, which forwards to the Worker over a service
+// binding. The Worker has no public workers.dev hostname any more, so naming
+// one here (as this fallback used to, first the development Worker and then
+// the production one) only produces a build that cannot reach the API.
+const DEFAULT_API_BASE = '';
 
 const hasExplicitApiBase = Object.prototype.hasOwnProperty.call(import.meta.env, 'VITE_API_BASE');
 const configuredApiBase = hasExplicitApiBase
