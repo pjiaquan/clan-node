@@ -7,7 +7,7 @@ import {
   SPOUSE_METADATA,
   type SiblingHandlePreference,
 } from '../relationship_utils';
-import { decryptProtectedValue } from '../data_protection';
+import { decryptPersonField } from '../data_protection';
 
 export { PARENT_CHILD_METADATA, SPOUSE_METADATA };
 
@@ -52,8 +52,8 @@ export async function getSiblingLinkMeta(
   const b = results.find((person) => person.id === bId) as Record<string, unknown> | undefined;
 
   const [aDobRaw, bDobRaw] = await Promise.all([
-    a?.dob ? decryptProtectedValue(env, a.dob as string | null) : Promise.resolve(null),
-    b?.dob ? decryptProtectedValue(env, b.dob as string | null) : Promise.resolve(null),
+    a?.dob ? decryptPersonField(env, aId, 'dob', a.dob as string | null) : Promise.resolve(null),
+    b?.dob ? decryptPersonField(env, bId, 'dob', b.dob as string | null) : Promise.resolve(null),
   ]);
 
   const aDob = aDobRaw ? new Date(aDobRaw).getTime() : 0;

@@ -168,7 +168,7 @@ const buildSeedGraphStatements = async (env: Env, layerId: string, layerName: st
   const [root, left, right] = createSeedNodes(layerName);
   const statements: D1PreparedStatement[] = [];
   for (const person of [root, left, right]) {
-    const protectedFields = await protectPersonWriteFields(env, {
+    const protectedFields = await protectPersonWriteFields(env, person.id, {
       metadata: JSON.stringify(person.metadata),
     });
     const insertColumns = [

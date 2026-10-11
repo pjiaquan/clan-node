@@ -5,7 +5,7 @@ import { buildSiblingLinkMeta } from '../relationship_utils';
 import {
   decryptCustomFieldRows,
   decryptPersonRow,
-  decryptProtectedValue,
+  decryptPersonField,
   migratePlaintextCustomFieldRows,
 } from '../data_protection';
 import { getUserSchemaSupport } from '../schema';
@@ -189,7 +189,7 @@ export async function updateSiblingOrdering(env: Env, repository: PeopleReposito
   const person = await repository.getPersonByIdInLayer(personId, layerId);
 
   const personDob = person && person.dob
-    ? new Date((await decryptProtectedValue(env, person.dob as string | null)) || '').getTime()
+    ? new Date((await decryptPersonField(env, personId, 'dob', person.dob as string | null)) || '').getTime()
     : 0;
   if (!personDob) return;
 
@@ -199,7 +199,7 @@ export async function updateSiblingOrdering(env: Env, repository: PeopleReposito
     const otherId = rel.from_person_id === personId ? String(rel.to_person_id) : String(rel.from_person_id);
     const other = await repository.getPersonByIdInLayer(otherId, layerId);
     const otherDob = other && other.dob
-      ? new Date((await decryptProtectedValue(env, other.dob as string | null)) || '').getTime()
+      ? new Date((await decryptPersonField(env, otherId, 'dob', other.dob as string | null)) || '').getTime()
       : 0;
     if (!otherDob || otherDob === personDob) continue;
 

@@ -64,6 +64,36 @@ the `DUAL_WRITE_*` credentials are set with `wrangler secret put`, or through
 - Self-host behind a reverse proxy sets `TRUSTED_PROXY=1`, otherwise rate
   limiting and audit entries use the proxy's address for everyone.
 
+## Protected fields
+
+Person dates, blood type, metadata and custom field values are encrypted with
+`AUTH_ENCRYPTION_KEY` (AES-GCM, `src/data_protection.ts`). Values written as
+`enc:v2` bind the table, column and owning person into the ciphertext as AAD,
+so a value only decrypts where it was written. A ciphertext copied onto another
+person or column is refused, not disclosed.
+
+Older rows hold `enc:v1`, which binds nothing. Rows are re-encrypted as v2 when
+the people API or a backup export reads them. While v1 is still accepted, though, any v1 value pasted into a protected
+column still decrypts. That includes `users.mfa_totp_secret`, which uses the
+same key and stays v1. To close that gap once the data has been migrated:
+
+1. Run a backup export. It migrates every person and custom field row.
+2. Confirm nothing is left (both counts should be `0`):
+
+   ```sql
+   SELECT COUNT(*) FROM people
+    WHERE blood_type LIKE 'enc:v1:%' OR dob LIKE 'enc:v1:%' OR dod LIKE 'enc:v1:%'
+       OR tob LIKE 'enc:v1:%' OR tod LIKE 'enc:v1:%' OR metadata LIKE 'enc:v1:%';
+   SELECT COUNT(*) FROM person_custom_fields WHERE value LIKE 'enc:v1:%';
+   ```
+
+3. Set `DATA_PROTECTION_REJECT_LEGACY=true`: under `[env.production.vars]` in
+   `wrangler.worker.toml` followed by `npm run deploy`, or in `selfhost.env`
+   followed by `npm run docker:up`. A value set only in the Cloudflare
+   dashboard is dropped by the next `wrangler deploy`. After that, a v1 value in
+   a protected column fails to decrypt and is never re-encrypted as v2. MFA is
+   unaffected: TOTP secrets are decrypted by `src/auth.ts`, not by this path.
+
 ## Databases
 
 The two Worker environments use different D1 databases: `clan-db` for
@@ -71,14 +101,21 @@ The two Worker environments use different D1 databases: `clan-db` for
 share one, so `wrangler dev --remote` wrote to live family data.
 
 `wrangler d1 execute` resolves the database by the **name on the command
-line**, not by the binding, so `--env production` does not protect it. The
-name is what decides which data you touch:
+line**, not by the binding. The name is what decides which data you touch, and
+it must be declared in the environment you select: `clan-db` exists only under
+`[env.production]`, so every remote command against it needs `--env production`.
+Without it Wrangler cannot find `clan-db` in the config, falls back to an API
+lookup by name, and fails with a misleading `Authentication error [code: 10000]`.
 
 ```bash
 npm run d1:query -- "SELECT COUNT(*) FROM people"   # clan-db-dev, local
 npm run d1:migrate                                   # clan-db-dev, local
-npm run d1:migrate:prod                              # clan-db, REMOTE
+npm run d1:migrate:prod                              # clan-db, REMOTE (--env production)
+
+# Ad hoc remote query against production:
+npx wrangler --config wrangler.worker.toml d1 execute clan-db --env production --remote --command "SELECT 1"
 ```
 
 `scripts/push_local_d1.sh` and `scripts/pull_remote_d1.sh` take the two names
-separately (`REMOTE_DB_NAME`, `LOCAL_DB_NAME`) for the same reason.
+separately (`REMOTE_DB_NAME`, `LOCAL_DB_NAME`) for the same reason, and pass
+`--env "$REMOTE_ENV"` (default `production`) on every remote call.

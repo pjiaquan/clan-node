@@ -56,6 +56,9 @@ EMAIL_VERIFICATION_URL_BASE = "https://clan-frontend.pages.dev"
 BREVO_FROM_EMAIL = "no-reply@hinoki.my"
 BREVO_FROM_NAME = "Family Tree"
 ALLOWED_EMAILS = "pjiaquan@gmail.com"
+# Refuse enc:v1 protected values. Enabled once production held no v1 rows
+# (verified 2026-10-11); see "Protected fields" in SECURITY.md.
+DATA_PROTECTION_REJECT_LEGACY = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"

@@ -3,6 +3,11 @@ export type Env = {
   AVATARS: R2Bucket;
   ADMIN_SETUP_TOKEN?: string;
   AUTH_ENCRYPTION_KEY?: string;
+  /**
+   * Opt-in: refuse enc:v1 protected values once every row has been re-encrypted
+   * as v2. See the format notes in src/data_protection.ts.
+   */
+  DATA_PROTECTION_REJECT_LEGACY?: string;
   FRONTEND_ORIGIN?: string;
   ENVIRONMENT?: string;
   EMAIL_VERIFICATION_URL_BASE?: string;
