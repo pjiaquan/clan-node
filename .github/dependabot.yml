@@ -42,6 +42,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # codeql-action/init and /analyze must run the same version, so split
+      # into two PRs each fails CodeQL on its own.
+      codeql:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: docker
     directory: /
