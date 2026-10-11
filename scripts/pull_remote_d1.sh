@@ -3,6 +3,10 @@ set -euo pipefail
 
 # The two sides are different databases now. The remote one is production.
 REMOTE_DB_NAME="${REMOTE_DB_NAME:-clan-db}"
+# clan-db is declared only under [env.production] in wrangler.worker.toml, so
+# remote commands must select that env or wrangler cannot resolve the name and
+# the API answers with a misleading "Authentication error [code: 10000]".
+REMOTE_ENV="${REMOTE_ENV:-production}"
 LOCAL_DB_NAME="${LOCAL_DB_NAME:-clan-db-dev}"
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -14,7 +18,7 @@ mkdir -p "$BACKUP_DIR"
 WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.worker.toml}"
 
 echo "Exporting remote D1 to $EXPORT_PATH..."
-wrangler --config "$WRANGLER_CONFIG" d1 export "$REMOTE_DB_NAME" --remote --output="$EXPORT_PATH"
+wrangler --config "$WRANGLER_CONFIG" d1 export "$REMOTE_DB_NAME" --remote --env "$REMOTE_ENV" --output="$EXPORT_PATH"
 
 IMPORT_PATH="$EXPORT_PATH"
 if [[ "$SKIP_AUDIT_LOGS" == "1" || "$SKIP_AUDIT_LOGS" == "true" || "$SKIP_AUDIT_LOGS" == "yes" ]]; then
