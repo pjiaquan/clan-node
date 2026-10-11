@@ -136,11 +136,22 @@ export const queryVerifiedEmails = async (db: D1Database, normalizedEmails: stri
   return map;
 };
 
-export const normalizeEmailList = (emails: Array<string | null | undefined>) => Array.from(new Set(
-  emails
-    .map((email) => typeof email === 'string' ? email.trim().toLowerCase() : '')
-    .filter(Boolean),
-));
+// OPTIMIZATION: Replaced chained .map().filter() inside a Set constructor with a single
+// traditional for loop inserting into a Set to avoid multiple intermediate array allocations,
+// improving performance and lowering GC overhead during batch processing.
+export const normalizeEmailList = (emails: Array<string | null | undefined>) => {
+  const uniqueEmails = new Set<string>();
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i];
+    if (typeof email === 'string') {
+      const normalized = email.trim().toLowerCase();
+      if (normalized) {
+        uniqueEmails.add(normalized);
+      }
+    }
+  }
+  return Array.from(uniqueEmails);
+};
 
 const isValidColumnName = (name: string) => /^[a-zA-Z0-9_]+$/.test(name);
 

@@ -23,3 +23,6 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+## 2025-02-12 - Optimize Chained Array Allocations
+**Learning:** Chaining array operations like `.map().filter()` inside a `Set` constructor (e.g., `Array.from(new Set(arr.map().filter()))`) allocates multiple intermediate arrays in memory. For batch data processing, this leads to unnecessary garbage collection overhead and slower execution times.
+**Action:** Consolidate these operations into a single, zero-allocation `for` loop over the source array, inserting valid/normalized items directly into the `Set`.
