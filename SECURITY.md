@@ -101,14 +101,21 @@ The two Worker environments use different D1 databases: `clan-db` for
 share one, so `wrangler dev --remote` wrote to live family data.
 
 `wrangler d1 execute` resolves the database by the **name on the command
-line**, not by the binding, so `--env production` does not protect it. The
-name is what decides which data you touch:
+line**, not by the binding. The name is what decides which data you touch, and
+it must be declared in the environment you select: `clan-db` exists only under
+`[env.production]`, so every remote command against it needs `--env production`.
+Without it Wrangler cannot find `clan-db` in the config, falls back to an API
+lookup by name, and fails with a misleading `Authentication error [code: 10000]`.
 
 ```bash
 npm run d1:query -- "SELECT COUNT(*) FROM people"   # clan-db-dev, local
 npm run d1:migrate                                   # clan-db-dev, local
-npm run d1:migrate:prod                              # clan-db, REMOTE
+npm run d1:migrate:prod                              # clan-db, REMOTE (--env production)
+
+# Ad hoc remote query against production:
+npx wrangler --config wrangler.worker.toml d1 execute clan-db --env production --remote --command "SELECT 1"
 ```
 
 `scripts/push_local_d1.sh` and `scripts/pull_remote_d1.sh` take the two names
-separately (`REMOTE_DB_NAME`, `LOCAL_DB_NAME`) for the same reason.
+separately (`REMOTE_DB_NAME`, `LOCAL_DB_NAME`) for the same reason, and pass
+`--env "$REMOTE_ENV"` (default `production`) on every remote call.

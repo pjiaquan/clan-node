@@ -15,7 +15,7 @@
     "deploy:build": "npm run deploy:check && VITE_PUBLIC_BASE=/ VITE_API_BASE= npm --prefix frontend run build && npx wrangler --config wrangler.worker.toml deploy --env production && npx wrangler pages deploy frontend/dist --project-name clan-frontend --branch master",
     "d1:create": "wrangler --config wrangler.worker.toml d1 create clan-db-dev",
     "d1:migrate": "wrangler --config wrangler.worker.toml d1 execute clan-db-dev --local --file=./migrations/schema.sql",
-    "d1:migrate:prod": "wrangler --config wrangler.worker.toml d1 execute clan-db --remote --file=./migrations/schema.sql",
+    "d1:migrate:prod": "wrangler --config wrangler.worker.toml d1 execute clan-db --env production --remote --file=./migrations/schema.sql",
     "d1:query": "wrangler --config wrangler.worker.toml d1 execute clan-db-dev --local --command",
     "d1:backup": "mkdir -p backups && cp -a .wrangler/state/v3/d1/miniflare-D1DatabaseObject backups/miniflare-D1DatabaseObject-$(date +%Y%m%d-%H%M%S)",
     "d1:restore": "ls -t backups/miniflare-D1DatabaseObject-* | head -n 1 | xargs -I{} sh -c 'rm -rf .wrangler/state/v3/d1/miniflare-D1DatabaseObject && cp -a {} .wrangler/state/v3/d1/miniflare-D1DatabaseObject'",
