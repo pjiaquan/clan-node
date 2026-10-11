@@ -1,6 +1,8 @@
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppBindings, Env, UserRole } from './types';
+import { isDevelopmentEnv, isProductionEnv } from './environment';
+import { isServerMintedAvatarUrl } from './storage_keys';
 import { notifyUpdate } from './notify';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
@@ -126,7 +128,13 @@ const fromBase32 = (value: string) => {
   return new Uint8Array(bytes);
 };
 
-async function hashPassword(password: string, salt: string) {
+/** OWASP's current floor for PBKDF2-HMAC-SHA256. */
+const PASSWORD_HASH_ITERATIONS = 600000;
+/** What hashes written before the cost was recorded alongside them used. */
+const LEGACY_PASSWORD_HASH_ITERATIONS = 100000;
+const PASSWORD_HASH_PREFIX = 'pbkdf2-sha256';
+
+async function derivePasswordBits(password: string, salt: string, iterations: number) {
   const key = await crypto.subtle.importKey(
     'raw',
     textEncoder.encode(password),
@@ -135,12 +143,54 @@ async function hashPassword(password: string, salt: string) {
     ['deriveBits']
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', iterations: 100000, salt: textEncoder.encode(salt) },
+    { name: 'PBKDF2', hash: 'SHA-256', iterations, salt: textEncoder.encode(salt) },
     key,
     256
   );
   return toBase64(bits);
 }
+
+/**
+ * Produces a stored password hash of the form
+ * `pbkdf2-sha256$<iterations>$<base64>`.
+ *
+ * The iteration count used to be a bare constant with nothing recorded in the
+ * database, so raising it would have locked out every existing account. The
+ * cost now travels with the hash: a stored value without the prefix is a
+ * legacy 100k hash, verified at that cost and upgraded on the owner's next
+ * successful sign-in.
+ */
+export async function hashPassword(password: string, salt: string, iterations = PASSWORD_HASH_ITERATIONS) {
+  return `${PASSWORD_HASH_PREFIX}$${iterations}$${await derivePasswordBits(password, salt, iterations)}`;
+}
+
+const parseStoredPasswordHash = (stored: unknown) => {
+  if (typeof stored !== 'string' || stored.length === 0) return null;
+  if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
+    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored };
+  }
+  const parts = stored.split('$');
+  const iterations = Number(parts[1]);
+  const digest = parts[2];
+  if (parts.length !== 3 || !digest || !Number.isInteger(iterations) || iterations <= 0) return null;
+  return { iterations, digest };
+};
+
+/**
+ * Verifies a password against a stored hash, reporting whether that hash is
+ * below the current cost and should be rewritten.
+ */
+export const verifyPassword = async (password: string, salt: string, storedHash: unknown) => {
+  const parsed = parseStoredPasswordHash(storedHash);
+  if (!parsed) {
+    // Still spend the time, so an unparseable hash is not a timing oracle.
+    await derivePasswordBits(password, salt, PASSWORD_HASH_ITERATIONS);
+    return { ok: false as const, needsRehash: false as const };
+  }
+  const digest = await derivePasswordBits(password, salt, parsed.iterations);
+  const ok = timingSafeEqual(digest, parsed.digest);
+  return { ok, needsRehash: ok && parsed.iterations < PASSWORD_HASH_ITERATIONS };
+};
 
 async function sha256Base64(input: string) {
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
@@ -309,7 +359,7 @@ const buildTotpOtpAuthUrl = (email: string, secret: string) => {
   return `otpauth://totp/${encodeURIComponent(label)}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD_SECONDS}`;
 };
 
-const generateTotpCodeForCounter = async (secret: string, counter: number) => {
+export const generateTotpCodeForCounter = async (secret: string, counter: number) => {
   const secretBytes = fromBase32(secret);
   const message = new Uint8Array(8);
   let value = counter;
@@ -328,16 +378,49 @@ const generateTotpCodeForCounter = async (secret: string, counter: number) => {
   return String(binary % (10 ** TOTP_DIGITS)).padStart(TOTP_DIGITS, '0');
 };
 
-const verifyTotpCode = async (secret: string, code: string) => {
-  if (!/^\d{6}$/.test(code)) return false;
+/**
+ * Returns the time-step the code matched, or null.
+ *
+ * The matched counter is the caller's responsibility to burn via
+ * `consumeTotpCounter`: the +/-1 step tolerance means a code stays valid for
+ * about 90 seconds, so without recording the step a captured code could be
+ * replayed for the rest of that span.
+ */
+export const verifyTotpCode = async (secret: string, code: string): Promise<number | null> => {
+  if (!/^\d{6}$/.test(code)) return null;
   const currentCounter = Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS);
+  let matched: number | null = null;
   for (let offset = -TOTP_WINDOW_STEPS; offset <= TOTP_WINDOW_STEPS; offset += 1) {
-    const expected = await generateTotpCodeForCounter(secret, currentCounter + offset);
-    if (timingSafeEqual(expected, code)) {
-      return true;
+    const counter = currentCounter + offset;
+    const expected = await generateTotpCodeForCounter(secret, counter);
+    // Not short-circuiting keeps the work constant across the window.
+    if (timingSafeEqual(expected, code) && matched === null) {
+      matched = counter;
     }
   }
-  return false;
+  return matched;
+};
+
+/**
+ * Burns a TOTP time-step for a user, rejecting a step already used.
+ *
+ * The compare-and-set is done by the UPDATE itself, so two requests carrying
+ * the same code cannot both succeed.
+ */
+export const consumeTotpCounter = async (
+  db: D1Database,
+  userId: string,
+  counter: number,
+  userSchema: UserSchemaSupport
+) => {
+  if (!userSchema.hasMfaTotpLastCounter) return true;
+  const result = await db.prepare(
+    `UPDATE users
+     SET mfa_totp_last_counter = ?
+     WHERE id = ?
+       AND (mfa_totp_last_counter IS NULL OR mfa_totp_last_counter < ?)`
+  ).bind(counter, userId, counter).run();
+  return Number(result.meta?.changes ?? 0) > 0;
 };
 
 type SessionSchemaSupport = {
@@ -383,7 +466,7 @@ const parseEncryptionKeyBytes = (value: string): Uint8Array => {
 const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   const keySource = env.AUTH_ENCRYPTION_KEY?.trim() || '';
   if (!keySource) {
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       throw new Error('AUTH_ENCRYPTION_KEY must be set in production to protect sensitive data.');
     }
     if (!encryptionKeyWarningShown) {
@@ -407,12 +490,44 @@ const getEncryptionKey = async (env: Env): Promise<CryptoKey | null> => {
   return cachedEncryptionKey;
 };
 
+/**
+ * Whether responses may carry `debug_*` MFA codes and invite/verification
+ * tokens.
+ *
+ * This used to be `ENVIRONMENT !== 'production'`, which fails open: anything
+ * deployed without an explicit production environment -- `npm run deploy`
+ * publishes the default env, which shares the production D1 database --
+ * handed out single-use invite and verification tokens from an unauthenticated
+ * endpoint and the MFA code from the login response. Opting in explicitly
+ * means a missing or misspelled `ENVIRONMENT` is safe by default.
+ */
+const debugTokensEnabled = (env: Env) => (
+  isDevelopmentEnv(env)
+  && ['1', 'true', 'yes'].includes((env.EXPOSE_DEBUG_TOKENS || '').trim().toLowerCase())
+);
+
+const SETUP_TOKEN_MIN_LENGTH = 16;
+
+/** Rejects the shipped `<INSERT_...>` placeholders and obviously weak tokens. */
+export const isUsableSetupToken = (token: string) => {
+  const trimmed = token.trim();
+  if (trimmed.length < SETUP_TOKEN_MIN_LENGTH) return false;
+  if (/^<.*>$/.test(trimmed)) return false;
+  if (/^(insert|replace|change)[_-]?me/i.test(trimmed)) return false;
+  return true;
+};
+
+/** Public self-service registration is opt-in; see POST /api/auth/register. */
+const publicRegistrationEnabled = (env: Env) => (
+  ['1', 'true', 'yes'].includes((env.PUBLIC_REGISTRATION_ENABLED || '').trim().toLowerCase())
+);
+
 const requireProductionSecret = (
   c: Context<AppBindings>,
   key: keyof Pick<Env, 'AUTH_ENCRYPTION_KEY' | 'ADMIN_SETUP_TOKEN'>,
   feature: string
 ) => {
-  if (c.env.ENVIRONMENT !== 'production') return null;
+  if (!isProductionEnv(c.env)) return null;
   if (typeof c.env[key] === 'string' && c.env[key]?.trim()) {
     return null;
   }
@@ -592,6 +707,18 @@ const sendInvitationEmail = async (env: Env, to: string, inviteUrl: string) => s
   htmlContent: `<p>You have been invited to Clan Node.</p><p><a href="${inviteUrl}">Accept your invitation and set your password</a></p>`
 });
 
+/** Warns the address being moved away from, so an unrequested change is seen. */
+const sendEmailChangeNoticeEmail = async (env: Env, to: string, requestedEmail: string) => sendTransactionalEmail(env, {
+  to,
+  subject: 'Your Clan Node email address was asked to change',
+  textContent: `Someone asked to change the email address on your Clan Node account to ${requestedEmail}.`
+    + ' The change only takes effect once that address is confirmed.'
+    + ' If this was not you, sign in and change your password now.',
+  htmlContent: `<p>Someone asked to change the email address on your Clan Node account to <strong>${requestedEmail}</strong>.</p>`
+    + '<p>The change only takes effect once that address is confirmed.</p>'
+    + '<p>If this was not you, sign in and change your password now.</p>'
+});
+
 const sendMfaCodeEmail = async (env: Env, to: string, code: string) => sendTransactionalEmail(env, {
   to,
   subject: 'Your sign-in code',
@@ -628,7 +755,14 @@ const createPasswordResetToken = async () => {
 };
 
 const createMfaCode = async () => {
-  const randomValue = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+  let randomValue = 0;
+  const array = new Uint32Array(1);
+  const maxValid = 4294000000; // Math.floor((2**32) / 1000000) * 1000000
+  do {
+    crypto.getRandomValues(array);
+    randomValue = array[0] ?? 0;
+  } while (randomValue >= maxValid);
+
   const code = String(randomValue % 1000000).padStart(6, '0');
   const codeHash = await sha256Base64(code);
   const expiresAt = new Date(Date.now() + MFA_TTL_MS).toISOString();
@@ -762,64 +896,63 @@ type RateLimitInput = {
   blockMs: number;
 };
 
+/**
+ * Consumes one attempt against a rate-limit bucket.
+ *
+ * This is a single upsert rather than SELECT-then-UPDATE: the old version read
+ * `count`, decided, and wrote back, so concurrent requests all observed the
+ * same pre-increment value and the cap was never actually enforced under
+ * load -- which matters most for the limiters guarding MFA codes and login.
+ *
+ * Semantics kept from the previous implementation: `maxAttempts` consumes are
+ * allowed per `windowMs`; the one after that blocks the bucket for `blockMs`
+ * without extending the block on further attempts.
+ */
 export const checkAndConsumeRateLimit = async (db: D1Database, input: RateLimitInput) => {
   await ensureAuthRateLimitTable(db);
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const existing = await db.prepare(
-    `SELECT window_start_ms, count, blocked_until_ms
-     FROM auth_rate_limits
-     WHERE action = ? AND limiter_key = ?`
-  ).bind(input.action, input.limiterKey).first();
 
-  if (!existing) {
-    await db.prepare(
-      `INSERT INTO auth_rate_limits (action, limiter_key, window_start_ms, count, blocked_until_ms, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?)`
-    ).bind(input.action, input.limiterKey, nowMs, 1, nowIso).run();
-    return { allowed: true as const };
-  }
+  const blocked = 'auth_rate_limits.blocked_until_ms > ?';
+  const windowExpired = '? - auth_rate_limits.window_start_ms > ?';
+  const row = await db.prepare(
+    `INSERT INTO auth_rate_limits (action, limiter_key, window_start_ms, count, blocked_until_ms, updated_at)
+     VALUES (?, ?, ?, 1, NULL, ?)
+     ON CONFLICT(action, limiter_key) DO UPDATE SET
+       window_start_ms = CASE
+         WHEN ${blocked} THEN auth_rate_limits.window_start_ms
+         WHEN ${windowExpired} THEN ?
+         ELSE auth_rate_limits.window_start_ms
+       END,
+       count = CASE
+         WHEN ${blocked} THEN auth_rate_limits.count
+         WHEN ${windowExpired} THEN 1
+         WHEN auth_rate_limits.count + 1 > ? THEN auth_rate_limits.count
+         ELSE auth_rate_limits.count + 1
+       END,
+       blocked_until_ms = CASE
+         WHEN ${blocked} THEN auth_rate_limits.blocked_until_ms
+         WHEN ${windowExpired} THEN NULL
+         WHEN auth_rate_limits.count + 1 > ? THEN ? + ?
+         ELSE NULL
+       END,
+       updated_at = ?
+     RETURNING count, blocked_until_ms`
+  ).bind(
+    input.action, input.limiterKey, nowMs, nowIso,
+    nowMs, nowMs, input.windowMs, nowMs,
+    nowMs, nowMs, input.windowMs, input.maxAttempts,
+    nowMs, nowMs, input.windowMs, input.maxAttempts, nowMs, input.blockMs,
+    nowIso
+  ).first();
 
-  const blockedUntilMs = Number((existing as any).blocked_until_ms ?? 0);
+  const blockedUntilMs = Number((row as any)?.blocked_until_ms ?? 0);
   if (blockedUntilMs > nowMs) {
     return {
       allowed: false as const,
       retryAfterSeconds: Math.max(1, Math.ceil((blockedUntilMs - nowMs) / 1000))
     };
   }
-
-  const windowStartMs = Number((existing as any).window_start_ms ?? 0);
-  const count = Number((existing as any).count ?? 0);
-  const inWindow = nowMs - windowStartMs <= input.windowMs;
-
-  if (!inWindow) {
-    await db.prepare(
-      `UPDATE auth_rate_limits
-       SET window_start_ms = ?, count = 1, blocked_until_ms = NULL, updated_at = ?
-       WHERE action = ? AND limiter_key = ?`
-    ).bind(nowMs, nowIso, input.action, input.limiterKey).run();
-    return { allowed: true as const };
-  }
-
-  if (count >= input.maxAttempts) {
-    const nextBlockedUntil = nowMs + input.blockMs;
-    await db.prepare(
-      `UPDATE auth_rate_limits
-       SET blocked_until_ms = ?, updated_at = ?
-       WHERE action = ? AND limiter_key = ?`
-    ).bind(nextBlockedUntil, nowIso, input.action, input.limiterKey).run();
-    return {
-      allowed: false as const,
-      retryAfterSeconds: Math.max(1, Math.ceil(input.blockMs / 1000))
-    };
-  }
-
-  await db.prepare(
-    `UPDATE auth_rate_limits
-     SET count = ?, updated_at = ?
-     WHERE action = ? AND limiter_key = ?`
-  ).bind(count + 1, nowIso, input.action, input.limiterKey).run();
-
   return { allowed: true as const };
 };
 
@@ -933,12 +1066,40 @@ const getRequestUserAgent = (c: Context<AppBindings>) => (
   || null
 );
 
-export const getRequestIpAddress = (c: Context<AppBindings>) => {
+const forwardedIpIsTrusted = (env: Env) => (
+  ['1', 'true', 'yes'].includes((env.TRUSTED_PROXY || '').trim().toLowerCase())
+);
+
+const forwardedIpHeader = (c: Context<AppBindings>) => {
   const cfIp = c.req.header('CF-Connecting-IP') || c.req.header('cf-connecting-ip');
   if (cfIp) return cfIp;
   const forwarded = c.req.header('x-forwarded-for');
-  if (!forwarded) return null;
-  return forwarded.split(',')[0]?.trim() || null;
+  return forwarded?.split(',')[0]?.trim() || null;
+};
+
+/**
+ * The client address used for rate-limit keys, session records and audit
+ * entries.
+ *
+ * `CF-Connecting-IP` and `X-Forwarded-For` used to be trusted unconditionally.
+ * That is correct on the Cloudflare edge, which overwrites CF-Connecting-IP,
+ * but the self-hosted server is a bare Node listener where both headers are
+ * whatever the client sent -- so IP-keyed limiters on registration, login and
+ * MFA could be bypassed by rotating a header, and the `ip:email` limiters
+ * turned into unlimited mail to one victim. Forwarded headers are now honoured
+ * only where something in front is known to set them.
+ */
+export const getRequestIpAddress = (c: Context<AppBindings>) => {
+  const socketAddress = c.env.socketAddress ?? null;
+  // No socket address means the Cloudflare runtime, where the edge sets
+  // CF-Connecting-IP and overwrites any client-supplied value.
+  if (!socketAddress) {
+    return forwardedIpHeader(c);
+  }
+  if (forwardedIpIsTrusted(c.env)) {
+    return forwardedIpHeader(c) || socketAddress;
+  }
+  return socketAddress;
 };
 
 const recordLoginAttempt = async (
@@ -1074,6 +1235,52 @@ const getMfaSession = async (db: D1Database, sessionId: string) => {
   ).bind(sessionId).first();
 };
 
+/**
+ * Atomically claims one verification attempt.
+ *
+ * The attempt counters used to be read, decided on, and written back, so a
+ * concurrent burst against one challenge all observed `attempt_count = 0` and
+ * the five-attempt cap was never enforced -- enough parallelism turns a
+ * six-digit code into a feasible guess. Claiming the attempt in the same
+ * statement that checks the cap removes the window; a null result means the
+ * row is gone, expired, or out of attempts.
+ */
+export const claimMfaChallengeAttempt = async (db: D1Database, challengeId: string, nowIso: string) => (
+  db.prepare(
+    `UPDATE auth_mfa_challenges
+     SET attempt_count = attempt_count + 1
+     WHERE id = ? AND expires_at > ? AND attempt_count < max_attempts
+     RETURNING user_id, email, code_hash, attempt_count, max_attempts`
+  ).bind(challengeId, nowIso).first()
+);
+
+export const claimMfaSessionAttempt = async (db: D1Database, sessionId: string, nowIso: string) => (
+  db.prepare(
+    `UPDATE auth_mfa_sessions
+     SET attempt_count = attempt_count + 1
+     WHERE id = ? AND expires_at > ? AND attempt_count < max_attempts
+     RETURNING user_id, email, attempt_count, max_attempts`
+  ).bind(sessionId, nowIso).first()
+);
+
+/**
+ * Whether an admin may complete sign-in with an e-mail code.
+ *
+ * Admins are normally held to an authenticator app, but `/api/auth/setup`
+ * creates the first admin without a session and TOTP can only be enrolled
+ * from one. The e-mail code was refused at both send and verify, so a freshly
+ * set-up admin could not sign in at all -- which made running the server in
+ * development mode the easiest way out. The exemption is therefore limited to
+ * an admin that has never held a session, and closes by itself as soon as
+ * this first sign-in creates one.
+ */
+const adminBootstrapOtpAllowed = async (db: D1Database, userId: string) => {
+  const existingSession = await db.prepare(
+    'SELECT 1 AS present FROM sessions WHERE user_id = ? LIMIT 1'
+  ).bind(userId).first();
+  return !existingSession;
+};
+
 const issueEmailFallbackChallenge = async (
   c: Context<AppBindings>,
   input: { userId: string; email: string; role: UserRole }
@@ -1096,7 +1303,7 @@ const issueEmailFallbackChallenge = async (
     userId: input.userId,
     email: input.email
   });
-  if (!challenge.delivered && c.env.ENVIRONMENT === 'production') {
+  if (!challenge.delivered && isProductionEnv(c.env)) {
     await c.env.DB.prepare(
       'DELETE FROM auth_mfa_challenges WHERE id = ?'
     ).bind(challenge.challengeId).run();
@@ -1174,7 +1381,7 @@ async function getSessionUser(db: D1Database, sessionId: string) {
   };
 }
 
-const isSecureRequest = (env: Env) => env.ENVIRONMENT === 'production';
+const isSecureRequest = (env: Env) => isProductionEnv(env);
 
 const clearSessionCookie = (c: Context<AppBindings>) => {
   const isSecure = isSecureRequest(c.env);
@@ -1395,7 +1602,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   };
 
   const getRpId = (env: Env): string => {
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       const origin = (env.FRONTEND_ORIGIN || '').split(',')[0]?.trim() || '';
       try {
         return new URL(origin).hostname;
@@ -1421,6 +1628,66 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     return new Uint8Array(digest);
   };
 
+  let passkeyChallengeTableReady = false;
+
+  /**
+   * Issued passkey challenges.
+   *
+   * The challenge also travels in an HMAC-signed cookie, which binds it to the
+   * browser but cannot make it single-use: expiring it relied on the client
+   * honouring the Set-Cookie that clears it, so a captured assertion could be
+   * replayed for the rest of the 5-minute TTL. This table is the authoritative
+   * record, and consuming a challenge deletes it.
+   */
+  const ensurePasskeyChallengeTable = async (db: D1Database) => {
+    if (passkeyChallengeTableReady) return;
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS auth_passkey_challenges (
+        challenge_hash TEXT PRIMARY KEY,
+        flow TEXT NOT NULL,
+        user_id TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`
+    ).run();
+    await db.prepare(
+      'CREATE INDEX IF NOT EXISTS idx_passkey_challenges_expires_at ON auth_passkey_challenges(expires_at)'
+    ).run();
+    passkeyChallengeTableReady = true;
+  };
+
+  const recordPasskeyChallenge = async (
+    db: D1Database,
+    input: { challenge: string; flow: PasskeyChallengeState['flow']; userId?: string | null; expiresAt: string }
+  ) => {
+    await ensurePasskeyChallengeTable(db);
+    const nowIso = new Date().toISOString();
+    await db.prepare('DELETE FROM auth_passkey_challenges WHERE expires_at <= ?').bind(nowIso).run();
+    await db.prepare(
+      `INSERT INTO auth_passkey_challenges (challenge_hash, flow, user_id, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(challenge_hash) DO UPDATE SET
+         flow = excluded.flow, user_id = excluded.user_id, expires_at = excluded.expires_at`
+    ).bind(await sha256Base64(input.challenge), input.flow, input.userId ?? null, input.expiresAt, nowIso).run();
+  };
+
+  /**
+   * Claims a challenge. Returns null when it was never issued, has expired, or
+   * has already been used -- the delete is the single-use guarantee.
+   */
+  const consumePasskeyChallenge = async (
+    db: D1Database,
+    challenge: string,
+    flow: PasskeyChallengeState['flow']
+  ) => {
+    await ensurePasskeyChallengeTable(db);
+    return db.prepare(
+      `DELETE FROM auth_passkey_challenges
+       WHERE challenge_hash = ? AND flow = ? AND expires_at > ?
+       RETURNING user_id`
+    ).bind(await sha256Base64(challenge), flow, new Date().toISOString()).first();
+  };
+
   const getPasskeyChallengeSecret = (env: Env): string | null => {
     const candidates = [
       env.AUTH_ENCRYPTION_KEY,
@@ -1431,7 +1698,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       const normalized = candidate?.trim();
       if (normalized) return normalized;
     }
-    if (env.ENVIRONMENT === 'production') {
+    if (isProductionEnv(env)) {
       return null;
     }
     return 'dev-passkey-challenge-secret';
@@ -1451,6 +1718,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       userId: input.userId ?? null,
       expiresAt: new Date(Date.now() + PASSKEY_CHALLENGE_TTL_MS).toISOString()
     };
+    await recordPasskeyChallenge(c.env.DB, {
+      challenge: state.challenge,
+      flow: state.flow,
+      userId: state.userId,
+      expiresAt: state.expiresAt
+    });
     const payload = toBase64Url(textEncoder.encode(JSON.stringify(state)));
     const signature = toBase64Url(await hmacSha256(textEncoder.encode(secret), textEncoder.encode(payload)));
     const isSecure = isSecureRequest(c.env);
@@ -1878,8 +2151,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const configuredToken = c.env.ADMIN_SETUP_TOKEN?.trim() || '';
+    // selfhost.env.example ships `<INSERT_RANDOM_TOKEN>`; it was compared
+    // literally, so an operator who copied the file without editing it had a
+    // publicly known bootstrap token.
+    if (configuredToken && !isUsableSetupToken(configuredToken)) {
+      return c.json({
+        error: 'Server misconfiguration: ADMIN_SETUP_TOKEN is a placeholder or too short'
+      }, 503);
+    }
     const requestToken = (c.req.header('x-setup-token') || '').trim();
-    if (configuredToken && requestToken !== configuredToken) {
+    // Compared in constant time: `!==` on a shared secret leaks it a character
+    // at a time to anyone who can measure the response.
+    if (configuredToken && !timingSafeEqual(requestToken, configuredToken)) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 
@@ -1944,7 +2227,31 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
   });
 
   app.post('/api/auth/register', async (c) => {
+    // Public self-service registration is opt-in. It used to be always on,
+    // and because `isEmailAuthorized` treats an unset ALLOWED_EMAILS as "no
+    // restriction", a reachable instance let anyone create an account -- and
+    // on an empty users table the first one became an admin.
+    if (!publicRegistrationEnabled(c.env)) {
+      return c.json({ error: 'Registration is disabled' }, 403);
+    }
+    // Opt-in alone is not enough: without an allowlist this is open to the
+    // whole internet, and without working e-mail nothing can be verified.
+    if (!getAllowedEmails(c.env)) {
+      return c.json({
+        error: 'Server misconfiguration: ALLOWED_EMAILS is required when public registration is enabled'
+      }, 503);
+    }
+
     const userSchema = await getUserSchemaSupport(c.env.DB);
+    const canVerifyEmail = Boolean(c.env.BREVO_API_KEY && c.env.BREVO_FROM_EMAIL)
+      && userSchema.hasEmailVerifiedAt
+      && userSchema.hasEmailVerifyTokenHash
+      && userSchema.hasEmailVerifyExpiresAt;
+    if (!canVerifyEmail) {
+      return c.json({
+        error: 'Server misconfiguration: e-mail verification is required for public registration'
+      }, 503);
+    }
 
     const body = await c.req.json();
     const password = typeof (body as any)?.password === 'string' ? (body as any).password : '';
@@ -1997,15 +2304,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const passwordHash = await hashPassword(password, salt);
     const now = new Date().toISOString();
 
-    const usersCountRow = await c.env.DB.prepare(
-      'SELECT COUNT(*) as count FROM users'
-    ).first();
-    const isFirstUser = Number((usersCountRow as any)?.count ?? 0) === 0;
-
-    const finalRole: UserRole = isFirstUser ? 'admin' : 'readonly';
-
-    const isEmailConfigured = Boolean(c.env.BREVO_API_KEY && c.env.BREVO_FROM_EMAIL);
-    const requireVerification = !isFirstUser && isEmailConfigured && userSchema.hasEmailVerifiedAt && userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt;
+    // Self-registration never grants admin. The first administrator is
+    // created through POST /api/auth/setup, which is gated on
+    // ADMIN_SETUP_TOKEN; granting admin to whoever registered first on an
+    // empty users table bypassed that gate entirely. Verification is likewise
+    // unconditional -- the old first-user exemption also skipped it.
+    const finalRole: UserRole = 'readonly';
+    const requireVerification = true;
 
     let verifyToken: string | null = null;
     let verifyTokenHash: string | null = null;
@@ -2065,17 +2370,16 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       action: 'register',
       resourceType: 'users',
       resourceId: id,
-      summary: isFirstUser ? `公開註冊首位管理員帳號 ${email}` : `公開註冊帳號 ${email}`,
+      summary: `公開註冊帳號 ${email}`,
       details: {
         username: email,
         role: finalRole,
         verification_email_sent: delivered,
-        requires_verification: requireVerification,
-        is_first_user: isFirstUser
+        requires_verification: requireVerification
       }
     });
 
-    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    const debugToken = (verifyToken && debugTokensEnabled(c.env)) ? verifyToken : null;
     return c.json({
       id,
       username: email,
@@ -2185,9 +2489,8 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const salt = (user as any).password_salt as string;
-    const expectedHash = (user as any).password_hash as string;
-    const actualHash = await hashPassword(password, salt);
-    if (!timingSafeEqual(actualHash, expectedHash)) {
+    const passwordCheck = await verifyPassword(password, salt, (user as any).password_hash);
+    if (!passwordCheck.ok) {
       await recordLoginAttempt(c, {
         email,
         success: false,
@@ -2196,6 +2499,18 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         role: normalizeRole((user as any).role)
       });
       return c.json({ error: 'Invalid email or password' }, 401);
+    }
+
+    // Upgrade a hash written at the old cost now that the password is known
+    // to be correct. The salt is kept so the row stays a straight replacement.
+    if (passwordCheck.needsRehash) {
+      await c.env.DB.prepare(
+        'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
+      ).bind(
+        await hashPassword(password, salt),
+        new Date().toISOString(),
+        (user as any).id as string
+      ).run();
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -2273,7 +2588,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
       emailChallengeId = emailFallback.challenge.challengeId;
       emailDelivered = emailFallback.challenge.delivered;
-      debugMfaCode = c.env.ENVIRONMENT === 'production' ? null : emailFallback.challenge.code;
+      debugMfaCode = debugTokensEnabled(c.env) ? emailFallback.challenge.code : null;
     }
 
     return c.json({
@@ -2318,7 +2633,10 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'Invalid or expired MFA session' }, 400);
     }
-    if (normalizeRole((user as any).role) === 'admin') {
+    if (
+      normalizeRole((user as any).role) === 'admin'
+      && !await adminBootstrapOtpAllowed(c.env.DB, (user as any).id as string)
+    ) {
       return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
     }
 
@@ -2346,7 +2664,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       ok: true,
       challenge_id: emailFallback.challenge.challengeId,
       delivered: emailFallback.challenge.delivered,
-      ...(c.env.ENVIRONMENT === 'production' ? {} : { debug_mfa_code: emailFallback.challenge.code })
+      ...(debugTokensEnabled(c.env) ? { debug_mfa_code: emailFallback.challenge.code } : {})
     });
   });
 
@@ -2395,13 +2713,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired MFA session' }, 400);
     }
 
-    const attemptCount = Number((mfaSession as any).attempt_count ?? 0);
-    const maxAttempts = Number((mfaSession as any).max_attempts ?? MFA_MAX_ATTEMPTS);
-    if (attemptCount >= maxAttempts) {
-      await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
-      return c.json({ error: 'Invalid or expired MFA session' }, 400);
-    }
-
     const totpField = userSchema.hasMfaTotpSecret ? ', mfa_totp_secret' : '';
     const user = await c.env.DB.prepare(
       `SELECT id, username, role${totpField} FROM users WHERE id = ?`
@@ -2415,15 +2726,24 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Authenticator app MFA is not enabled' }, 400);
     }
 
-    const isValid = await verifyTotpCode(totpSecret, code);
-    if (!isValid) {
-      const nextAttempts = attemptCount + 1;
+    // Claim the attempt before comparing, so parallel guesses cannot all slip
+    // through on the same pre-increment count.
+    const claimed = await claimMfaSessionAttempt(c.env.DB, sessionId, nowIso);
+    if (!claimed) {
+      await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
+      return c.json({ error: 'Invalid or expired MFA session' }, 400);
+    }
+    const nextAttempts = Number((claimed as any).attempt_count ?? 0);
+    const maxAttempts = Number((claimed as any).max_attempts ?? MFA_MAX_ATTEMPTS);
+
+    const matchedCounter = await verifyTotpCode(totpSecret, code);
+    // Burn the time-step, so the same code cannot be replayed inside the
+    // +/-1 step tolerance window.
+    const accepted = matchedCounter !== null
+      && await consumeTotpCounter(c.env.DB, (user as any).id as string, matchedCounter, userSchema);
+    if (!accepted) {
       if (nextAttempts >= maxAttempts) {
         await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE id = ?').bind(sessionId).run();
-      } else {
-        await c.env.DB.prepare(
-          'UPDATE auth_mfa_sessions SET attempt_count = ? WHERE id = ?'
-        ).bind(nextAttempts, sessionId).run();
       }
       await recordAuditLog(c, {
         action: 'mfa_failed',
@@ -2445,7 +2765,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       `DELETE FROM auth_mfa_sessions
        WHERE id = ?
          AND expires_at > ?
-         AND attempt_count < max_attempts
        RETURNING user_id, email`
     ).bind(sessionId, nowIso).first();
     if (!consumedSession) {
@@ -2525,30 +2844,28 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
 
-    const attemptCount = Number((challenge as any).attempt_count ?? 0);
-    const maxAttempts = Number((challenge as any).max_attempts ?? MFA_MAX_ATTEMPTS);
-    if (attemptCount >= maxAttempts) {
+    // Claim the attempt before comparing, so parallel guesses cannot all slip
+    // through on the same pre-increment count.
+    const claimed = await claimMfaChallengeAttempt(c.env.DB, challengeId, nowIso);
+    if (!claimed) {
       await c.env.DB.prepare('DELETE FROM auth_mfa_challenges WHERE id = ?').bind(challengeId).run();
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
+    const nextAttempts = Number((claimed as any).attempt_count ?? 0);
+    const maxAttempts = Number((claimed as any).max_attempts ?? MFA_MAX_ATTEMPTS);
 
     const codeHash = await sha256Base64(code);
-    if (!timingSafeEqual(codeHash, (challenge as any).code_hash as string)) {
-      const nextAttempts = attemptCount + 1;
+    if (!timingSafeEqual(codeHash, (claimed as any).code_hash as string)) {
       if (nextAttempts >= maxAttempts) {
         await c.env.DB.prepare('DELETE FROM auth_mfa_challenges WHERE id = ?').bind(challengeId).run();
-      } else {
-        await c.env.DB.prepare(
-          'UPDATE auth_mfa_challenges SET attempt_count = ? WHERE id = ?'
-        ).bind(nextAttempts, challengeId).run();
       }
       await recordAuditLog(c, {
         action: 'mfa_failed',
         resourceType: 'auth',
-        resourceId: (challenge as any).user_id as string,
-        summary: `MFA 驗證失敗 ${(challenge as any).email as string}`,
+        resourceId: (claimed as any).user_id as string,
+        summary: `MFA 驗證失敗 ${(claimed as any).email as string}`,
         details: {
-          email: (challenge as any).email as string,
+          email: (claimed as any).email as string,
           challenge_id: challengeId,
           attempt_count: nextAttempts,
           ip_address: getRequestIpAddress(c),
@@ -2563,7 +2880,6 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
        WHERE id = ?
          AND code_hash = ?
          AND expires_at > ?
-         AND attempt_count < max_attempts
        RETURNING user_id, email`
     ).bind(challengeId, codeHash, nowIso).first();
     if (!consumedChallenge) {
@@ -2576,9 +2892,25 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'Invalid or expired sign-in code' }, 400);
     }
-    if (normalizeRole((user as any).role) === 'admin') {
+    const isAdmin = normalizeRole((user as any).role) === 'admin';
+    const isAdminBootstrap = isAdmin
+      && await adminBootstrapOtpAllowed(c.env.DB, (user as any).id as string);
+    if (isAdmin && !isAdminBootstrap) {
       await c.env.DB.prepare('DELETE FROM auth_mfa_sessions WHERE user_id = ?').bind((consumedChallenge as any).user_id as string).run();
       return c.json({ error: 'Admin accounts must use authenticator app MFA.' }, 403);
+    }
+    if (isAdminBootstrap) {
+      await recordAuditLog(c, {
+        action: 'admin_bootstrap_login',
+        resourceType: 'auth',
+        resourceId: (user as any).id as string,
+        summary: `管理員首次登入（Email 驗證碼）${(user as any).username as string}`,
+        details: {
+          email: (consumedChallenge as any).email as string,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
     }
 
     const userRole = normalizeRole((user as any).role);
@@ -2622,7 +2954,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         email: (user as any).username,
         role: userRole,
         avatar_url: null
-      }
+      },
+      // This session is the one chance to enrol TOTP: the next sign-in will
+      // require it, because the exemption only covers an admin with no
+      // session history.
+      ...(isAdminBootstrap ? { requires_totp_enrollment: true } : {})
     });
   });
 
@@ -2640,8 +2976,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
 
     const tokenHash = await sha256Base64(token);
     const now = new Date().toISOString();
+    const pendingField = userSchema.hasPendingEmail ? ', pending_email' : '';
     const user = await c.env.DB.prepare(
-      `SELECT id, email
+      `SELECT id, email${pendingField}
        FROM users
        WHERE email_verify_token_hash = ?
          AND email_verify_expires_at IS NOT NULL
@@ -2651,23 +2988,64 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid or expired token' }, 400);
     }
 
-    await c.env.DB.prepare(
-      `UPDATE users
-       SET email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
-       WHERE id = ?`
-    ).bind(now, now, (user as any).id as string).run();
+    // A parked address change is applied here, once -- and only once -- its
+    // owner has proved control of it by following this link.
+    const pendingEmail = userSchema.hasPendingEmail
+      ? ((user as any).pending_email as string | null) ?? null
+      : null;
+    const previousEmail = (user as any).email as string;
 
+    if (pendingEmail) {
+      // Re-check for a collision: another account may have taken the address
+      // between the request and the confirmation.
+      const duplicateField = userSchema.hasEmail ? 'email' : 'username';
+      const duplicate = await c.env.DB.prepare(
+        `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
+      ).bind(pendingEmail, (user as any).id as string).first();
+      if (duplicate) {
+        await c.env.DB.prepare(
+          `UPDATE users
+           SET pending_email = NULL, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+           WHERE id = ?`
+        ).bind(now, (user as any).id as string).run();
+        return c.json({ error: 'User already exists' }, 409);
+      }
+      await c.env.DB.prepare(
+        `UPDATE users
+         SET username = ?, ${userSchema.hasEmail ? 'email = ?, ' : ''}pending_email = NULL,
+             email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).bind(
+        pendingEmail,
+        ...(userSchema.hasEmail ? [pendingEmail] : []),
+        now,
+        now,
+        (user as any).id as string
+      ).run();
+      // The sign-in identity just moved, so existing sessions should not ride
+      // along on the old one.
+      await revokeUserSessions(c.env.DB, (user as any).id as string);
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE users
+         SET email_verified_at = ?, email_verify_token_hash = NULL, email_verify_expires_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).bind(now, now, (user as any).id as string).run();
+    }
+
+    const verifiedEmail = pendingEmail ?? previousEmail;
     await recordAuditLog(c, {
       action: 'verify_email',
       resourceType: 'users',
       resourceId: (user as any).id as string,
-      summary: `驗證 Email ${(user as any).email as string}`,
+      summary: `驗證 Email ${verifiedEmail}`,
       details: {
-        email: (user as any).email as string
+        email: verifiedEmail,
+        ...(pendingEmail ? { previous_email: previousEmail, email_changed: true } : {})
       }
     });
 
-    return c.json({ ok: true, email: (user as any).email as string });
+    return c.json({ ok: true, email: verifiedEmail, email_changed: Boolean(pendingEmail) });
   });
 
   app.post('/api/auth/accept-invite', async (c) => {
@@ -2797,7 +3175,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    const debugToken = c.env.ENVIRONMENT === 'production' ? null : token;
+    const debugToken = debugTokensEnabled(c.env) ? token : null;
     return c.json({
       ok: true,
       delivered,
@@ -3069,19 +3447,27 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'TOTP setup expired. Start setup again.' }, 400);
     }
 
-    const isValid = await verifyTotpCode(pendingSecret, code);
-    if (!isValid) {
+    const matchedCounter = await verifyTotpCode(pendingSecret, code);
+    if (matchedCounter === null) {
       return c.json({ error: 'Invalid authenticator code' }, 400);
     }
 
     const email = ((user as any).email as string | null) ?? ((user as any).username as string);
     const nowIso = new Date().toISOString();
     const encryptedSecret = await encryptSecret(c.env, pendingSecret);
+    const lastCounterColumn = userSchema.hasMfaTotpLastCounter ? ', mfa_totp_last_counter = ?' : '';
     await c.env.DB.prepare(
       `UPDATE users
-       SET mfa_totp_secret = ?, mfa_totp_enabled_at = ?, mfa_totp_pending_secret = NULL, mfa_totp_pending_expires_at = NULL, updated_at = ?
+       SET mfa_totp_secret = ?, mfa_totp_enabled_at = ?, mfa_totp_pending_secret = NULL, mfa_totp_pending_expires_at = NULL, updated_at = ?${lastCounterColumn}
        WHERE id = ?`
-    ).bind(encryptedSecret, nowIso, nowIso, sessionUser.userId).run();
+    ).bind(
+      encryptedSecret,
+      nowIso,
+      nowIso,
+      // The code just used for enrolment must not also work as a sign-in code.
+      ...(userSchema.hasMfaTotpLastCounter ? [matchedCounter] : []),
+      sessionUser.userId
+    ).run();
 
     await recordAuditLog(c, {
       action: 'mfa_totp_enabled',
@@ -3153,6 +3539,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     const body = await c.req.json();
     const hasEmailUpdate = typeof (body as any)?.email === 'string';
     const nextEmail = hasEmailUpdate ? normalizeEmail((body as any).email) : '';
+    const currentPassword = typeof (body as any)?.current_password === 'string'
+      ? (body as any).current_password
+      : '';
     const hasAvatarUpdate = Object.prototype.hasOwnProperty.call(body as object, 'avatar_url');
     const avatarUrlRaw = hasAvatarUpdate ? (body as any).avatar_url : undefined;
     const nextAvatarUrl = typeof avatarUrlRaw === 'string' ? avatarUrlRaw.trim() : null;
@@ -3162,6 +3551,11 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
     if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
       return c.json({ error: 'Invalid email format' }, 400);
+    }
+    // Account avatars were also stored verbatim, and user management renders
+    // them, so the same beacon applied to whoever views the user list.
+    if (nextAvatarUrl && !isServerMintedAvatarUrl(nextAvatarUrl)) {
+      return c.json({ error: 'avatar_url must be an uploaded avatar path' }, 400);
     }
 
     const existing = await c.env.DB.prepare(
@@ -3177,36 +3571,67 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     let delivered = false;
     const changedFields: string[] = [];
 
+    let pendingEmail: string | null = null;
     if (hasEmailUpdate) {
       const currentEmail = ((existing as any).email as string | null) ?? ((existing as any).username as string);
       if (currentEmail !== nextEmail) {
+        // Changing the address used to need nothing but the session, and it
+        // swapped the sign-in identity immediately. A hijacked session could
+        // therefore point the account at an attacker's address, collect the
+        // verification mail, then use password reset to keep it for good.
+        if (!currentPassword) {
+          return c.json({ error: 'current_password is required to change the email address' }, 400);
+        }
+        const reauth = await verifyPassword(
+          currentPassword,
+          (existing as any).password_salt as string,
+          (existing as any).password_hash
+        );
+        if (!reauth.ok) {
+          await recordAuditLog(c, {
+            action: 'account_email_change_denied',
+            resourceType: 'account',
+            resourceId: sessionUser.userId,
+            summary: `變更 Email 失敗：密碼錯誤 ${currentEmail}`,
+            details: {
+              ip_address: getRequestIpAddress(c),
+              user_agent: getRequestUserAgent(c)
+            }
+          });
+          return c.json({ error: 'Current password is incorrect' }, 400);
+        }
+        // The allowlist is applied without the admin exemption: that exemption
+        // exists so an admin is not locked out of an address they already
+        // hold, not so they can move to one outside the list.
+        if (!isEmailAuthorized(nextEmail, c.env)) {
+          return c.json({ error: 'That email address is not authorized for this database' }, 403);
+        }
+        if (!userSchema.hasEmailVerifyTokenHash || !userSchema.hasEmailVerifyExpiresAt || !userSchema.hasPendingEmail) {
+          return c.json({ error: 'Email changes are not available' }, 503);
+        }
+
         const duplicateField = userSchema.hasEmail ? 'email' : 'username';
         const duplicate = await c.env.DB.prepare(
-          `SELECT id FROM users WHERE ${duplicateField} = ? AND id != ?`
-        ).bind(nextEmail, sessionUser.userId).first();
+          `SELECT id FROM users WHERE (${duplicateField} = ? OR pending_email = ?) AND id != ?`
+        ).bind(nextEmail, nextEmail, sessionUser.userId).first();
         if (duplicate) {
           return c.json({ error: 'User already exists' }, 409);
         }
-        updates.push('username = ?');
-        values.push(nextEmail);
-        if (userSchema.hasEmail) {
-          updates.push('email = ?');
-          values.push(nextEmail);
-        }
-        if (userSchema.hasEmailVerifiedAt) {
-          updates.push('email_verified_at = ?');
-          values.push(null);
-        }
-        if (userSchema.hasEmailVerifyTokenHash && userSchema.hasEmailVerifyExpiresAt) {
-          const token = await createVerificationToken();
-          updates.push('email_verify_token_hash = ?', 'email_verify_expires_at = ?');
-          values.push(token.tokenHash, token.expiresAt);
-          const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
-          delivered = invitePending
-            ? await sendInvitationEmail(c.env, nextEmail, buildInvitationUrl(c.env, token.token))
-            : await sendVerificationEmail(c.env, nextEmail, buildVerificationUrl(c.env, token.token));
-        }
-        changedFields.push('email');
+
+        // Park the address until its owner proves control of it. username,
+        // email and email_verified_at deliberately stay as they are, so the
+        // account keeps working at its current address in the meantime.
+        const token = await createVerificationToken();
+        updates.push('pending_email = ?', 'email_verify_token_hash = ?', 'email_verify_expires_at = ?');
+        values.push(nextEmail, token.tokenHash, token.expiresAt);
+        pendingEmail = nextEmail;
+
+        const invitePending = isInvitePendingPassword((existing as any).password_hash, (existing as any).password_salt);
+        delivered = invitePending
+          ? await sendInvitationEmail(c.env, nextEmail, buildInvitationUrl(c.env, token.token))
+          : await sendVerificationEmail(c.env, nextEmail, buildVerificationUrl(c.env, token.token));
+        await sendEmailChangeNoticeEmail(c.env, currentEmail, nextEmail);
+        changedFields.push('pending_email');
       }
     }
 
@@ -3242,7 +3667,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       }
     });
 
-    return c.json(accountData.account);
+    return c.json({ ...accountData.account, pending_email: pendingEmail });
   });
 
   app.post('/api/auth/account/avatar', async (c) => {
@@ -3337,8 +3762,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (!user) {
       return c.json({ error: 'User not found' }, 404);
     }
-    const actualHash = await hashPassword(currentPassword, (user as any).password_salt as string);
-    if (!timingSafeEqual(actualHash, (user as any).password_hash as string)) {
+    const currentPasswordCheck = await verifyPassword(
+      currentPassword,
+      (user as any).password_salt as string,
+      (user as any).password_hash
+    );
+    if (!currentPasswordCheck.ok) {
       return c.json({ error: 'Current password is incorrect' }, 400);
     }
 
@@ -3587,7 +4016,7 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
         invitation_email_sent: delivered
       }
     });
-    const debugToken = (c.env.ENVIRONMENT === 'production' || !verifyToken) ? null : verifyToken;
+    const debugToken = (verifyToken && debugTokensEnabled(c.env)) ? verifyToken : null;
     return c.json({
       id,
       username: email,
@@ -3978,6 +4407,13 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid challenge' }, 400);
     }
+    // Claim the challenge so a captured ceremony cannot be replayed, even with
+    // the cookie, and so one challenge cannot be retried.
+    const claimedChallenge = await consumePasskeyChallenge(c.env.DB, clientData.challenge, 'register');
+    if (!claimedChallenge || String((claimedChallenge as any).user_id ?? '') !== sessionUser.userId) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey registration challenge is missing or expired' }, 400);
+    }
 
     let credentialPublicKey: Uint8Array;
     let credentialAlgorithm = alg;
@@ -3999,6 +4435,15 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       if (!bytesEqual(rpIdHash, attestation.authData.rpIdHash)) {
         clearPasskeyChallengeCookie(c);
         return c.json({ error: 'Invalid RP ID' }, 400);
+      }
+
+      // The body's `id` is what gets stored and later looked up at sign-in, so
+      // it has to be the credential the authenticator actually attested to --
+      // it was previously trusted without being compared.
+      if (attestation.authData.credentialId.length > 0
+        && !timingSafeEqual(toBase64Url(attestation.authData.credentialId), credentialId)) {
+        clearPasskeyChallengeCookie(c);
+        return c.json({ error: 'Credential id does not match the attested credential' }, 400);
       }
 
       credentialPublicKey = attestation.authData.credentialPublicKey;
@@ -4138,6 +4583,12 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid challenge' }, 400);
     }
+    // Claim the challenge so a captured assertion cannot be replayed within
+    // its TTL, and so one challenge cannot be retried.
+    if (!await consumePasskeyChallenge(c.env.DB, clientData.challenge, 'login')) {
+      clearPasskeyChallengeCookie(c);
+      return c.json({ error: 'Passkey login challenge is missing or expired' }, 400);
+    }
     if (!bytesEqual(expectedRpIdHash, parseAuthDataRpIdHash(authenticatorData))) {
       clearPasskeyChallengeCookie(c);
       return c.json({ error: 'Invalid RP ID' }, 400);
@@ -4231,12 +4682,37 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
       return c.json({ error: 'Invalid passkey signature' }, 401);
     }
 
-    // Verify counter (prevent cloned authenticators)
+    // A signature counter that has not advanced is the spec's signal of a
+    // cloned authenticator. This used to log a warning and continue, which
+    // meant clone detection was effectively off.
+    //
+    // Authenticators that do not implement a counter report 0 forever; for
+    // those `storedCounter` stays 0 and the check is skipped, as the spec
+    // requires.
     const storedCounter = Number((passkey as any).counter) || 0;
     const authDataCounter = parseAuthDataCounter(authenticatorData);
     if (storedCounter > 0 && authDataCounter <= storedCounter) {
-      // Counter didn't increase - possible clone. Allow but warn.
-      console.warn('Passkey counter did not increase:', { credentialId, storedCounter, authDataCounter });
+      clearPasskeyChallengeCookie(c);
+      await recordAuditLog(c, {
+        action: 'passkey_counter_regression',
+        resourceType: 'auth',
+        resourceId: (passkey as any).user_id as string,
+        summary: `Passkey 簽章計數未遞增，拒絕登入 ${credentialId}`,
+        details: {
+          passkey_id: (passkey as any).id as string,
+          stored_counter: storedCounter,
+          presented_counter: authDataCounter,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
+      await recordLoginAttempt(c, {
+        email: 'passkey-user',
+        success: false,
+        reason: 'passkey_counter_regression',
+        userId: (passkey as any).user_id as string
+      });
+      return c.json({ error: 'Invalid passkey' }, 401);
     }
 
     const nowIso = new Date().toISOString();
@@ -4255,6 +4731,37 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     }
 
     const userRole = normalizeRole((user as any).role);
+
+    // A passkey is a single factor, and for an admin it is the whole sign-in --
+    // it bypasses the mandatory-TOTP policy that the password path enforces.
+    // Only user presence was checked, so a roaming key with no PIN or
+    // biometric was enough for an admin session. The role is not known at
+    // /login/begin (the credential is discoverable), so this is enforced here.
+    const PASSKEY_FLAG_USER_VERIFIED = 0x04;
+    if (userRole === 'admin' && !(authDataFlags & PASSKEY_FLAG_USER_VERIFIED)) {
+      await recordAuditLog(c, {
+        action: 'passkey_user_verification_required',
+        resourceType: 'auth',
+        resourceId: (user as any).id as string,
+        summary: `Passkey 未經使用者驗證，拒絕管理員登入 ${(user as any).username as string}`,
+        details: {
+          passkey_id: (passkey as any).id as string,
+          ip_address: getRequestIpAddress(c),
+          user_agent: getRequestUserAgent(c)
+        }
+      });
+      await recordLoginAttempt(c, {
+        email: (user as any).username as string,
+        success: false,
+        reason: 'passkey_user_verification_required',
+        userId: (user as any).id as string,
+        role: userRole
+      });
+      return c.json({
+        error: 'Administrator sign-in requires a passkey that verifies you (biometric or PIN).'
+      }, 401);
+    }
+
     const userEmail = normalizeEmail((user as any).email ?? (user as any).username);
     if (!isEmailAuthorized(userEmail, c.env, userRole)) {
       await recordLoginAttempt(c, {

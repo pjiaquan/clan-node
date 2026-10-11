@@ -158,6 +158,8 @@ CREATE TABLE IF NOT EXISTS users (
     mfa_totp_enabled_at TEXT,
     mfa_totp_pending_secret TEXT,
     mfa_totp_pending_expires_at TEXT,
+    mfa_totp_last_counter INTEGER,
+    pending_email TEXT,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
