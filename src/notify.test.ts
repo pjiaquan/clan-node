@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sendTelegramPayload } from './notify';
-import type { Env } from './types';
+import { Hono } from 'hono';
+import { notifyUpdate, sendTelegramPayload } from './notify';
+import type { AppBindings, Env } from './types';
 
 test('sendTelegramPayload skips if token or chat ID is missing', async () => {
   const originalWarn = console.warn;
@@ -144,5 +145,46 @@ test('sendTelegramPayload catches fetch exceptions and logs warning', async () =
   } finally {
     globalThis.fetch = originalFetch;
     console.warn = originalWarn;
+  }
+});
+
+test('notifyUpdate reports the resolved client address, not a spoofed header', async () => {
+  const originalFetch = globalThis.fetch;
+  const sent: string[] = [];
+  globalThis.fetch = async (_url: string | URL | Request, options?: RequestInit) => {
+    sent.push(JSON.parse(options?.body as string).text);
+    return new Response('ok', { status: 200 });
+  };
+
+  try {
+    const pending: Promise<unknown>[] = [];
+    const app = new Hono<AppBindings>();
+    app.post('/api/x', (c) => {
+      notifyUpdate(c, 'test:event');
+      return c.text('ok');
+    });
+    // A self-host request (socketAddress set, no TRUSTED_PROXY) carrying a
+    // client-chosen CF-Connecting-IP.
+    const env = {
+      TELEGRAM_BOT_TOKEN: 'test-token',
+      TELEGRAM_CHAT_ID: 'test-chat',
+      socketAddress: '198.51.100.7',
+    } as Env;
+    const executionCtx = {
+      waitUntil: (p: Promise<unknown>) => { pending.push(p); },
+      passThroughOnException: () => {},
+      props: {},
+    } as unknown as ExecutionContext;
+    await app.request('/api/x', {
+      method: 'POST',
+      headers: { 'CF-Connecting-IP': '203.0.113.9' },
+    }, env, executionCtx);
+    await Promise.all(pending);
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /^IP: 198\.51\.100\.7$/m);
+    assert.doesNotMatch(sent[0], /203\.0\.113\.9/);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
