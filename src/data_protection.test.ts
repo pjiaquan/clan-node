@@ -258,3 +258,10 @@ test('migratePlaintextCustomFieldRows rewrites plaintext and v1 values as bound 
   assert.deepEqual(note.params.slice(1), [2, 'plain']);
   assert.equal(await decryptProtectedValue(REJECT_LEGACY_ENV, note.params[0] as string, customFieldContext('person-a', 'note')), 'plain');
 });
+
+test('protectPersonWriteFields skips undefined fields and keeps explicit nulls', async () => {
+  const fields = await protectPersonWriteFields(ENV, 'person-a', { dob: undefined, dod: null, tob: '08:00' });
+  assert.equal('dob' in fields, false, 'an omitted field must not be written');
+  assert.equal(fields.dod, null, 'an explicit null still clears the column');
+  assert.ok(fields.tob?.startsWith(`${ENCRYPTED_VALUE_PREFIX}:`));
+});
