@@ -237,3 +237,11 @@ npm run dev:selfhost
 ```
 
 That starts the Node server on port `8787` using local SQLite, filesystem avatar storage, and the built frontend if `frontend/dist` exists.
+
+To serve the frontend from it, build it first with an empty `VITE_API_BASE`, as the Dockerfile does:
+
+```bash
+cd frontend && npm ci && VITE_API_BASE= npm run build
+```
+
+Without `VITE_API_BASE=`, a build opened on localhost sends its API calls to port `8787`. That happens to work for `npm run dev:selfhost`, but on any other `PORT` the page's `connect-src 'self'` policy blocks them.
