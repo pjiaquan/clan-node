@@ -86,11 +86,16 @@ export class D1GraphRepository implements GraphRepository {
     if (!userSchema.hasEmail || !userSchema.hasEmailVerifiedAt) {
       return new Map<string, string>();
     }
-    const normalizedEmails = Array.from(new Set(
-      emails
-        .map((email) => typeof email === 'string' ? email.trim().toLowerCase() : '')
-        .filter(Boolean),
-    ));
+    // Bolt Optimization: Replaced O(N) chained array allocations with a single loop
+    const uniqueEmails = new Set<string>();
+    for (let i = 0; i < emails.length; i++) {
+      const email = emails[i];
+      if (typeof email === 'string') {
+        const normalized = email.trim().toLowerCase();
+        if (normalized) uniqueEmails.add(normalized);
+      }
+    }
+    const normalizedEmails = Array.from(uniqueEmails);
     if (!normalizedEmails.length) {
       return new Map<string, string>();
     }
