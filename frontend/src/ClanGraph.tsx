@@ -2474,6 +2474,10 @@ export function ClanGraph({
 
     const visibleNodes = graphData.nodes.filter((person) => !concealedNodeIds.has(person.id));
 
+    // nodePositionMap is a deliberate render-time cache of where the user last
+    // dropped each node, so a recompute does not snap nodes back. Moving a node
+    // must not trigger a re-render, which is why it is a ref and not state.
+    // eslint-disable-next-line react-hooks/refs
     return visibleNodes.map((person, index) => {
       const genderColor = person.gender === 'M' ? '#3b82f6' : person.gender === 'F' ? '#ec4899' : '#8b5cf6';
       const title = person.title || '';

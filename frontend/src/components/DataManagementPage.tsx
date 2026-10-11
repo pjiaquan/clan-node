@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type { AuthUser, NodeBackupPayload } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
@@ -59,6 +59,14 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
   const [passphraseConfirmValue, setPassphraseConfirmValue] = useState('');
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
 
+  const closePassphrasePrompt = useCallback((value: string | null) => {
+    passphrasePrompt?.resolve(value);
+    setPassphrasePrompt(null);
+    setPassphraseValue('');
+    setPassphraseConfirmValue('');
+    setPassphraseError(null);
+  }, [passphrasePrompt]);
+
   useEffect(() => {
     if (!passphrasePrompt) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -69,7 +77,7 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [passphrasePrompt]);
+  }, [passphrasePrompt, closePassphrasePrompt]);
 
   const requestPassphrase = (confirm: boolean) => new Promise<string | null>((resolve) => {
     setPassphraseValue('');
@@ -77,14 +85,6 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
     setPassphraseError(null);
     setPassphrasePrompt({ confirm, resolve });
   });
-
-  const closePassphrasePrompt = (value: string | null) => {
-    passphrasePrompt?.resolve(value);
-    setPassphrasePrompt(null);
-    setPassphraseValue('');
-    setPassphraseConfirmValue('');
-    setPassphraseError(null);
-  };
 
   const submitPassphrase = (event: React.FormEvent) => {
     event.preventDefault();
