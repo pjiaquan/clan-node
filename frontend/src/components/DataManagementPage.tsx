@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { AuthUser } from '../types';
+import type { AuthUser, NodeBackupPayload } from '../types';
 import { PageHeaderMenu } from './PageHeaderMenu';
 import { useI18n } from '../i18n';
 import {
+  MIN_BACKUP_PASSPHRASE_LENGTH,
   decryptBackupPayload,
   encryptBackupPayload,
   isEncryptedBackupPayload,
@@ -47,27 +48,62 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
 
   const isAdmin = currentUser.role === 'admin';
 
-  const promptForExportPassphrase = () => {
-    const first = window.prompt(t('settings.backupPassphrasePrompt'));
-    if (first === null) return null;
-    if (!first.trim()) {
-      throw new Error(t('settings.backupPassphraseRequired'));
-    }
-    const second = window.prompt(t('settings.backupPassphraseConfirmPrompt'));
-    if (second === null) return null;
-    if (first !== second) {
-      throw new Error(t('settings.backupPassphraseMismatch'));
-    }
-    return first;
+  // The passphrase used to be collected with window.prompt, which shows it in
+  // clear text on screen and cannot validate before closing. This asks for it
+  // in masked fields instead.
+  const [passphrasePrompt, setPassphrasePrompt] = useState<{
+    confirm: boolean;
+    resolve: (value: string | null) => void;
+  } | null>(null);
+  const [passphraseValue, setPassphraseValue] = useState('');
+  const [passphraseConfirmValue, setPassphraseConfirmValue] = useState('');
+  const [passphraseError, setPassphraseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!passphrasePrompt) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePassphrasePrompt(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [passphrasePrompt]);
+
+  const requestPassphrase = (confirm: boolean) => new Promise<string | null>((resolve) => {
+    setPassphraseValue('');
+    setPassphraseConfirmValue('');
+    setPassphraseError(null);
+    setPassphrasePrompt({ confirm, resolve });
+  });
+
+  const closePassphrasePrompt = (value: string | null) => {
+    passphrasePrompt?.resolve(value);
+    setPassphrasePrompt(null);
+    setPassphraseValue('');
+    setPassphraseConfirmValue('');
+    setPassphraseError(null);
   };
 
-  const promptForImportPassphrase = () => {
-    const passphrase = window.prompt(t('settings.backupPassphraseImportPrompt'));
-    if (passphrase === null) return null;
-    if (!passphrase.trim()) {
-      throw new Error(t('settings.backupPassphraseRequired'));
+  const submitPassphrase = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!passphrasePrompt) return;
+    if (!passphraseValue.trim()) {
+      setPassphraseError(t('settings.backupPassphraseRequired'));
+      return;
     }
-    return passphrase;
+    if (passphrasePrompt.confirm) {
+      if (passphraseValue.trim().length < MIN_BACKUP_PASSPHRASE_LENGTH) {
+        setPassphraseError(t('settings.backupPassphraseTooShort', { min: MIN_BACKUP_PASSPHRASE_LENGTH }));
+        return;
+      }
+      if (passphraseValue !== passphraseConfirmValue) {
+        setPassphraseError(t('settings.backupPassphraseMismatch'));
+        return;
+      }
+    }
+    closePassphrasePrompt(passphraseValue);
   };
 
   const handleExportBackup = async () => {
@@ -75,7 +111,7 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
     setBackupMessage(null);
     setIsExportingBackup(true);
     try {
-      const passphrase = promptForExportPassphrase();
+      const passphrase = await requestPassphrase(true);
       if (passphrase === null) {
         setIsExportingBackup(false);
         return;
@@ -116,15 +152,14 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
     try {
       const text = await backupFile.text();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const payload = isEncryptedBackupPayload(parsed)
-        ? await decryptBackupPayload(parsed, (() => {
-          const passphrase = promptForImportPassphrase();
-          if (passphrase === null) {
-            throw new Error(t('settings.importCancelled'));
-          }
-          return passphrase;
-        })())
-        : parsed;
+      let payload: Record<string, unknown> | NodeBackupPayload = parsed;
+      if (isEncryptedBackupPayload(parsed)) {
+        const passphrase = await requestPassphrase(false);
+        if (passphrase === null) {
+          throw new Error(t('settings.importCancelled'));
+        }
+        payload = await decryptBackupPayload(parsed, passphrase);
+      }
       const result = await api.importNodeBackup(payload);
       setBackupMessage(
         t('settings.importDone', {
@@ -212,6 +247,57 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
           </section>
         )}
       </main>
+
+      {passphrasePrompt && (
+        <div className="modal-overlay" onClick={() => closePassphrasePrompt(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h2>{t('settings.backupPassphraseLabel')}</h2>
+            <form onSubmit={submitPassphrase}>
+              <p className="name-lock-hint">
+                {passphrasePrompt.confirm
+                  ? t('settings.backupPassphrasePrompt')
+                  : t('settings.backupPassphraseImportPrompt')}
+              </p>
+              <div className="form-group">
+                <label htmlFor="backup-passphrase">{t('settings.backupPassphraseLabel')}</label>
+                <input
+                  id="backup-passphrase"
+                  type="password"
+                  value={passphraseValue}
+                  onChange={(event) => setPassphraseValue(event.target.value)}
+                  autoComplete={passphrasePrompt.confirm ? 'new-password' : 'current-password'}
+                  autoFocus
+                  required
+                />
+              </div>
+              {passphrasePrompt.confirm && (
+                <div className="form-group">
+                  <label htmlFor="backup-passphrase-confirm">
+                    {t('settings.backupPassphraseConfirmLabel')}
+                  </label>
+                  <input
+                    id="backup-passphrase-confirm"
+                    type="password"
+                    value={passphraseConfirmValue}
+                    onChange={(event) => setPassphraseConfirmValue(event.target.value)}
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+              )}
+              <div className="form-actions">
+                <button type="button" onClick={() => closePassphrasePrompt(null)}>
+                  {t('common.cancel')}
+                </button>
+                <button type="submit" className="btn-primary">
+                  {t('settings.backupPassphraseSubmit')}
+                </button>
+              </div>
+              {passphraseError && <div className="login-error">{passphraseError}</div>}
+              </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -309,7 +309,8 @@ export interface NodeBackupPayload {
 
 export interface EncryptedNodeBackupPayload {
   format: 'clan-node-backup-encrypted';
-  version: 1;
+  /** 1: PBKDF2 at 250k, no AAD. 2: 600k, header bound as AAD. */
+  version: 1 | 2;
   encrypted_at: string;
   kdf: {
     algorithm: 'PBKDF2';

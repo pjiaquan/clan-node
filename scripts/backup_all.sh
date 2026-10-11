@@ -5,7 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="${BACKUP_DIR:-"$ROOT_DIR/backups"}"
 TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
 
-D1_NAME="${D1_NAME:-}"
+# Back up the production database by default. clan-db is declared only under
+# [env.production] in wrangler.worker.toml, so the export must select that env.
+# Without --remote, `d1 export` reads the local wrangler dev database instead.
+D1_NAME="${D1_NAME:-clan-db}"
+D1_ENV="${D1_ENV:-production}"
 R2_BUCKET="${R2_BUCKET:-}"
 R2_REMOTE="${R2_REMOTE:-}"
 R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
@@ -22,9 +26,13 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-DB_OUT="$BACKUP_DIR/d1-${TIMESTAMP}.sql"
-echo "Exporting D1 database to $DB_OUT"
-wrangler --config "${WRANGLER_CONFIG:-wrangler.worker.toml}" d1 export "$D1_NAME" --output "$DB_OUT"
+DB_OUT="$BACKUP_DIR/d1-${D1_NAME}-${TIMESTAMP}.sql"
+echo "Exporting remote D1 database $D1_NAME (env: $D1_ENV) to $DB_OUT"
+wrangler --config "${WRANGLER_CONFIG:-wrangler.worker.toml}" d1 export "$D1_NAME" --remote --env "$D1_ENV" --output "$DB_OUT"
+if [[ ! -s "$DB_OUT" ]]; then
+  echo "D1 export is empty or missing: $DB_OUT" >&2
+  exit 1
+fi
 
 AVATAR_OUT="$BACKUP_DIR/avatars-${TIMESTAMP}"
 if command -v rclone >/dev/null 2>&1; then

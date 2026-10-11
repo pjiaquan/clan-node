@@ -25,31 +25,44 @@ export class KinshipTitleResolver {
     private readonly relationships: Relationship[],
   ) {
     this.rankComputer = new SiblingRankComputer(people, relationships);
-    people.forEach((p) => this.peopleMap.set(p.id, p));
+    for (let i = 0; i < people.length; i++) {
+      const p = people[i];
+      this.peopleMap.set(p.id, p);
+    }
 
-    relationships.forEach((rel) => {
+    // Bolt Optimization: Replace forEach with index-based loop and consolidate map lookups
+    for (let i = 0; i < relationships.length; i++) {
+      const rel = relationships[i];
       if (rel.type === 'parent_child') {
-        if (!this.childrenOfParentMap.has(rel.from_person_id)) {
-          this.childrenOfParentMap.set(rel.from_person_id, new Set());
+        let children = this.childrenOfParentMap.get(rel.from_person_id);
+        if (children === undefined) {
+          children = new Set();
+          this.childrenOfParentMap.set(rel.from_person_id, children);
         }
-        this.childrenOfParentMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        children.add(rel.to_person_id);
 
-        if (!this.parentsOfChildMap.has(rel.to_person_id)) {
-          this.parentsOfChildMap.set(rel.to_person_id, new Set());
+        let parents = this.parentsOfChildMap.get(rel.to_person_id);
+        if (parents === undefined) {
+          parents = new Set();
+          this.parentsOfChildMap.set(rel.to_person_id, parents);
         }
-        this.parentsOfChildMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        parents.add(rel.from_person_id);
       } else if (rel.type === 'spouse') {
-        if (!this.spouseOfPersonMap.has(rel.from_person_id)) {
-          this.spouseOfPersonMap.set(rel.from_person_id, new Set());
+        let spousesFrom = this.spouseOfPersonMap.get(rel.from_person_id);
+        if (spousesFrom === undefined) {
+          spousesFrom = new Set();
+          this.spouseOfPersonMap.set(rel.from_person_id, spousesFrom);
         }
-        this.spouseOfPersonMap.get(rel.from_person_id)!.add(rel.to_person_id);
+        spousesFrom.add(rel.to_person_id);
 
-        if (!this.spouseOfPersonMap.has(rel.to_person_id)) {
-          this.spouseOfPersonMap.set(rel.to_person_id, new Set());
+        let spousesTo = this.spouseOfPersonMap.get(rel.to_person_id);
+        if (spousesTo === undefined) {
+          spousesTo = new Set();
+          this.spouseOfPersonMap.set(rel.to_person_id, spousesTo);
         }
-        this.spouseOfPersonMap.get(rel.to_person_id)!.add(rel.from_person_id);
+        spousesTo.add(rel.from_person_id);
       }
-    });
+    }
   }
 
   resolve({ path, nodePath, targetId }: ResolveInput): string {

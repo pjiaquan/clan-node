@@ -36,6 +36,7 @@ class MockD1Database {
   auditRows: Array<Record<string, unknown>> = [];
   rateLimits = new Map<string, RateLimitRow>();
   passkeys = new Map<string, PasskeyRow>();
+  passkeyChallenges = new Map<string, { flow: string; user_id: string | null; expires_at: string }>();
   sessions: Array<Record<string, unknown>> = [];
   users = new Map<string, Record<string, unknown>>([
     ['user-1', {
@@ -137,39 +138,44 @@ class MockD1Database {
     if (query.startsWith('UPDATE users SET email = LOWER(TRIM(username))')) {
       return { run: { success: true, meta: { changes: 0 } } };
     }
-    if (query.includes('SELECT window_start_ms, count, blocked_until_ms')) {
-      const key = `${args[0]}::${args[1]}`;
+    // The limiter is one upsert that returns the post-update row; its real
+    // behaviour is covered against SQLite in src/rate_limit.test.ts.
+    if (query.includes('INSERT INTO auth_rate_limits')) {
+      const [action, limiterKey, nowMs] = [String(args[0]), String(args[1]), Number(args[2])];
+      const key = `${action}::${limiterKey}`;
+      const maxAttempts = Number(args[11]);
+      const existing = this.rateLimits.get(key);
+      if (!existing) {
+        this.rateLimits.set(key, { window_start_ms: nowMs, count: 1, blocked_until_ms: null });
+      } else if (!(existing.blocked_until_ms && existing.blocked_until_ms > nowMs)) {
+        if (existing.count + 1 > maxAttempts) {
+          existing.blocked_until_ms = nowMs + Number(args[16]);
+        } else {
+          existing.count += 1;
+        }
+      }
       return { first: this.rateLimits.get(key) ?? null };
     }
-    if (query.includes('INSERT INTO auth_rate_limits')) {
-      const key = `${args[0]}::${args[1]}`;
-      this.rateLimits.set(key, {
-        window_start_ms: Number(args[2]),
-        count: Number(args[3]),
-        blocked_until_ms: null
+    if (query.includes('INSERT INTO auth_passkey_challenges')) {
+      this.passkeyChallenges.set(String(args[0]), {
+        flow: String(args[1]),
+        user_id: args[2] == null ? null : String(args[2]),
+        expires_at: String(args[3])
       });
       return { run: { success: true, meta: { changes: 1 } } };
     }
-    if (query.includes('UPDATE auth_rate_limits') && query.includes('SET window_start_ms = ?')) {
-      const key = `${args[2]}::${args[3]}`;
-      this.rateLimits.set(key, {
-        window_start_ms: Number(args[0]),
-        count: 1,
-        blocked_until_ms: null
-      });
-      return { run: { success: true, meta: { changes: 1 } } };
+    if (query.includes('DELETE FROM auth_passkey_challenges WHERE expires_at <= ?')) {
+      return { run: { success: true, meta: { changes: 0 } } };
     }
-    if (query.includes('UPDATE auth_rate_limits') && query.includes('SET blocked_until_ms = ?')) {
-      const key = `${args[2]}::${args[3]}`;
-      const current = this.rateLimits.get(key);
-      if (current) current.blocked_until_ms = Number(args[0]);
-      return { run: { success: true, meta: { changes: 1 } } };
-    }
-    if (query.includes('UPDATE auth_rate_limits') && query.includes('SET count = ?')) {
-      const key = `${args[2]}::${args[3]}`;
-      const current = this.rateLimits.get(key);
-      if (current) current.count = Number(args[0]);
-      return { run: { success: true, meta: { changes: 1 } } };
+    if (query.includes('DELETE FROM auth_passkey_challenges')) {
+      const hash = String(args[0]);
+      const row = this.passkeyChallenges.get(hash);
+      if (!row || row.flow !== String(args[1]) || row.expires_at <= String(args[2])) {
+        return { first: null };
+      }
+      // Single use: the row is gone once claimed.
+      this.passkeyChallenges.delete(hash);
+      return { first: { user_id: row.user_id } };
     }
     if (query.includes('SELECT credential_id FROM auth_passkeys WHERE user_id = ?')) {
       const userId = String(args[0]);
@@ -307,7 +313,12 @@ const encodeCoseRsaPublicKey = (n: Uint8Array, e: Uint8Array) => concatBytes(
   encodeCborInteger(-2), encodeCborBytes(e)
 );
 
-const createAuthenticatorData = async (rpId: string, counter: number, flags = 0x01) => {
+/** Authenticator data flags: user present, and user verified. */
+const FLAG_USER_PRESENT = 0x01;
+const FLAG_USER_VERIFIED = 0x04;
+const VERIFIED_FLAGS = FLAG_USER_PRESENT | FLAG_USER_VERIFIED;
+
+const createAuthenticatorData = async (rpId: string, counter: number, flags = FLAG_USER_PRESENT) => {
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', encodeUtf8(rpId)));
   const counterBytes = new Uint8Array(4);
   new DataView(counterBytes.buffer).setUint32(0, counter);
@@ -436,7 +447,7 @@ test('passkey registration and login succeed with a real signed assertion', asyn
   const loginCookie = getCookieHeader(loginBegin);
   const loginBody = await loginBegin.json() as { challenge: string };
 
-  const loginAuthData = await createAuthenticatorData('localhost', 2);
+  const loginAuthData = await createAuthenticatorData('localhost', 2, VERIFIED_FLAGS);
   const loginClientData = createClientDataJson('webauthn.get', String(loginBody.challenge), 'http://localhost:5173');
   const loginClientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', loginClientData.raw));
   const signedPayload = concatBytes(loginAuthData, loginClientHash);
@@ -518,7 +529,7 @@ test('passkey registration stores RSA algorithm and login succeeds with an RSA a
   assert.equal(loginBegin.status, 200);
   const loginCookie = getCookieHeader(loginBegin);
   const loginBody = await loginBegin.json() as { challenge: string };
-  const loginAuthData = await createAuthenticatorData('localhost', 2);
+  const loginAuthData = await createAuthenticatorData('localhost', 2, VERIFIED_FLAGS);
   const loginClientData = createClientDataJson('webauthn.get', String(loginBody.challenge), 'http://localhost:5173');
   const loginClientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', loginClientData.raw));
   const signedPayload = concatBytes(loginAuthData, loginClientHash);
@@ -584,7 +595,7 @@ test('passkey login succeeds with an ECDSA DER assertion signature', async () =>
   const loginBegin = await app.request('/api/auth/passkey/login/begin', {}, env);
   const loginCookie = getCookieHeader(loginBegin);
   const loginBody = await loginBegin.json() as { challenge: string };
-  const loginAuthData = await createAuthenticatorData('localhost', 2);
+  const loginAuthData = await createAuthenticatorData('localhost', 2, VERIFIED_FLAGS);
   const loginClientData = createClientDataJson('webauthn.get', String(loginBody.challenge), 'http://localhost:5173');
   const loginClientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', loginClientData.raw));
   const signedPayload = concatBytes(loginAuthData, loginClientHash);
@@ -637,3 +648,134 @@ test('passkey login succeeds with an ECDSA DER assertion signature', async () =>
   assert.equal(db.sessions.length, 1);
 });
 
+
+/**
+ * Registers an ECDSA passkey and returns a helper that mints login assertions
+ * for it, so the hardening checks can be exercised one at a time.
+ */
+const registerEcdsaPasskey = async (credentialId = 'cred-hardening') => {
+  const { app, db, env } = createTestApp();
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify']
+  );
+  const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const cosePublicKey = encodeCoseEc2PublicKey(
+    new Uint8Array(Buffer.from(jwk.x ?? '', 'base64url')),
+    new Uint8Array(Buffer.from(jwk.y ?? '', 'base64url'))
+  );
+
+  const begin = await app.request('/api/auth/passkey/register/begin', {}, env);
+  const beginCookie = getCookieHeader(begin);
+  const { challenge } = await begin.json() as { challenge: string };
+  const registerFinish = await app.request('/api/auth/passkey/register/finish', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: beginCookie },
+    body: JSON.stringify({
+      id: credentialId,
+      response: {
+        clientDataJSON: createClientDataJson('webauthn.create', challenge, 'http://localhost:5173').encoded,
+        authenticatorData: toBase64Url(await createAuthenticatorData('localhost', 1, VERIFIED_FLAGS)),
+        publicKey: toBase64Url(cosePublicKey),
+        alg: -7
+      }
+    })
+  }, env);
+  assert.equal(registerFinish.status, 200);
+
+  /** Runs a full login ceremony and returns the raw request plus its response. */
+  const login = async (counter: number, flags = VERIFIED_FLAGS) => {
+    const loginBegin = await app.request('/api/auth/passkey/login/begin', {}, env);
+    const cookie = getCookieHeader(loginBegin);
+    const { challenge: loginChallenge } = await loginBegin.json() as { challenge: string };
+
+    const authData = await createAuthenticatorData('localhost', counter, flags);
+    const clientData = createClientDataJson('webauthn.get', loginChallenge, 'http://localhost:5173');
+    const clientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', clientData.raw));
+    const signature = new Uint8Array(await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      keyPair.privateKey,
+      concatBytes(authData, clientHash)
+    ));
+
+    const request = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        id: credentialId,
+        response: {
+          clientDataJSON: clientData.encoded,
+          authenticatorData: toBase64Url(authData),
+          signature: toBase64Url(signature)
+        }
+      })
+    };
+    const response = await app.request('/api/auth/passkey/login/finish', request, env);
+    return { request, response };
+  };
+
+  return { app, db, env, login };
+};
+
+test('a passkey login challenge cannot be replayed', async () => {
+  const { db, app, env, login } = await registerEcdsaPasskey('cred-replay');
+
+  const { request, response } = await login(2);
+  assert.equal(response.status, 200);
+  assert.equal(db.sessions.length, 1);
+
+  // Replaying the captured assertion with its cookie must fail: the challenge
+  // was claimed server-side, so holding the cookie is no longer enough.
+  const replay = await app.request('/api/auth/passkey/login/finish', request, env);
+  assert.equal(replay.status, 400);
+  assert.match(await replay.text(), /challenge is missing or expired/);
+  assert.equal(db.sessions.length, 1, 'no second session may be created');
+});
+
+test('a passkey whose signature counter does not advance is rejected', async () => {
+  const { db, login } = await registerEcdsaPasskey('cred-counter');
+
+  assert.equal((await login(2)).response.status, 200);
+  assert.equal(db.passkeys.get('cred-counter')?.counter, 2);
+
+  // A cloned authenticator replays an old counter value.
+  const regressed = await login(2);
+  assert.equal(regressed.response.status, 401);
+  assert.match(await regressed.response.text(), /Invalid passkey/);
+  assert.equal(db.sessions.length, 1, 'the clone must not get a session');
+  assert.ok(
+    db.auditRows.some((row) => row.action === 'passkey_counter_regression'),
+    'the rejection should be auditable'
+  );
+
+  assert.equal((await login(3)).response.status, 200, 'an advancing counter still works');
+});
+
+test('an admin passkey that does not verify the user is rejected', async () => {
+  const { db, login } = await registerEcdsaPasskey('cred-uv');
+
+  // User present but not verified: a roaming key with no PIN or biometric.
+  const presenceOnly = await login(2, FLAG_USER_PRESENT);
+  assert.equal(presenceOnly.response.status, 401);
+  assert.match(await presenceOnly.response.text(), /requires a passkey that verifies you/);
+  assert.equal(db.sessions.length, 0);
+  assert.ok(
+    db.auditRows.some((row) => row.action === 'passkey_user_verification_required'),
+    'the rejection should be auditable'
+  );
+
+  assert.equal((await login(3, VERIFIED_FLAGS)).response.status, 200);
+});
+
+test('user verification is only required of admins', async () => {
+  const { db, login } = await registerEcdsaPasskey('cred-readonly');
+  const user = db.users.get('user-1');
+  assert.ok(user);
+  user.role = 'readonly';
+
+  // A read-only account may hold an authenticator with no verification
+  // capability, so presence alone stays sufficient there.
+  assert.equal((await login(2, FLAG_USER_PRESENT)).response.status, 200);
+  assert.equal(db.sessions.length, 1);
+});

@@ -57,6 +57,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({
   const [notice, setNotice] = useState<string | null>(null);
   const [email, setEmail] = useState(currentUser.email || currentUser.username);
   const [currentPassword, setCurrentPassword] = useState('');
+  const [emailChangePassword, setEmailChangePassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -79,23 +80,37 @@ export const AccountPage: React.FC<AccountPageProps> = ({
     loadAccount();
   }, [loadAccount]);
 
+  const accountEmail = account?.email || account?.username || '';
+  // Moving the sign-in address needs the password, and does not take effect
+  // until the new address is confirmed.
+  const isEmailChange = Boolean(accountEmail) && email !== accountEmail;
+
   const handleSaveProfile = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const updated = await api.updateAccount({ email });
+      const updated = await api.updateAccount(
+        isEmailChange ? { email, current_password: emailChangePassword } : { email }
+      );
       setAccount(updated);
-      setEmail(updated.email || updated.username);
+      setEmailChangePassword('');
+      if (updated.pending_email) {
+        // The account keeps its current address until the new one is confirmed.
+        setEmail(updated.email || updated.username);
+        setNotice(t('account.emailChangePending', { email: updated.pending_email }));
+      } else {
+        setEmail(updated.email || updated.username);
+        setNotice(t('account.profileSaved'));
+      }
       onAccountUpdated(updated);
-      setNotice(t('account.profileSaved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('account.profileSaveFailed'));
     } finally {
       setBusy(false);
     }
-  }, [email, onAccountUpdated, t]);
+  }, [email, emailChangePassword, isEmailChange, onAccountUpdated, t]);
 
   const handleAvatarUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -238,6 +253,21 @@ export const AccountPage: React.FC<AccountPageProps> = ({
                     required
                   />
                 </div>
+                {isEmailChange && (
+                  <div className="form-group">
+                    <label htmlFor="account-email-change-password">
+                      {t('account.emailChangePassword')}
+                    </label>
+                    <input
+                      id="account-email-change-password"
+                      type="password"
+                      value={emailChangePassword}
+                      onChange={(event) => setEmailChangePassword(event.target.value)}
+                      autoComplete="current-password"
+                      required
+                    />
+                  </div>
+                )}
                 <div className="account-meta-grid">
                   <div className="account-meta-card">
                     <span>{t('account.role')}</span>

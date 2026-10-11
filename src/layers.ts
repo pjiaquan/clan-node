@@ -2,10 +2,12 @@ import type { Context, Hono } from 'hono';
 import type { AppBindings, Env } from './types';
 import { checkAndConsumeRateLimit, getRequestIpAddress } from './auth';
 import { protectPersonWriteFields } from './data_protection';
-import { recordAuditLog, recordRateLimitAudit } from './audit';
+import { recordAuditLog, recordRateLimitAudit, requireAuditLog } from './audit';
 import { queueRemoteJson } from './dual_write';
 import { LAYER_WRITE_RATE_LIMIT } from './rate_limits';
 import { getPeopleSchemaSupport } from './schema';
+import { safeStorageKey } from './storage_keys';
+import { deriveStorageKeyFromUrl } from './people/avatar_service';
 
 export const DEFAULT_LAYER_ID = 'default';
 export const DEFAULT_LAYER_NAME = 'Default Layer';
@@ -39,12 +41,6 @@ let layerSchemaSupportPromise: Promise<void> | null = null;
 const isAdmin = (c: Context<AppBindings>) => {
   const sessionUser = c.get('sessionUser');
   return Boolean(sessionUser && sessionUser.role === 'admin');
-};
-
-const deriveStorageKeyFromUrl = (avatarUrl: string | null | undefined) => {
-  if (!avatarUrl) return null;
-  if (!avatarUrl.startsWith('/api/avatars/')) return null;
-  return avatarUrl.replace('/api/avatars/', '');
 };
 
 const hasColumn = async (db: D1Database, table: string, column: string) => {
@@ -172,7 +168,7 @@ const buildSeedGraphStatements = async (env: Env, layerId: string, layerName: st
   const [root, left, right] = createSeedNodes(layerName);
   const statements: D1PreparedStatement[] = [];
   for (const person of [root, left, right]) {
-    const protectedFields = await protectPersonWriteFields(env, {
+    const protectedFields = await protectPersonWriteFields(env, person.id, {
       metadata: JSON.stringify(person.metadata),
     });
     const insertColumns = [
@@ -355,18 +351,36 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
        WHERE p.layer_id = ?`
     ).bind(layerId).all();
 
-    for (const row of avatarRows.results as Array<Record<string, unknown>>) {
-      const key = String(row.storage_key ?? '') || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
-      if (!key) continue;
-      await c.env.AVATARS.delete(key);
-    }
-
     const peopleCountRow = await c.env.DB.prepare(
       'SELECT COUNT(*) AS count FROM people WHERE layer_id = ?'
     ).bind(layerId).first();
     const relationshipCountRow = await c.env.DB.prepare(
       'SELECT COUNT(*) AS count FROM relationships WHERE layer_id = ?'
     ).bind(layerId).first();
+
+    // Deleting a layer removes every person, relationship and avatar in it, so
+    // the record of who asked for it has to exist before any of that happens.
+    const auditFailure = await requireAuditLog(c, {
+      action: 'delete',
+      resourceType: 'layers',
+      resourceId: layerId,
+      summary: `刪除圖層 ${String((existing as any).name ?? layerId)}`,
+      details: {
+        name: String((existing as any).name ?? layerId),
+        description: ((existing as any).description as string | null) ?? null,
+        removed_node_count: Number((peopleCountRow as any)?.count ?? 0),
+        removed_relationship_count: Number((relationshipCountRow as any)?.count ?? 0),
+        removed_avatar_count: avatarRows.results.length,
+      }
+    });
+    if (auditFailure) return auditFailure;
+
+    for (const row of avatarRows.results as Array<Record<string, unknown>>) {
+      const key = safeStorageKey(row.storage_key)
+        || deriveStorageKeyFromUrl(String(row.avatar_url ?? ''));
+      if (!key) continue;
+      await c.env.AVATARS.delete(key);
+    }
 
     await c.env.DB.batch([
       c.env.DB.prepare(
@@ -385,20 +399,6 @@ export function registerLayerRoutes(app: Hono<AppBindings>) {
       c.env.DB.prepare('DELETE FROM people WHERE layer_id = ?').bind(layerId),
       c.env.DB.prepare('DELETE FROM graph_layers WHERE id = ?').bind(layerId),
     ]);
-
-    await recordAuditLog(c, {
-      action: 'delete',
-      resourceType: 'layers',
-      resourceId: layerId,
-      summary: `刪除圖層 ${String((existing as any).name ?? layerId)}`,
-      details: {
-        name: String((existing as any).name ?? layerId),
-        description: ((existing as any).description as string | null) ?? null,
-        removed_node_count: Number((peopleCountRow as any)?.count ?? 0),
-        removed_relationship_count: Number((relationshipCountRow as any)?.count ?? 0),
-        removed_avatar_count: avatarRows.results.length,
-      }
-    });
 
     queueRemoteJson(c, 'DELETE', `/api/layers/${layerId}`, undefined);
 
