@@ -3552,6 +3552,9 @@ export function registerAuthRoutes(app: Hono<AppBindings>) {
     if (hasEmailUpdate && (!nextEmail || !isValidEmail(nextEmail))) {
       return c.json({ error: 'Invalid email format' }, 400);
     }
+    if (currentPassword && currentPassword.length > PASSWORD_MAX_LENGTH) {
+      return c.json({ error: 'Current password is incorrect' }, 400);
+    }
     // Account avatars were also stored verbatim, and user management renders
     // them, so the same beacon applied to whoever views the user list.
     if (nextAvatarUrl && !isServerMintedAvatarUrl(nextAvatarUrl)) {
