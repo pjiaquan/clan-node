@@ -20,8 +20,22 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # react and react-dom (and their types) must move together: split into
+      # two PRs, neither installs, because each @types package peers on the
+      # other's version.
+      react:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # typescript-eslint peers on typescript <6.1.0, so a newer TypeScript
+      # fails `npm ci`. Lift this once typescript-eslint supports 7.
+      - dependency-name: typescript
+        versions: [">=6.1.0"]
 
   - package-ecosystem: github-actions
     directory: /

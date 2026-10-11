@@ -1,7 +1,7 @@
 # Pin the base by digest for a reproducible build. Resolve one with:
-#   docker buildx imagetools inspect node:20-bookworm-slim
-# then replace the tag below with node:20-bookworm-slim@sha256:<digest>.
-ARG NODE_IMAGE=node:20-bookworm-slim
+#   docker buildx imagetools inspect node:22-bookworm-slim
+# then replace the tag below with node:22-bookworm-slim@sha256:<digest>.
+ARG NODE_IMAGE=node:22-bookworm-slim
 
 FROM ${NODE_IMAGE} AS frontend-build
 
