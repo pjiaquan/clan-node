@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { hashPassword, registerAuthRoutes, verifyPassword } from './auth';
+import { hashPassword, registerAuthRoutes, requireAuth, verifyPassword } from './auth';
 import { SqliteD1Database } from './selfhost/sqlite_d1';
 import type { AppBindings, Env } from './types';
 
@@ -24,11 +24,9 @@ const dir = await mkdtemp(path.join(tmpdir(), 'clan-tokens-'));
 const db = new SqliteD1Database(path.join(dir, 'test.sqlite'));
 db.rawDb.exec(schemaSql);
 
+// Mounted as in src/index.ts, so admin-only routes see a real session.
 const app = new Hono<AppBindings>();
-app.use('/api/auth/users*', async (c, next) => {
-  c.set('sessionUser', { userId: 'user-admin', username: 'admin@example.com', role: 'admin' });
-  await next();
-});
+app.use('/api/*', requireAuth);
 registerAuthRoutes(app);
 
 const env = {
@@ -59,11 +57,24 @@ const withCapturedEmail = async (run: (sent: SentEmail[]) => Promise<void>) => {
   }
 };
 
-const post = (url: string, body: Record<string, unknown>) => app.request(
+const post = (url: string, body: Record<string, unknown>, cookie?: string) => app.request(
   url,
-  { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify(body) },
+  {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN, ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify(body),
+  },
   env
 );
+
+/** Seeds a live session for the admin and returns the cookie that carries it. */
+const adminSessionCookie = async () => {
+  const now = new Date().toISOString();
+  await db.prepare(
+    "INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES ('admin-session', 'user-admin', ?, ?)"
+  ).bind(now, new Date(Date.now() + 3600_000).toISOString()).run();
+  return 'clan_session=admin-session';
+};
 
 const tokenFrom = (sent: SentEmail[], to: string, param: string) => {
   const mail = sent.filter((item) => item.to === to).pop();
@@ -155,7 +166,7 @@ test('an invitation token sets the password and activates the account', async ()
   await resetState();
   await withCapturedEmail(async (sent) => {
     const invited = 'invited@example.com';
-    const create = await post('/api/auth/users', { email: invited, role: 'readonly' });
+    const create = await post('/api/auth/users', { email: invited, role: 'readonly' }, await adminSessionCookie());
     assert.equal(create.status, 201);
 
     // Before the invitation is accepted the account cannot be signed in to.
