@@ -132,8 +132,16 @@ const fromBase32 = (value: string) => {
   return new Uint8Array(bytes);
 };
 
-/** OWASP's current floor for PBKDF2-HMAC-SHA256. */
-const PASSWORD_HASH_ITERATIONS = 600000;
+/**
+ * The Workers runtime's ceiling for PBKDF2: deriveBits throws NotSupportedError
+ * above 100000. This was raised to OWASP's 600000, which Node (and so the test
+ * suite) accepts, but on Workers every new hash failed -- registration, invite
+ * acceptance, password reset and change all returned 500, and the dummy hash
+ * spent on unknown e-mails turned login and forgot-password into an oracle for
+ * which addresses have accounts (500 versus 401/200). Going past this needs a
+ * different KDF, not a bigger number.
+ */
+export const PASSWORD_HASH_ITERATIONS = 100000;
 /** What hashes written before the cost was recorded alongside them used. */
 const LEGACY_PASSWORD_HASH_ITERATIONS = 100000;
 const PASSWORD_HASH_PREFIX = 'pbkdf2-sha256';
@@ -171,13 +179,13 @@ export async function hashPassword(password: string, salt: string, iterations = 
 const parseStoredPasswordHash = (stored: unknown) => {
   if (typeof stored !== 'string' || stored.length === 0) return null;
   if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
-    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored };
+    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored, legacy: true };
   }
   const parts = stored.split('$');
   const iterations = Number(parts[1]);
   const digest = parts[2];
   if (parts.length !== 3 || !digest || !Number.isInteger(iterations) || iterations <= 0) return null;
-  return { iterations, digest };
+  return { iterations, digest, legacy: false };
 };
 
 /**
@@ -193,7 +201,9 @@ export const verifyPassword = async (password: string, salt: string, storedHash:
   }
   const digest = await derivePasswordBits(password, salt, parsed.iterations);
   const ok = timingSafeEqual(digest, parsed.digest);
-  return { ok, needsRehash: ok && parsed.iterations < PASSWORD_HASH_ITERATIONS };
+  // A bare legacy digest is rewritten even at the same cost, so every stored
+  // hash carries its own iteration count.
+  return { ok, needsRehash: ok && (parsed.legacy || parsed.iterations < PASSWORD_HASH_ITERATIONS) };
 };
 
 async function sha256Base64(input: string) {
