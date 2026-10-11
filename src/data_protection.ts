@@ -209,7 +209,10 @@ export const protectPersonWriteFields = async (
 ) => {
   const next: Partial<Record<PersonProtectedField, string | null>> = {};
   for (const field of PERSON_PROTECTED_FIELDS) {
-    if (field in fields) {
+    // `undefined` means "not part of this write". Callers pass every key, so
+    // testing `field in fields` turned an omitted field into NULL: a name-only
+    // edit, or a node drag saving metadata, erased dob, blood type and the rest.
+    if (fields[field] !== undefined) {
       next[field] = await encryptProtectedValue(env, fields[field], personFieldContext(personId, field));
     }
   }

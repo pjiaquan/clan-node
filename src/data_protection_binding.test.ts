@@ -149,3 +149,43 @@ test('legacy v1 rows still read, are migrated to v2 on read, and then survive th
   assert.equal(afterBody.dob, '1940-04-04');
   assert.deepEqual(afterBody.metadata.customFields, [{ label: 'phone', value: 'legacy-phone' }]);
 });
+
+/**
+ * Every update passed all six protected keys to protectPersonWriteFields, and
+ * an omitted one (`undefined`) was written back as NULL. The frontend sends
+ * only the fields that changed, and a node drag sends only `metadata`, so both
+ * silently erased the person's dates and blood type.
+ */
+const updatePerson = (id: string, body: Record<string, unknown>) => app.request(
+  `/api/people/${id}`,
+  { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+  env
+);
+
+const protectedFieldsOf = async (id: string) => {
+  const body = await (await getPerson(id)).json() as any;
+  return { dob: body.dob, dod: body.dod, tob: body.tob, tod: body.tod, blood_type: body.blood_type };
+};
+
+const FULL = { dob: '1950-01-01', dod: '2020-02-02', tob: '08:00', tod: '09:00', blood_type: 'A' };
+
+test('a name-only update leaves the protected fields alone', async () => {
+  const id = await createPerson({ name: 'Keep', ...FULL });
+  assert.equal((await updatePerson(id, { name: 'Renamed' })).status, 200);
+  assert.deepEqual(await protectedFieldsOf(id), FULL);
+});
+
+test('saving a node position (metadata only) leaves the protected fields alone', async () => {
+  const id = await createPerson({ name: 'Dragged', ...FULL });
+  // What hooks/clanGraph/actions.ts sends when a node is dropped.
+  assert.equal((await updatePerson(id, { metadata: { position: { x: 10, y: 20 } }, layer_id: 'default' })).status, 200);
+  assert.deepEqual(await protectedFieldsOf(id), FULL);
+  const body = await (await getPerson(id)).json() as any;
+  assert.deepEqual(body.metadata.position, { x: 10, y: 20 });
+});
+
+test('an explicit null still clears a protected field', async () => {
+  const id = await createPerson({ name: 'Cleared', ...FULL });
+  assert.equal((await updatePerson(id, { dob: null })).status, 200);
+  assert.deepEqual(await protectedFieldsOf(id), { ...FULL, dob: null });
+});
