@@ -1773,10 +1773,15 @@ export function ClanGraph({
     } | null = null;
     const selectedIds = getDragSelectionIds(node.id, draggingNodes);
     const selectedSet = new Set(selectedIds);
-    const nodeMap = new Map(nodesRef.current.map((item) => [item.id, item]));
-    draggingNodes.forEach((item) => {
+    const nodeMap = new Map<string, Node>();
+    for (let i = 0; i < nodesRef.current.length; i++) {
+      const item = nodesRef.current[i];
       nodeMap.set(item.id, item);
-    });
+    }
+    for (let i = 0; i < draggingNodes.length; i++) {
+      const item = draggingNodes[i];
+      nodeMap.set(item.id, item);
+    }
     const dragNode = nodeMap.get(node.id) ?? node;
     const ySourceNodes = selectedIds.length > 1
       ? selectedIds
@@ -2714,7 +2719,12 @@ export function ClanGraph({
   }, [graphData, selectedEdge]);
   const spouseHandleMap = useMemo(() => {
     if (!graphData) return {};
-    const nodesById = new Map(nodes.map((item) => [item.id, item]));
+    // ⚡ Bolt: Eliminate redundant array mapping allocation in rendering loop
+    const nodesById = new Map<string, Node>();
+    for (let i = 0; i < nodes.length; i++) {
+      const item = nodes[i];
+      nodesById.set(item.id, item);
+    }
     const handleMap = new Map<string, Set<string>>();
     const tolerance = 2;
 
@@ -3510,7 +3520,12 @@ export function ClanGraph({
 
   useEffect(() => {
     setNodes((prev) => {
-      const prevNodeMap = new Map(prev.map((node) => [node.id, node]));
+      // ⚡ Bolt: Eliminate redundant array mapping allocation in render loop
+      const prevNodeMap = new Map<string, Node>();
+      for (let i = 0; i < prev.length; i++) {
+        const item = prev[i];
+        prevNodeMap.set(item.id, item);
+      }
       return initialNodes.map((node) => ({
         ...(prevNodeMap.get(node.id) ?? {}),
         ...node,
