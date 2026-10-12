@@ -4,6 +4,7 @@ import type { AppBindings, Env, UserRole } from './types';
 import { isDevelopmentEnv, isProductionEnv } from './environment';
 import { isServerMintedAvatarUrl } from './storage_keys';
 import { notifyUpdate } from './notify';
+import { getRequestIpAddress } from './request_ip';
 import { recordAuditLog, recordRateLimitAudit } from './audit';
 import { hasConfiguredEncryptionKey, isEncryptedValue } from './data_protection';
 import { validateAvatarUpload } from './avatar_validation';
@@ -22,6 +23,9 @@ import {
 } from './rate_limits';
 import { getUserSchemaSupport } from './schema';
 import type { UserSchemaSupport } from './schema';
+
+// Re-exported for the route modules that already import it from here.
+export { getRequestIpAddress };
 
 const SESSION_COOKIE = 'clan_session';
 const PASSKEY_CHALLENGE_COOKIE = 'clan_passkey_challenge';
@@ -128,8 +132,16 @@ const fromBase32 = (value: string) => {
   return new Uint8Array(bytes);
 };
 
-/** OWASP's current floor for PBKDF2-HMAC-SHA256. */
-const PASSWORD_HASH_ITERATIONS = 600000;
+/**
+ * The Workers runtime's ceiling for PBKDF2: deriveBits throws NotSupportedError
+ * above 100000. This was raised to OWASP's 600000, which Node (and so the test
+ * suite) accepts, but on Workers every new hash failed -- registration, invite
+ * acceptance, password reset and change all returned 500, and the dummy hash
+ * spent on unknown e-mails turned login and forgot-password into an oracle for
+ * which addresses have accounts (500 versus 401/200). Going past this needs a
+ * different KDF, not a bigger number.
+ */
+export const PASSWORD_HASH_ITERATIONS = 100000;
 /** What hashes written before the cost was recorded alongside them used. */
 const LEGACY_PASSWORD_HASH_ITERATIONS = 100000;
 const PASSWORD_HASH_PREFIX = 'pbkdf2-sha256';
@@ -167,13 +179,13 @@ export async function hashPassword(password: string, salt: string, iterations = 
 const parseStoredPasswordHash = (stored: unknown) => {
   if (typeof stored !== 'string' || stored.length === 0) return null;
   if (!stored.startsWith(`${PASSWORD_HASH_PREFIX}$`)) {
-    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored };
+    return { iterations: LEGACY_PASSWORD_HASH_ITERATIONS, digest: stored, legacy: true };
   }
   const parts = stored.split('$');
   const iterations = Number(parts[1]);
   const digest = parts[2];
   if (parts.length !== 3 || !digest || !Number.isInteger(iterations) || iterations <= 0) return null;
-  return { iterations, digest };
+  return { iterations, digest, legacy: false };
 };
 
 /**
@@ -189,7 +201,9 @@ export const verifyPassword = async (password: string, salt: string, storedHash:
   }
   const digest = await derivePasswordBits(password, salt, parsed.iterations);
   const ok = timingSafeEqual(digest, parsed.digest);
-  return { ok, needsRehash: ok && parsed.iterations < PASSWORD_HASH_ITERATIONS };
+  // A bare legacy digest is rewritten even at the same cost, so every stored
+  // hash carries its own iteration count.
+  return { ok, needsRehash: ok && (parsed.legacy || parsed.iterations < PASSWORD_HASH_ITERATIONS) };
 };
 
 async function sha256Base64(input: string) {
@@ -1066,41 +1080,6 @@ const getRequestUserAgent = (c: Context<AppBindings>) => (
   || null
 );
 
-const forwardedIpIsTrusted = (env: Env) => (
-  ['1', 'true', 'yes'].includes((env.TRUSTED_PROXY || '').trim().toLowerCase())
-);
-
-const forwardedIpHeader = (c: Context<AppBindings>) => {
-  const cfIp = c.req.header('CF-Connecting-IP') || c.req.header('cf-connecting-ip');
-  if (cfIp) return cfIp;
-  const forwarded = c.req.header('x-forwarded-for');
-  return forwarded?.split(',')[0]?.trim() || null;
-};
-
-/**
- * The client address used for rate-limit keys, session records and audit
- * entries.
- *
- * `CF-Connecting-IP` and `X-Forwarded-For` used to be trusted unconditionally.
- * That is correct on the Cloudflare edge, which overwrites CF-Connecting-IP,
- * but the self-hosted server is a bare Node listener where both headers are
- * whatever the client sent -- so IP-keyed limiters on registration, login and
- * MFA could be bypassed by rotating a header, and the `ip:email` limiters
- * turned into unlimited mail to one victim. Forwarded headers are now honoured
- * only where something in front is known to set them.
- */
-export const getRequestIpAddress = (c: Context<AppBindings>) => {
-  const socketAddress = c.env.socketAddress ?? null;
-  // No socket address means the Cloudflare runtime, where the edge sets
-  // CF-Connecting-IP and overwrites any client-supplied value.
-  if (!socketAddress) {
-    return forwardedIpHeader(c);
-  }
-  if (forwardedIpIsTrusted(c.env)) {
-    return forwardedIpHeader(c) || socketAddress;
-  }
-  return socketAddress;
-};
 
 const recordLoginAttempt = async (
   c: Context<AppBindings>,

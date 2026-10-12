@@ -12,9 +12,8 @@ compatibility_flags = ["nodejs_compat"]
 #
 # IMPORTANT: wrangler inherits top-level keys into named environments, so
 # [env.production] re-enables this explicitly. Setting it here alone removes
-# the workers.dev route from the production Worker too, which takes the API
-# offline -- the Pages Function in functions/api/[[path]].ts proxies to that
-# hostname.
+# the workers.dev route from the production Worker too; production sets it
+# explicitly below, also to false.
 workers_dev = false
 
 # D1 Database binding for the default (development) environment.
@@ -41,10 +40,12 @@ BREVO_FROM_NAME = "Family Tree"
 ALLOWED_EMAILS = "pjiaquan@gmail.com"
 
 [env.production]
-# Re-enabled over the inherited top-level `workers_dev = false`: this Worker is
-# served at clan-node-production.<subdomain>.workers.dev, which the Pages
-# Function proxies to.
-workers_dev = true
+# Off, like the inherited top-level value: the Worker's only entry point is the
+# Pages Function's `API` service binding (wrangler.toml). A public workers.dev
+# hostname let anyone skip Pages, and the Pages Function's old fetch() to it
+# made every user arrive from the Workers egress IP, collapsing the IP-keyed
+# rate limits into one shared bucket.
+workers_dev = false
 # Per-version preview hostnames are an extra public entry point to the same
 # Worker and the same production database, and nothing needs them.
 preview_urls = false

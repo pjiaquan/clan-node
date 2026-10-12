@@ -1,2 +1,8 @@
 name = "clan-frontend"
 pages_build_output_dir = "frontend/dist"
+
+# The /api/* Pages Function (functions/api/[[path]].ts) reaches the production
+# Worker through this binding; the Worker has no public hostname.
+[[services]]
+binding = "API"
+service = "clan-node-production"

@@ -1,4 +1,4 @@
-const API_BASE = process.env.API_BASE || 'https://clan-node-production.pjiaquan.workers.dev';
+const API_BASE = process.env.API_BASE || 'https://clan-frontend.pages.dev';
 const USER = process.env.USERNAME || '';
 const PASS = process.env.PASSWORD || '';
 const ORIGIN_OVERRIDE = process.env.ORIGIN || '';

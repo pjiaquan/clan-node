@@ -1,5 +1,5 @@
 const LOCAL_API_BASE = process.env.LOCAL_API_BASE || 'http://localhost:8787';
-const REMOTE_API_BASE = process.env.REMOTE_API_BASE || 'https://clan-node-production.pjiaquan.workers.dev';
+const REMOTE_API_BASE = process.env.REMOTE_API_BASE || 'https://clan-frontend.pages.dev';
 const LOCAL_USER = process.env.LOCAL_USER || '';
 const LOCAL_PASS = process.env.LOCAL_PASS || '';
 const REMOTE_USER = process.env.REMOTE_USER || '';

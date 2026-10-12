@@ -56,6 +56,11 @@ the `DUAL_WRITE_*` credentials are set with `wrangler secret put`, or through
   HSTS and stops requiring `AUTH_ENCRYPTION_KEY`.
 - `npm run deploy` targets `--env production`. The default environment is
   marked `workers_dev = false` so it cannot be published.
+- The production Worker also has `workers_dev = false` and `preview_urls =
+  false`: its only entry point is the Cloudflare Pages Function's `API`
+  service binding. Do not reintroduce a public hostname for it, or a
+  `fetch()` from the Pages Function to one -- that subrequest arrives from the
+  Workers egress IP, so every user shares one rate-limit bucket.
 - `ALLOWED_EMAILS` is set. An unset list means "no restriction".
 - `PUBLIC_REGISTRATION_ENABLED` stays unset unless public sign-up is wanted;
   when enabled it also requires `ALLOWED_EMAILS` and working e-mail delivery.

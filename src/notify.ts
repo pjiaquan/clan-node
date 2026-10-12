@@ -1,4 +1,5 @@
 import { tryExecutionCtx } from './background';
+import { getRequestIpAddress } from './request_ip';
 import type { Context } from 'hono';
 import type { AppBindings, Env } from './types';
 
@@ -81,10 +82,9 @@ export const notifyUpdate = (
   const sessionUser = c.get('sessionUser');
   const userLabel = sessionUser ? `${sessionUser.username} (${sessionUser.role})` : 'anonymous';
   const url = new URL(c.req.url);
-  const ip = c.req.header('CF-Connecting-IP')
-    || c.req.header('X-Forwarded-For')
-    || c.req.header('x-forwarded-for')
-    || 'unknown';
+  // Same resolution as rate limits and audit entries; reading the headers
+  // directly let a self-host client put any address in the notification.
+  const ip = getRequestIpAddress(c) || 'unknown';
   const origin = c.req.header('Origin') || c.req.header('origin') || 'unknown';
   const referer = c.req.header('Referer') || c.req.header('referer') || 'unknown';
   const userAgent = c.req.header('User-Agent') || c.req.header('user-agent') || 'unknown';

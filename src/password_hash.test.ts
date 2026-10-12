@@ -1,11 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hashPassword, verifyPassword } from './auth';
+import { PASSWORD_HASH_ITERATIONS, hashPassword, verifyPassword } from './auth';
 
 const PASSWORD = 'Correct Horse Battery Staple 9!';
 const SALT = 'DEr8xCDlZ0kqK3hdMQxLsQ==';
 const LEGACY_ITERATIONS = 100000;
-const CURRENT_ITERATIONS = 600000;
+const CURRENT_ITERATIONS = 100000;
+/** deriveBits on Workers throws NotSupportedError above this; Node does not. */
+const WORKERS_PBKDF2_MAX_ITERATIONS = 100000;
+
+test('the hash cost stays within what the Workers runtime supports', () => {
+  // Node accepts any count, so nothing else here would notice a value that
+  // makes every hash on Workers throw.
+  assert.ok(PASSWORD_HASH_ITERATIONS <= WORKERS_PBKDF2_MAX_ITERATIONS);
+});
 
 test('a new hash records its cost and verifies without needing a rewrite', async () => {
   const stored = await hashPassword(PASSWORD, SALT);
@@ -23,10 +31,10 @@ test('a legacy bare-base64 hash still verifies and is flagged for rewrite', asyn
 
   const result = await verifyPassword(PASSWORD, SALT, legacyStored);
   assert.equal(result.ok, true, 'existing accounts must not be locked out');
-  assert.equal(result.needsRehash, true, 'and must be upgraded on next sign-in');
+  assert.equal(result.needsRehash, true, 'and must be rewritten in the self-describing format');
 });
 
-test('a rewritten legacy hash verifies at the new cost', async () => {
+test('a rewritten legacy hash verifies without another rewrite', async () => {
   const legacyStored = (await hashPassword(PASSWORD, SALT, LEGACY_ITERATIONS)).split('$')[2];
   assert.equal((await verifyPassword(PASSWORD, SALT, legacyStored)).needsRehash, true);
 
