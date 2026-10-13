@@ -1,0 +1,40 @@
+
+> clan-node@1.0.0 dev /app
+> wrangler --config wrangler.worker.toml dev --ip 0.0.0.0
+
+
+ ⛅️ wrangler 4.150.0
+────────────────────
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+Your Worker has access to the following bindings:
+Binding                                                                           Resource                  Mode
+env.DB (clan-db-dev)                                                              D1 Database               local
+env.AVATARS (clan-avatars)                                                        R2 Bucket                 local
+env.ENVIRONMENT ("development")                                                   Environment Variable      local
+env.FRONTEND_ORIGIN ("http://localhost:5173,http://192.168....")                  Environment Variable      local
+env.EMAIL_VERIFICATION_URL_BASE ("http://localhost:5173")                         Environment Variable      local
+env.BREVO_FROM_EMAIL ("no-reply@hinoki.my")                                       Environment Variable      local
+env.BREVO_FROM_NAME ("Family Tree")                                               Environment Variable      local
+env.ALLOWED_EMAILS ("pjiaquan@gmail.com")                                         Environment Variable      local
+
+⎔ Starting local server...
+[wrangler:info] Ready on http://0.0.0.0:8787
+[wrangler:info] - http://127.0.0.1:8787
+[wrangler:info] - http://192.168.0.2:8787
+[wrangler:info] GET /api/auth/setup 200 OK (46ms)
+[wrangler:info] GET /api/auth/setup 200 OK (16ms)
+[wrangler:info] GET /api/auth/setup 200 OK (15ms)
+[wrangler:info] GET /api/auth/setup 200 OK (8ms)
+[wrangler:info] GET /api/auth/setup 200 OK (12ms)
+[wrangler:info] GET /api/auth/setup 200 OK (8ms)
+[wrangler:info] GET /api/auth/setup 200 OK (13ms)
+[wrangler:info] GET /api/auth/setup 200 OK (7ms)
+[wrangler:info] GET /api/auth/setup 200 OK (13ms)
+[wrangler:info] GET /api/auth/setup 200 OK (7ms)
+[wrangler:info] OPTIONS /api/auth/setup 204 No Content (4ms)
+[wrangler:info] POST /api/auth/setup 400 Bad Request (10ms)
+[wrangler:info] GET /api/auth/setup 200 OK (10ms)
+[wrangler:info] GET /api/auth/setup 200 OK (7ms)
+[wrangler:info] OPTIONS /api/auth/setup 204 No Content (5ms)
+[wrangler:info] POST /api/auth/setup 400 Bad Request (9ms)
