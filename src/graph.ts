@@ -111,17 +111,24 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         formal_title: person.formal_title
       }));
 
-      const relationships = relationshipsRaw.map((rel: any) => ({
-        ...rel,
-        metadata: safeParse(rel.metadata as string)
-      }));
-      const kinshipRelationships: Relationship[] = relationships.map((rel: any) => ({
-        id: Number(rel.id),
-        layer_id: String(rel.layer_id ?? layerId),
-        from_person_id: String(rel.from_person_id),
-        to_person_id: String(rel.to_person_id),
-        type: String(rel.type) as RelationshipType
-      }));
+      // Bolt Optimization: Consolidate double array mapping into a single pass.
+      // Avoids O(N) intermediate array allocation and halves iteration overhead
+      // while preserving code readability.
+      const kinshipRelationships: Relationship[] = [];
+      const relationships = relationshipsRaw.map((rel: any) => {
+        const parsedRel = {
+          ...rel,
+          metadata: safeParse(rel.metadata as string)
+        };
+        kinshipRelationships.push({
+          id: Number(parsedRel.id),
+          layer_id: String(parsedRel.layer_id ?? layerId),
+          from_person_id: String(parsedRel.from_person_id),
+          to_person_id: String(parsedRel.to_person_id),
+          type: String(parsedRel.type) as RelationshipType
+        });
+        return parsedRel;
+      });
       const kinshipLabelMap = await loadKinshipLabelMap(c.env.DB);
       const observedKinshipDefaults: Array<{ default_title: string; default_formal_title: string }> = [];
       const kinshipResults = calculateKinshipMany({
