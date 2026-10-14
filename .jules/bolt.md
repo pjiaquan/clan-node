@@ -23,3 +23,7 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+
+## 2025-02-23 - Avoid redundant double lookups on Maps in tight loops
+**Learning:** In backend data processing logic that batches rows by ID (like `avatarMap` or `customFieldMap`), code often uses `map.get(key) || []` and then `map.set(key, list)` in every loop iteration. This causes a redundant `Map.get` and `Map.set` hash operation, and also allocates a new temporary array object `[]` every iteration if the key is falsy, regardless of whether it's actually used.
+**Action:** When appending elements to a Map of arrays inside a loop, use a single `Map.get(key)`. Check if it is `undefined`. If so, initialize the array and `Map.set(key, array)` only *once* per key. Then, directly `push()` to the returned (or newly created) reference, skipping any further `map.set()` calls.
