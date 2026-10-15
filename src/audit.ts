@@ -142,7 +142,8 @@ export function registerAuditRoutes(app: Hono<AppBindings>) {
       return c.json([]);
     }
 
-    const rawLimit = Number(c.req.query('limit') || 200);
+    const rawLimitStr = c.req.query('limit');
+    const rawLimit = Number(rawLimitStr ? rawLimitStr.slice(0, 10) : 200);
     const limit = Number.isFinite(rawLimit)
       ? Math.max(1, Math.min(Math.trunc(rawLimit), 500))
       : 200;
@@ -150,7 +151,8 @@ export function registerAuditRoutes(app: Hono<AppBindings>) {
     // Paginate on the monotonic id rather than created_at, which is not
     // unique. Without a cursor, everything older than the newest `limit`
     // entries was unreachable through the API.
-    const rawBefore = c.req.query('before');
+    const rawBeforeStr = c.req.query('before');
+    const rawBefore = rawBeforeStr !== undefined ? rawBeforeStr.slice(0, 20) : undefined;
     const before = rawBefore !== undefined && /^\d+$/.test(rawBefore) ? Number(rawBefore) : null;
 
     const { results } = before === null

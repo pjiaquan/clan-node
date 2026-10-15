@@ -139,6 +139,9 @@ export function registerBackupRoutes(app: Hono<AppBindings>) {
       // bytes actually read as well.
       const contentLengthHeader = c.req.header('content-length');
       if (contentLengthHeader) {
+        if (contentLengthHeader.length > 20) {
+          return c.json({ error: 'Payload too large.' }, 413);
+        }
         const contentLength = parseInt(contentLengthHeader, 10);
         if (Number.isFinite(contentLength) && contentLength > MAX_IMPORT_BYTES) {
           return c.json({ error: 'Payload too large. Maximum size is 50MB.' }, 413);
