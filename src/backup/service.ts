@@ -158,26 +158,35 @@ export const extractDataEnvelope = (body: unknown) => {
 
 export const parseLayers = (input: unknown[], now: string): BackupLayer[] => {
   const seen = new Set<string>();
-  return input.map((row, index) => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupLayer>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid layers[${index}]`);
     const id = asString(row.id, `layers[${index}].id`);
     if (seen.has(id)) {
       throw new Error(`Duplicate layer id "${id}"`);
     }
     seen.add(id);
-    return {
+    result[index] = {
       id,
       name: asString(row.name, `layers[${index}].name`),
       description: asNullableString(row.description),
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  });
+  }
+  return result;
 };
 
 export const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
   const seen = new Set<string>();
-  return input.map((row, index) => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupPerson>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid people[${index}]`);
     const id = asString(row.id, `people[${index}].id`);
     if (seen.has(id)) {
@@ -190,7 +199,7 @@ export const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
     if (!GENDERS.has(gender as Gender)) {
       throw new Error(`Invalid gender for person "${id}"`);
     }
-    return {
+    result[index] = {
       id,
       layer_id: typeof row.layer_id === 'string' && row.layer_id.trim() ? row.layer_id.trim() : DEFAULT_LAYER_ID,
       name,
@@ -207,7 +216,8 @@ export const parsePeople = (input: unknown[], now: string): BackupPerson[] => {
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  });
+  }
+  return result;
 };
 
 const asStorageKey = (value: string | null, field: string) => {
@@ -222,11 +232,15 @@ const asAvatarUrl = (value: string, field: string) => {
   return value;
 };
 
-export const parseAvatars = (input: unknown[], now: string): BackupAvatar[] => (
-  input.map((row, index) => {
+export const parseAvatars = (input: unknown[], now: string): BackupAvatar[] => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupAvatar>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid person_avatars[${index}]`);
     const sortOrder = row.sort_order === undefined ? index : asNullableNumber(row.sort_order);
-    return {
+    result[index] = {
       id: asString(row.id, `person_avatars[${index}].id`),
       person_id: asString(row.person_id, `person_avatars[${index}].person_id`),
       // Both reach the object store on delete, and avatar_url is rendered by
@@ -242,8 +256,9 @@ export const parseAvatars = (input: unknown[], now: string): BackupAvatar[] => (
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  })
-);
+  }
+  return result;
+};
 
 // Bolt Optimization: Replace Array.prototype.map with a pre-allocated array and standard loop.
 // Impact: Reduces parsing overhead (up to ~60% faster) by avoiding temporary closure allocation per item during large payload parsing.
@@ -270,10 +285,14 @@ export const parseRelationships = (input: unknown[], now: string): BackupRelatio
   return result;
 };
 
-export const parseCustomFields = (input: unknown[], now: string): BackupCustomField[] => (
-  input.map((row, index) => {
+export const parseCustomFields = (input: unknown[], now: string): BackupCustomField[] => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupCustomField>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid person_custom_fields[${index}]`);
-    return {
+    result[index] = {
       id: asNullableNumber(row.id),
       person_id: asString(row.person_id, `person_custom_fields[${index}].person_id`),
       label: asString(row.label, `person_custom_fields[${index}].label`),
@@ -281,30 +300,40 @@ export const parseCustomFields = (input: unknown[], now: string): BackupCustomFi
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  })
-);
+  }
+  return result;
+};
 
-export const parseRelationshipTypeLabels = (input: unknown[], now: string): BackupRelationshipTypeLabel[] => (
-  input.map((row, index) => {
+export const parseRelationshipTypeLabels = (input: unknown[], now: string): BackupRelationshipTypeLabel[] => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupRelationshipTypeLabel>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid relationship_type_labels[${index}]`);
     const type = asString(row.type, `relationship_type_labels[${index}].type`) as RelationshipType;
     if (!RELATIONSHIP_TYPES.has(type)) {
       throw new Error(`Invalid relationship type label key "${type}"`);
     }
-    return {
+    result[index] = {
       type,
       label: asString(row.label, `relationship_type_labels[${index}].label`),
       description: typeof row.description === 'string' ? row.description : '',
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  })
-);
+  }
+  return result;
+};
 
-export const parseKinshipLabels = (input: unknown[], now: string): BackupKinshipLabel[] => (
-  input.map((row, index) => {
+export const parseKinshipLabels = (input: unknown[], now: string): BackupKinshipLabel[] => {
+  const len = input.length;
+  // ⚡ Bolt: Replace map with pre-allocated array and loop to avoid closure allocation overhead
+  const result = new Array<BackupKinshipLabel>(len);
+  for (let index = 0; index < len; index++) {
+    const row = input[index];
     if (!isRecord(row)) throw new Error(`Invalid kinship_labels[${index}]`);
-    return {
+    result[index] = {
       default_title: asString(row.default_title, `kinship_labels[${index}].default_title`),
       default_formal_title: asString(row.default_formal_title, `kinship_labels[${index}].default_formal_title`),
       custom_title: asNullableString(row.custom_title),
@@ -313,8 +342,9 @@ export const parseKinshipLabels = (input: unknown[], now: string): BackupKinship
       created_at: asOptionalTimestamp(row.created_at, now),
       updated_at: asOptionalTimestamp(row.updated_at, now),
     };
-  })
-);
+  }
+  return result;
+};
 
 export const validateRelations = (
   layers: BackupLayer[],

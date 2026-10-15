@@ -23,3 +23,6 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+## 2025-02-12 - Avoid micro-optimizations that sacrifice readability
+**Learning:** Replacing `new Set(arr.map(...))` with a `for` loop in React UI components or replacing `map.has(key)` with `map.get(key) === undefined` when the value is never used provides no measurable performance benefit but significantly hurts code readability and maintainability.
+**Action:** Only optimize for allocation overhead in strict hot paths (like parsing large JSON backup blobs), not in standard UI components or declarative business logic.
