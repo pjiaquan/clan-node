@@ -4535,3 +4535,5 @@ button:disabled:hover {
 .account-meta-card strong {
   font-size: 0.95rem;
 }
+
+.graph-settings-btn.is-loading { cursor: wait; }
