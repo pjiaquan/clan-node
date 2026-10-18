@@ -214,10 +214,11 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
             <div className="graph-backup-actions">
               <button
                 type="button"
-                className="graph-settings-btn secondary"
+                className={`graph-settings-btn secondary${isExportingBackup ? ' is-loading' : ''}`}
                 onClick={handleExportBackup}
                 disabled={isExportingBackup || isImportingBackup}
               >
+                {isExportingBackup && <span className="btn-inline-spinner" aria-hidden="true" />}
                 {isExportingBackup ? t('settings.exporting') : t('settings.export')}
               </button>
               <input
@@ -234,10 +235,11 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
               />
               <button
                 type="button"
-                className="graph-settings-btn primary"
+                className={`graph-settings-btn primary${isImportingBackup ? ' is-loading' : ''}`}
                 onClick={handleImportBackup}
                 disabled={!backupFile || isExportingBackup || isImportingBackup}
               >
+                {isImportingBackup && <span className="btn-inline-spinner" aria-hidden="true" />}
                 {isImportingBackup ? t('settings.importing') : t('settings.import')}
               </button>
             </div>
