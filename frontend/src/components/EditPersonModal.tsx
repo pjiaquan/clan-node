@@ -698,7 +698,7 @@ export const EditPersonModal: React.FC<EditPersonModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
-      <div className="modal modal-edit-person" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-edit-person" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <h2>{t('editPerson.title')}</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">

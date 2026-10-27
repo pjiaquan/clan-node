@@ -3997,7 +3997,7 @@ export function ClanGraph({
 
       {avatarPreview && (
         <div className="modal-overlay avatar-overlay" onClick={() => setAvatarPreview(null)}>
-          <div className="avatar-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="avatar-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             {avatarPreview.images.length > 1 && (
               <button
                 type="button"
@@ -4096,7 +4096,7 @@ export function ClanGraph({
 
       {pendingRelationshipChoice && (
         <div className="modal-overlay" onClick={() => setPendingRelationshipChoice(null)}>
-          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <h3>{t('graph.selectRelationshipType')}</h3>
             <p>
               {
@@ -4144,7 +4144,7 @@ export function ClanGraph({
 
       {pendingSiblingOrderChoice && (
         <div className="modal-overlay" onClick={() => setPendingSiblingOrderChoice(null)}>
-          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <h3>{t('graph.selectSiblingOrder')}</h3>
             <p>{t('graph.siblingOrderPrompt')}</p>
             <div className="relationship-choice-actions">
@@ -4170,7 +4170,7 @@ export function ClanGraph({
 
       {pendingParentChildOrderChoice && (
         <div className="modal-overlay" onClick={() => setPendingParentChildOrderChoice(null)}>
-          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="relationship-choice-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <h3>{t('graph.selectParentChildOrder')}</h3>
             <p>{t('graph.parentChildOrderPrompt')}</p>
             <div className="relationship-choice-actions">

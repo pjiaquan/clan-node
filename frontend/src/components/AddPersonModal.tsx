@@ -93,7 +93,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <h2>{t('addPerson.title')}</h2>
         <form onSubmit={async (e) => {
           e.preventDefault();
