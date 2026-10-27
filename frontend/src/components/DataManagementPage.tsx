@@ -250,7 +250,7 @@ export const DataManagementPage: React.FC<DataManagementPageProps> = ({
 
       {passphrasePrompt && (
         <div className="modal-overlay" onClick={() => closePassphrasePrompt(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
             <h2>{t('settings.backupPassphraseLabel')}</h2>
             <form onSubmit={submitPassphrase}>
               <p className="name-lock-hint">

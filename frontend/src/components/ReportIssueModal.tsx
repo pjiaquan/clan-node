@@ -65,7 +65,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ personName, 
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()}>
+      <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <h2>{t('report.title')}</h2>
         <p className="report-issue-person">{t('report.targetPerson', { name: personName })}</p>
         <form onSubmit={handleSubmit}>
