@@ -164,9 +164,8 @@ export class KinshipTitleResolver {
 
   private getCousinInLawTitle(reference: Person | undefined, cousin: Person | undefined) {
     if (!reference || !cousin) return '姻親表親配偶';
-    const referenceDob = reference.dob ? new Date(reference.dob).getTime() : 0;
-    const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
-    const isOlder = referenceDob && cousinDob ? cousinDob < referenceDob : null;
+    // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+    const isOlder = reference.dob && cousin.dob ? cousin.dob < reference.dob : null;
 
     if (cousin.gender === 'F') {
       if (isOlder === null) return this.formatDualTitle('表姐夫/表妹婿', '姻親表姐夫/姻親表妹婿');
@@ -384,10 +383,9 @@ export class KinshipTitleResolver {
       if (parent && spouseChild) {
         if (parent.gender === 'M') {
           if (spouseChild.gender === 'M') {
-            const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-            const uncleDob = spouseChild.dob ? new Date(spouseChild.dob).getTime() : 0;
-            if (parentDob && uncleDob) {
-              return uncleDob < parentDob ? '伯母' : '嬸嬸';
+            // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+            if (parent.dob && spouseChild.dob) {
+              return spouseChild.dob < parent.dob ? '伯母' : '嬸嬸';
             }
             return '伯母/嬸嬸';
           }
@@ -469,10 +467,9 @@ export class KinshipTitleResolver {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '堂' : '表';
         if (target.gender === 'M') {
-          const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-          const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
-          if (parentDob && targetDob) {
-            return targetDob < parentDob ? `${prefix}伯` : `${prefix}叔`;
+          // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+          if (parent.dob && target.dob) {
+            return target.dob < parent.dob ? `${prefix}伯` : `${prefix}叔`;
           }
           return `${prefix}伯/叔`;
         }
@@ -491,10 +488,9 @@ export class KinshipTitleResolver {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '堂' : '表';
         if (cousin.gender === 'M') {
-          const parentDob = parent.dob ? new Date(parent.dob).getTime() : 0;
-          const cousinDob = cousin.dob ? new Date(cousin.dob).getTime() : 0;
-          if (parentDob && cousinDob) {
-            return cousinDob < parentDob ? `${prefix}伯母` : `${prefix}嬸`;
+          // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+          if (parent.dob && cousin.dob) {
+            return cousin.dob < parent.dob ? `${prefix}伯母` : `${prefix}嬸`;
           }
           return `${prefix}伯母/嬸`;
         }
@@ -510,9 +506,8 @@ export class KinshipTitleResolver {
       if (parent && grandparent && grandparentSibling) {
         const isSameSurnameLine = parent.gender === 'M' && grandparent.gender === 'M' && grandparentSibling.gender === 'M';
         const prefix = isSameSurnameLine ? '再堂' : '再表';
-        const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-        const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
-        const isOlder = centerDob && targetDob ? targetDob < centerDob : null;
+        // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+        const isOlder = this.centerPerson.dob && target.dob ? target.dob < this.centerPerson.dob : null;
         const genderLabel = target.gender === 'M'
           ? (isOlder === false ? '弟' : '兄')
           : (isOlder === false ? '妹' : '姊');
@@ -798,13 +793,12 @@ export class KinshipTitleResolver {
     if (pathStr === 'up-down-spouse-sibling' || pathStr === 'sibling-spouse-sibling') {
       const linkingSibling = pathStr === 'sibling-spouse-sibling' ? this.getPerson(nodePath[1]) : this.getPerson(nodePath[2]);
       if (linkingSibling) {
-        const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-        const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
+        // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
         if (target.gender === 'M') {
-          if (centerDob && targetDob) return targetDob < centerDob ? '親家大哥' : '親家弟弟';
+          if (this.centerPerson.dob && target.dob) return target.dob < this.centerPerson.dob ? '親家大哥' : '親家弟弟';
           return '親家兄弟';
         }
-        if (centerDob && targetDob) return targetDob < centerDob ? '親家大姊' : '親家妹妹';
+        if (this.centerPerson.dob && target.dob) return target.dob < this.centerPerson.dob ? '親家大姊' : '親家妹妹';
         return '親家姊妹';
       }
     }
@@ -817,9 +811,8 @@ export class KinshipTitleResolver {
       || pathStr === 'sibling-spouse-sibling-down-sibling'
     ) {
       const inLawChild = this.getPerson(nodePath[nodePath.length - 2]);
-      const inLawChildDob = inLawChild?.dob ? new Date(inLawChild.dob).getTime() : 0;
-      const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
-      const isOlder = inLawChildDob && targetDob ? targetDob < inLawChildDob : null;
+      // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+      const isOlder = inLawChild?.dob && target.dob ? target.dob < inLawChild.dob : null;
 
       if (target.gender === 'M') {
         if (isOlder === true) return '姻親的兄';
@@ -957,9 +950,8 @@ export class KinshipTitleResolver {
     if (pathStr === 'up-up-down-down' || pathStr === 'up-sibling-down') {
       const parent = this.getPerson(nodePath[1]);
       const auntUncle = this.getPerson(pathStr === 'up-sibling-down' ? nodePath[2] : nodePath[2]);
-      const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-      const targetDob = target.dob ? new Date(target.dob).getTime() : 0;
-      const isOlder = centerDob && targetDob ? targetDob < centerDob : null;
+      // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+      const isOlder = this.centerPerson.dob && target.dob ? target.dob < this.centerPerson.dob : null;
       const genderLabel = target.gender === 'M'
         ? (isOlder === false ? '弟' : '兄')
         : (isOlder === false ? '妹' : '姊');
@@ -1034,9 +1026,8 @@ export class KinshipTitleResolver {
       const parent = this.getPerson(nodePath[1]);
       const auntUncle = this.getPerson(nodePath[auntUncleIndex]);
       const cousin = this.getPerson(nodePath[cousinIndex]);
-      const centerDob = this.centerPerson.dob ? new Date(this.centerPerson.dob).getTime() : 0;
-      const cousinDob = cousin?.dob ? new Date(cousin.dob).getTime() : 0;
-      const isOlder = centerDob && cousinDob ? cousinDob < centerDob : null;
+      // Bolt Optimization: Directly compare ISO 8601 strings to eliminate new Date() allocation overhead.
+      const isOlder = this.centerPerson.dob && cousin?.dob ? cousin.dob < this.centerPerson.dob : null;
       const isPaternalBrother = parent?.gender === 'M' && auntUncle?.gender === 'M';
 
       if (cousin?.gender === 'M') {

@@ -23,3 +23,6 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+## 2025-02-12 - Date Instantiation Overhead in Date Comparisons
+**Learning:** Comparing ISO 8601 formatted date strings using `new Date(dateStr).getTime()` incurs significant CPU and memory allocation overhead on hot paths.
+**Action:** When sorting or comparing standard ISO 8601 date strings, rely on direct string lexicographical comparison (`<` and `>`) to skip Date instantiation entirely, saving allocations and significantly speeding up execution.
