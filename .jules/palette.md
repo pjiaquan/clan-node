@@ -10,3 +10,6 @@
 ## 2024-05-20 - Ensure loading states for generic modals
 **Learning:** We implemented a loading state in `AddPersonModal`. I've observed that some modals like `AddPersonModal` don't disable their 'Cancel' buttons or display proper feedback with inline spinners during async submissions. This leaves the interface unresponsive during a network call or creation flow, breaking expectations for async actions in similar components.
 **Action:** When adding async submission functions in forms and modals, always apply the `btn-inline-spinner` class, set standard `disabled={submitting}` states on inputs/buttons, and provide clear user feedback during submission (e.g., text changing from 'Submit' to 'Saving...').
+## 2024-05-20 - Missing Accessibility Attributes on Modals
+**Learning:** Custom modals using `className="modal"`, `className="avatar-modal"`, or `className="relationship-choice-modal"` often omit the required accessibility attributes for dialogs. While `aria-hidden` management on the background may not be fully implemented, the basic container attributes were missing, which impairs screen reader identification of the pop-up context.
+**Action:** When creating custom modal containers (e.g., `className="modal"`), always ensure `role="dialog"` and `aria-modal="true"` are included on the wrapper element to provide appropriate context to assistive technology.
