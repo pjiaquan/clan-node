@@ -136,11 +136,21 @@ export const queryVerifiedEmails = async (db: D1Database, normalizedEmails: stri
   return map;
 };
 
-export const normalizeEmailList = (emails: Array<string | null | undefined>) => Array.from(new Set(
-  emails
-    .map((email) => typeof email === 'string' ? email.trim().toLowerCase() : '')
-    .filter(Boolean),
-));
+// Bolt Optimization: Consolidate map and filter array allocations into a single loop.
+// Impact: Reduces intermediate array allocations, avoiding unnecessary garbage collection overhead when processing large email lists.
+export const normalizeEmailList = (emails: Array<string | null | undefined>) => {
+  const uniqueEmails = new Set<string>();
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i];
+    if (typeof email === 'string') {
+      const normalized = email.trim().toLowerCase();
+      if (normalized) {
+        uniqueEmails.add(normalized);
+      }
+    }
+  }
+  return Array.from(uniqueEmails);
+};
 
 const isValidColumnName = (name: string) => /^[a-zA-Z0-9_]+$/.test(name);
 
