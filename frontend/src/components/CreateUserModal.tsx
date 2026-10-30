@@ -46,7 +46,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ onClose, onSub
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <h2>{t('createUser.title')}</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
