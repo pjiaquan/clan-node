@@ -54,6 +54,6 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",
     "typescript": "^7.0.2",
-    "wrangler": "^4.149.0"
+    "wrangler": "^4.156.0"
   }
 }
