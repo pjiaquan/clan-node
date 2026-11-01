@@ -23,3 +23,4 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+## 2025-02-12 - Revert unsafe Promise.all in relationships\n**Learning:** Unsafe read-modify-write parallelization in relationships was reverted. Avoid parallelizing `ensure*Link` unless standard upsert mechanisms exist.\n**Action:** Use sequential loops for DB operations depending on existence checks.
