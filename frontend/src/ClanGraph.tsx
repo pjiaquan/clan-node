@@ -882,7 +882,12 @@ export function ClanGraph({
 
   useEffect(() => {
     if (!graphData) return;
-    const validIds = new Set(graphData.nodes.map((node) => node.id));
+    // Bolt: Eliminate map lookup and iteration allocation in graph construction (O(N) allocation overhead)
+    // Replaced Array.map -> Set with single iteration
+    const validIds = new Set<string>();
+    for (let i = 0; i < graphData.nodes.length; i++) {
+      validIds.add(graphData.nodes[i].id);
+    }
     setDimNodeIds((prev) => {
       let changed = false;
       const next = new Set<string>();
@@ -1773,7 +1778,13 @@ export function ClanGraph({
     } | null = null;
     const selectedIds = getDragSelectionIds(node.id, draggingNodes);
     const selectedSet = new Set(selectedIds);
-    const nodeMap = new Map(nodesRef.current.map((item) => [item.id, item]));
+    // Bolt: Eliminate map lookup and iteration allocation in graph construction (O(N) allocation overhead)
+    // Replaced Array.map -> Map with single iteration for better drag performance
+    const nodeMap = new Map<string, Node>();
+    for (let i = 0; i < nodesRef.current.length; i++) {
+      const item = nodesRef.current[i];
+      nodeMap.set(item.id, item);
+    }
     draggingNodes.forEach((item) => {
       nodeMap.set(item.id, item);
     });
@@ -2714,7 +2725,13 @@ export function ClanGraph({
   }, [graphData, selectedEdge]);
   const spouseHandleMap = useMemo(() => {
     if (!graphData) return {};
-    const nodesById = new Map(nodes.map((item) => [item.id, item]));
+    // Bolt: Eliminate map lookup and iteration allocation in graph construction (O(N) allocation overhead)
+    // Replaced Array.map -> Map with single iteration
+    const nodesById = new Map<string, Node>();
+    for (let i = 0; i < nodes.length; i++) {
+      const item = nodes[i];
+      nodesById.set(item.id, item);
+    }
     const handleMap = new Map<string, Set<string>>();
     const tolerance = 2;
 
@@ -3510,7 +3527,13 @@ export function ClanGraph({
 
   useEffect(() => {
     setNodes((prev) => {
-      const prevNodeMap = new Map(prev.map((node) => [node.id, node]));
+      // Bolt: Eliminate map lookup and iteration allocation in graph construction (O(N) allocation overhead)
+      // Replaced Array.map -> Map with single iteration
+      const prevNodeMap = new Map<string, Node>();
+      for (let i = 0; i < prev.length; i++) {
+        const item = prev[i];
+        prevNodeMap.set(item.id, item);
+      }
       return initialNodes.map((node) => ({
         ...(prevNodeMap.get(node.id) ?? {}),
         ...node,
