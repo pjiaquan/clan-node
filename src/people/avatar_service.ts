@@ -73,12 +73,16 @@ export const loadAvatarMap = async (db: Env['DB']) => {
     `${avatarSelectSql} ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
   ).all();
   const map = new Map<string, PersonAvatar[]>();
-  results.forEach((row) => {
-    const avatar = normalizeAvatar(row as Record<string, unknown>);
-    const list = map.get(avatar.person_id) || [];
+  // Bolt Optimization: Replace forEach with index-based loop and consolidate map lookups
+  for (let i = 0; i < results.length; i++) {
+    const avatar = normalizeAvatar(results[i] as Record<string, unknown>);
+    let list = map.get(avatar.person_id);
+    if (list === undefined) {
+      list = [];
+      map.set(avatar.person_id, list);
+    }
     list.push(avatar);
-    map.set(avatar.person_id, list);
-  });
+  }
   return map;
 };
 
