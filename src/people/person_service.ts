@@ -153,13 +153,19 @@ export const loadCustomFields = async (
     await migratePlaintextCustomFieldRows(env.DB, env, results);
   }
   const decrypted = await decryptCustomFieldRows(env, results);
+  // ⚡ Bolt: Eliminate closure allocation and redundant map hash lookups + intermediate array allocations
+  // Expected impact: Faster processing by removing O(N) array allocation overhead and halving hash lookups.
   const map = new Map<string, { label: string; value: string }[]>();
-  decrypted.forEach((row: Record<string, unknown>) => {
+  for (let i = 0; i < decrypted.length; i++) {
+    const row = decrypted[i] as Record<string, unknown>;
     const personId = String(row.person_id);
-    const list = map.get(personId) || [];
+    let list = map.get(personId);
+    if (list === undefined) {
+      list = [];
+      map.set(personId, list);
+    }
     list.push({ label: String(row.label ?? ''), value: String(row.value ?? '') });
-    map.set(personId, list);
-  });
+  }
   return map;
 };
 
