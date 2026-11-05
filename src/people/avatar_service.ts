@@ -72,13 +72,19 @@ export const loadAvatarMap = async (db: Env['DB']) => {
   const { results } = await db.prepare(
     `${avatarSelectSql} ORDER BY person_id ASC, is_primary DESC, sort_order ASC, created_at ASC`
   ).all();
+  // ⚡ Bolt: Eliminate closure allocation and redundant map hash lookups + intermediate array allocations
+  // Expected impact: Faster processing by removing O(N) array allocation overhead and halving hash lookups.
   const map = new Map<string, PersonAvatar[]>();
-  results.forEach((row) => {
+  for (let i = 0; i < results.length; i++) {
+    const row = results[i];
     const avatar = normalizeAvatar(row as Record<string, unknown>);
-    const list = map.get(avatar.person_id) || [];
+    let list = map.get(avatar.person_id);
+    if (list === undefined) {
+      list = [];
+      map.set(avatar.person_id, list);
+    }
     list.push(avatar);
-    map.set(avatar.person_id, list);
-  });
+  }
   return map;
 };
 
