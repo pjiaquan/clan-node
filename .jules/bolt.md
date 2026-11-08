@@ -23,3 +23,6 @@
 ## 2025-02-12 - Eliminate map lookup and iteration allocation in graph construction
 **Learning:** Using `Array.prototype.forEach` to construct maps in the graph layer creates significant O(N) allocation and function overhead, while double lookups like `!map.has(key)` followed by `map.get(key)` needlessly doubles the hashing cost in hot paths during graph initialization and calculation.
 **Action:** When repeatedly inserting into or fetching from `Map` objects within loops traversing large relationship sets, always use a traditional index-based `for` loop and consolidate map lookups into a single `map.get(key)` combined with a check for `undefined`.
+## 2025-02-12 - Eliminate map grouping allocation overhead
+**Learning:** Using `Array.prototype.forEach` to construct grouping Maps via `map.get(key) || []` creates unnecessary array allocations for existing keys and redundant `.set()` calls, which hurts performance when grouping large graph results.
+**Action:** Replace `forEach` with an index-based `for` loop. Check if the value `=== undefined` to initialize the array and call `.set()` exactly once per key, then mutate the array via reference using `.push()`.
