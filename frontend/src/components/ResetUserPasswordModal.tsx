@@ -51,7 +51,7 @@ export const ResetUserPasswordModal: React.FC<ResetUserPasswordModalProps> = ({ 
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <h2>{t('userMgmt.resetPasswordTitle')}</h2>
         <p className="user-admin-modal-target">{email}</p>
         <form onSubmit={handleSubmit}>
