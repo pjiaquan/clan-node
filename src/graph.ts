@@ -61,12 +61,19 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
         graphRepository.listRelationships(layerId)
       ]);
 
+      // ⚡ Bolt: Optimize map grouping by using an index-based for loop and a single .get() lookup.
+      // This eliminates closure allocation overhead, redundant fallback array allocations (|| []),
+      // and duplicate .set() hash lookups for existing keys in hot paths.
       const avatarMap = new Map<string, typeof avatarRows>();
-      avatarRows.forEach((avatar) => {
-        const list = avatarMap.get(avatar.person_id) || [];
+      for (let i = 0; i < avatarRows.length; i++) {
+        const avatar = avatarRows[i];
+        let list = avatarMap.get(avatar.person_id);
+        if (list === undefined) {
+          list = [];
+          avatarMap.set(avatar.person_id, list);
+        }
         list.push(avatar);
-        avatarMap.set(avatar.person_id, list);
-      });
+      }
 
       // Decrypt custom fields and list verified emails concurrently
       const [decryptedCustomFieldRows, verifiedEmailMap] = await Promise.all([
@@ -75,12 +82,18 @@ export function registerGraphRoutes(app: Hono<AppBindings>) {
           peopleRaw.map((person) => person.email as string | null | undefined)
         )
       ]);
+      // ⚡ Bolt: Optimize map grouping by using an index-based for loop and a single .get() lookup.
+      // This reduces hash overhead and avoids creating intermediate arrays when appending to the map.
       const customFieldMap = new Map<string, { label: string; value: string }[]>();
-      decryptedCustomFieldRows.forEach((row: any) => {
-        const list = customFieldMap.get(row.person_id) || [];
+      for (let i = 0; i < decryptedCustomFieldRows.length; i++) {
+        const row: any = decryptedCustomFieldRows[i];
+        let list = customFieldMap.get(row.person_id);
+        if (list === undefined) {
+          list = [];
+          customFieldMap.set(row.person_id, list);
+        }
         list.push({ label: row.label, value: row.value });
-        customFieldMap.set(row.person_id, list);
-      });
+      }
 
       const people = await Promise.all(peopleRaw.map(async (person: any) => {
         const decryptedPerson = await decryptPersonRow(c.env, person as Record<string, unknown>);
