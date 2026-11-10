@@ -154,12 +154,17 @@ export const loadCustomFields = async (
   }
   const decrypted = await decryptCustomFieldRows(env, results);
   const map = new Map<string, { label: string; value: string }[]>();
-  decrypted.forEach((row: Record<string, unknown>) => {
+  // Bolt Optimization: Consolidate map lookups and avoid array allocations
+  for (let i = 0; i < decrypted.length; i++) {
+    const row = decrypted[i] as Record<string, unknown>;
     const personId = String(row.person_id);
-    const list = map.get(personId) || [];
+    let list = map.get(personId);
+    if (list === undefined) {
+      list = [];
+      map.set(personId, list);
+    }
     list.push({ label: String(row.label ?? ''), value: String(row.value ?? '') });
-    map.set(personId, list);
-  });
+  }
   return map;
 };
 
